@@ -166,7 +166,12 @@ export async function startStack(name: string, profile: Profile): Promise<Stack>
     stop: async () => {
       await stopServer();
       await stopFake();
-      if (!process.env.E2E_KEEP) rmSync(root, { recursive: true, force: true });
+      if (process.env.E2E_KEEP) return;
+      if (TARGET === "image") {
+        // Files the container wrote belong to UID 65532; remove them from a throwaway container.
+        execFileSync("docker", ["run", "--rm", "-v", `${root}:/cleanup`, "alpine:3.22", "sh", "-c", "rm -rf /cleanup/data /cleanup/comfy"], { stdio: "ignore" });
+      }
+      rmSync(root, { recursive: true, force: true });
     },
   };
 }

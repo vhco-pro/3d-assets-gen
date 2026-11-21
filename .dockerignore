@@ -1,0 +1,17 @@
+# Allowlist: exclude everything, then include what the build reads.
+*
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.json
+!tsconfig.base.json
+!tsconfig.web.json
+!tsconfig.node.json
+!tsconfig.e2e.json
+!vite.config.ts
+!app/
+app/e2e/
+app/memory/
+app/image/
+app/docs/
+**/*.test.ts

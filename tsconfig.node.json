@@ -12,6 +12,7 @@
   },
   "include": [
     "app/test-setup.ts",
+    "app/image",
     "app/server",
     "app/pipeline",
     "app/fake-comfy",
