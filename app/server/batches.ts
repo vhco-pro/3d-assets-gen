@@ -178,7 +178,11 @@ async function parseMultipart(req: Request, stagingDir: string | null, totalLimi
           return;
         }
         hash.update(chunk);
-        out?.write(chunk);
+        if (out && !out.write(chunk)) {
+          // Respect the disk: pause the upload until the file has drained, so memory stays flat.
+          stream.pause();
+          out.once("drain", () => stream.resume());
+        }
       });
       stream.on("limit", () => {
         abort(new HttpError(400, `${name} is larger than 20 MiB.`));

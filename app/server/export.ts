@@ -41,81 +41,93 @@ interface Entry {
   data?: Uint8Array;
 }
 
-/** Streams a stored (uncompressed) zip; sizes stay below 4 GiB because exports are capped at 2 GiB. */
+/**
+ * Streams a stored (uncompressed) zip, pulling one chunk at a time so a slow client never makes the server
+ * buffer the archive. Sizes stay below 4 GiB because exports are capped at 2 GiB.
+ */
 function zipStream(entries: Entry[]): ReadableStream<Uint8Array> {
+  const iterator = zipChunks(entries);
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await iterator.next();
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
+    },
+    async cancel() {
+      await iterator.return(undefined);
+    },
+  }, { highWaterMark: 1 });
+}
+
+async function* zipChunks(entries: Entry[]): AsyncGenerator<Uint8Array> {
   const enc = new TextEncoder();
   const central: Uint8Array[] = [];
   let offset = 0;
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const push = (bytes: Uint8Array): void => {
-        controller.enqueue(bytes);
-        offset += bytes.length;
-      };
-      for (const entry of entries) {
-        const name = enc.encode(entry.name);
-        const start = offset;
-        const local = new Uint8Array(30 + name.length);
-        const lv = new DataView(local.buffer);
-        lv.setUint32(0, 0x04034b50, true);
-        lv.setUint16(4, 20, true);
-        lv.setUint16(6, 0x0808, true);
-        lv.setUint16(8, 0, true);
-        lv.setUint16(26, name.length, true);
-        local.set(name, 30);
-        push(local);
-        let crc = 0xffffffff;
-        let size = 0;
-        if (entry.data) {
-          crc = crcUpdate(crc, entry.data);
-          size = entry.data.length;
-          push(entry.data);
-        } else if (entry.path) {
-          for await (const chunk of Bun.file(entry.path).stream()) {
-            crc = crcUpdate(crc, chunk);
-            size += chunk.length;
-            push(chunk);
-          }
-        }
-        crc = (crc ^ 0xffffffff) >>> 0;
-        const desc = new Uint8Array(16);
-        const dv = new DataView(desc.buffer);
-        dv.setUint32(0, 0x08074b50, true);
-        dv.setUint32(4, crc, true);
-        dv.setUint32(8, size, true);
-        dv.setUint32(12, size, true);
-        push(desc);
-        const cd = new Uint8Array(46 + name.length);
-        const cv = new DataView(cd.buffer);
-        cv.setUint32(0, 0x02014b50, true);
-        cv.setUint16(4, 20, true);
-        cv.setUint16(6, 20, true);
-        cv.setUint16(8, 0x0808, true);
-        cv.setUint32(16, crc, true);
-        cv.setUint32(20, size, true);
-        cv.setUint32(24, size, true);
-        cv.setUint16(28, name.length, true);
-        cv.setUint32(42, start, true);
-        cd.set(name, 46);
-        central.push(cd);
+  for (const entry of entries) {
+    const name = enc.encode(entry.name);
+    const start = offset;
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0808, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(26, name.length, true);
+    local.set(name, 30);
+    offset += local.length;
+    yield local;
+    let crc = 0xffffffff;
+    let size = 0;
+    if (entry.data) {
+      crc = crcUpdate(crc, entry.data);
+      size = entry.data.length;
+      offset += size;
+      yield entry.data;
+    } else if (entry.path) {
+      for await (const chunk of Bun.file(entry.path).stream()) {
+        crc = crcUpdate(crc, chunk);
+        size += chunk.length;
+        offset += chunk.length;
+        yield chunk;
       }
-      const cdStart = offset;
-      let cdSize = 0;
-      for (const cd of central) {
-        push(cd);
-        cdSize += cd.length;
-      }
-      const end = new Uint8Array(22);
-      const ev = new DataView(end.buffer);
-      ev.setUint32(0, 0x06054b50, true);
-      ev.setUint16(8, central.length, true);
-      ev.setUint16(10, central.length, true);
-      ev.setUint32(12, cdSize, true);
-      ev.setUint32(16, cdStart, true);
-      push(end);
-      controller.close();
-    },
-  });
+    }
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const desc = new Uint8Array(16);
+    const dv = new DataView(desc.buffer);
+    dv.setUint32(0, 0x08074b50, true);
+    dv.setUint32(4, crc, true);
+    dv.setUint32(8, size, true);
+    dv.setUint32(12, size, true);
+    offset += desc.length;
+    yield desc;
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0808, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, start, true);
+    cd.set(name, 46);
+    central.push(cd);
+  }
+  const cdStart = offset;
+  let cdSize = 0;
+  for (const cd of central) {
+    cdSize += cd.length;
+    yield cd;
+  }
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, central.length, true);
+  ev.setUint16(10, central.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, cdStart, true);
+  yield end;
 }
 
 function manifestEntry(job: JobRow, glb: string, source: string): Record<string, unknown> {
