@@ -917,6 +917,7 @@ None.
 | 2026-11-21 | R-6 | spec | `945c51a` | claude-opus-5-5 | procedural | 2 blocking, 6 should-fix, 2 nits |
 | 2026-11-21 | R-7 | spec | `5d41ca9` | claude-opus-5-5 | procedural | 1 blocking, 10 should-fix, 2 nits |
 | 2026-11-21 | R-8 | spec | `b810be8` | claude-opus-5-5 | procedural | 3 blocking, 11 should-fix, 4 nits |
+| 2026-11-21 | R-9 | spec | `2768304` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 1 nit |
 
 ### R-1
 
@@ -1922,6 +1923,87 @@ SEVERITY: nit
 WHERE: Context > Owner summary (acceptance "does not authorize ... touching ComfyUI beyond deleting the app's own files in its input and output folders", lines 96-98); Design > Deployment and exposure (deploy step 4 "Creates the two ComfyUI `asset-studio` folders when missing", line 700)
 EVIDENCE: Deploy creates `input\asset-studio` and `output\asset-studio` inside ComfyUI's shared folders, which the summary's limit, read literally, does not cover.
 PROPOSAL: Say the acceptance also covers creating the two `asset-studio` subfolders in ComfyUI's input and output folders.
+
+### R-9
+
+TARGET: 2768304e1f1b0860bcb70dd49ebc6ad8757f9c21
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > ComfyUI client (line 309); Design > Glossary ("ComfyUI offline" and "ComfyUI incompatible" rows, lines 585-586); AC-18 (line 869); Test Plan row AC-18 (line 895); Test Plan row AC-04 (line 881); Design > HTTP API (`GET /api/jobs` "with queue position for submitted jobs")
+EVIDENCE: Line 309 says `/api/health` "reports ComfyUI as incompatible together with the version it found (or none), and the page shows that in its banner". The AC-18 proof reads "the two banner texts" and "asserts each equals its Glossary term", so a banner that reads, for example, "ComfyUI incompatible (found 0.46.1)" as line 309 asks fails the equality check. The job-state labels have the same problem when the queue shows the queue position the API returns next to "Queued". The previous revision (the fix for R-8 F-03) changed the proof from "is one of the Glossary terms" to "equals its Glossary term", which makes this conflict exact.
+PROPOSAL: Say that the banner and state label each carry the Glossary term as their own labelled element, with the version and queue position in separate text, and have the AC-18 proof compare only that element. Alternatively, change the proof to "starts with its Glossary term".
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Command-line output (bats, line 798); Design > Verification commands (the `bun run verify` order, lines 804-811); Design > Repository and CI (`checks` runs `bun run verify`); Test Plan row AC-19 (line 896)
+EVIDENCE: The AC-19 proof depends on "`bats` tests in `scripts/deploy/tests/`" for `deploy.sh`, `rollback.sh`, `check-repo.sh` and `check-image.sh`. The `bun run verify` list (type check, lint, `bun test app` and `bun test ./.github`, golden check, build and size, image build, memory tests, dev readiness, docs check, Playwright) never runs `bats`, and the CI `checks` job runs only `bun run verify`. conventions/terminal-output.md: "its documented verification command and CI run reporter/output tests for the modes below". conventions/frontend-testing.md lines 30-32: the aggregate command runs the relevant tests and "CI must run the applicable automated checks before merge". As written, the shell tools' output and exit-code tests never run in CI.
+PROPOSAL: Add the `bats scripts/deploy/tests` step (and shellcheck of `scripts/deploy/`, which conventions/coding.md line 21 expects scripts to support) to the `bun run verify` order.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Runtime and layout (line 238)
+EVIDENCE: Design enables only "the React hooks rules (`rules-of-hooks` and `exhaustive-deps`) at error severity, per `conventions/react.md`". conventions/react.md (Enforcement and verification): "Use the React lint rules supported by the chosen plugin version to check purity, ref access, state updates, immutability, and component identity. Pin and verify the actual configuration." An implementer who follows line 238 enables two rules and leaves out the rest the convention asks for.
+PROPOSAL: Name the `eslint-plugin-react-hooks` version and say that its purity, refs, set-state-in-render, immutability and component-identity rules also run at error severity, or record why one is not available.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (`scripts/deploy/tools.env`, lines 684-686); Design > Repository and CI (Renovate bullet, lines 781-783)
+EVIDENCE: The tool versions and SHA-256 checksums that `deploy.sh`, `rollback.sh` and `check-image.sh` read live in `scripts/deploy/tools.env`, a file this repository defines and that a person reviews in every Renovate PR. conventions/coding.md lines 70-71: "Configuration a person writes or reviews is YAML. ... Settings files we define use the `.yaml` suffix and load strictly." An env file that the scripts source is neither YAML nor loaded strictly.
+PROPOSAL: Keep the pins in `scripts/deploy/tools.yaml` read with a strict parser, or record why a sourced env file is an accepted exception.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (lines 684-686); Design > Repository and CI (`renovate.json` bullet, lines 781-784); Test Plan row AC-14 (line 891, "`renovate.json` exists on `main`")
+EVIDENCE: Each pin in `tools.env` is a version plus a SHA-256 checksum, and "a Renovate custom manager in `renovate.json` updates" them. A regex custom manager that only captures the version bumps it and leaves the old checksum, so the next `deploy.sh` fails its checksum check. Digest updates need a datasource that supports them and a captured `currentDigest`, and the document names neither. conventions/delivery.md lines 159-160: "Adding a dependency includes confirming the updater will propose its next version." knowledge/managed-renovate.md lines 50-67 also give a baseline (`config:recommended` and two `packageRules` that block automerge for action majors and `github-digest` updates), and Design lists only `helpers:pinGitHubActionDigests`. The AC-14 proof checks only that the file exists.
+PROPOSAL: Specify the custom manager's datasource (for example `github-release-attachments`) with version and digest captured together, adopt the baseline config, and add a check (for example `renovate-config-validator` plus a test that the manager's pattern matches every pin in the file with its checksum) to `bun run verify`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 5, lines 713-714; logon script, line 719); AC-19 (line 870)
+EVIDENCE: Deploy step 1 "waits up to three minutes for the engine". Step 5 "waits until `/api/health` on `127.0.0.1:8790` reports the new version and commit", and `start-asset-studio.ps1` "waits for the engine", and neither gives a limit. A container that crash-loops or an engine that never starts leaves `deploy.sh` hanging with no failed step, which AC-19 ("exit non-zero whenever a step failed") cannot observe. One implementer waits forever, another picks some timeout.
+PROPOSAL: Give step 5 and the logon script a bounded wait (for example three minutes) that ends in a reported failure, and add the timeout case to the `bats` tests.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: AC-15 (line 866); Test Plan row AC-15 (line 892); Design > Restart, upgrade and rollback (lines 494-507)
+EVIDENCE: AC-15 requires that rolling back "restores the matching backup across a schema change". The manual procedure deploys two prerelease versions, and both have schema version 1 ("The first release has schema version 1 and nothing to migrate", lines 499-500), so `rollback.sh` never takes its restore branch. The unit tests are Bun tests: they run `restore-backup` "on a copy" and assert that "the rollback logic picks the newest `schema-1-*` backup". That logic lives in `rollback.sh`, a shell script that asks both images for their schema version and runs the previous image's `restore-backup` against the Compose volume. None of those steps runs in any proof, so a `rollback.sh` that never calls `restore-backup`, or calls it without the volume, passes.
+PROPOSAL: Add a `bats` test of `rollback.sh` with stubbed `docker` and `ssh` that asserts it queries both schema versions, picks the newest matching backup, runs `restore-backup` with the data volume mounted, and fails when no backup exists. Alternatively, add a local Docker test that uses a test image at schema 2.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Export (slug rule, line 624; manifest `prompt`, line 633); Design > Pipeline port and combined graphs (Game-asset style row, line 276); Design > Jobs and batches (job row "prompt text", line 330); Test Plan row AC-08 (non-Latin fixture, line 885)
+EVIDENCE: "The slug is the prompt", and the manifest has `"prompt": "<text or null>"`. Game-asset style is on by default and "appends the suffix at `scripts/generate_3d.py:23`" (", single object, game asset, centered, ..."). Nothing says whether the slug and the manifest use the user's text or the text with the suffix appended. With the suffix, a non-Latin prompt slugs to `single-object-game-asset-centered-full-o`, not `asset`, so the AC-08 case "downloads as `asset-<short id>.glb`" passes or fails depending on that choice, and on whether the fixture job has style on. Two implementers would produce different file names and manifests.
+PROPOSAL: State that the job row stores the user's prompt without the suffix, and that the slug and the manifest `prompt` use it (optionally add a `style` boolean to the manifest). Say which style setting the non-Latin fixture uses.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (CodeQL bullet, lines 777-780); Test Plan row AC-14 (line 891, "code scanning lists analyses for JavaScript/TypeScript, Python and Actions")
+EVIDENCE: `vhco-pro/.github` `.github/workflows/reusable-codeql-js.yml` (read with `gh api` during this review) passes `languages: ${{ inputs.languages }}` to `codeql-action/init` and always uploads with `category: "/language:js-ts"`. With `languages: javascript-typescript,python`, the Python results go up under the JS/TS category, so code scanning shows no separate Python category, and the proof does not say how `check-repo.sh` tells a Python analysis apart. An implementer who calls the workflow twice, once per language, gets two uploads with the same category, and the second replaces the first.
+PROPOSAL: Keep the single call, and state how `check-repo.sh` confirms Python coverage (for example alerts or rules with the `py/` prefix in the `/language:js-ts` analysis, or the SARIF run's language). Alternatively, add a `category` input to the reusable workflow upstream before relying on per-language analyses.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (content hash paragraph); Design > Export (image-job slug from "the upload's file name", line 624; manifest `upload`); AC-02 ("a conflict when its content differs")
+EVIDENCE: The batch hash covers "the kind, the preset values, then each prompt line in order, or each image's bytes in order". For an image job, the upload's file name decides the slug, the download names and the manifest `upload` field, but it is not hashed. A reused batch ID whose images have the same bytes and different file names gets 200 with the first batch, whose names differ, instead of the 409 that AC-02 requires when content differs.
+PROPOSAL: Include each image's file name, as the slug and manifest use it, in the canonical encoding, and add that case to the AC-02 idempotency tests.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (lines 669-671, "the folders the running ComfyUI uses (Background)"); Context > Background
+EVIDENCE: No Background bullet states which input and output folders the running ComfyUI uses. The supporting evidence is `scripts/start_headless.ps1:20` (`--input-directory "$shared\input" --output-directory "$shared\output"`, with `$shared` the `ComfyUI-Shared` folder at line 10), and the stored R-5 record that quotes the running process's `--input-directory`.
+PROPOSAL: Cite `scripts/start_headless.ps1:10,20`, or add a Background bullet with the running process's directory arguments, path redacted.
 
 ## Sources
 
