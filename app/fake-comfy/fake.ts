@@ -64,6 +64,10 @@ export class FakeComfy {
   finishOnCancel = new Set<string>();
   /** When set, per-job cancel calls answer with this HTTP status instead of acting. */
   cancelStatus: number | null = null;
+  /** Prompts whose graph text contains one of these strings stay running until released. */
+  holdMatching = new Set<string>();
+  /** Prompts whose graph text contains one of these strings fail during execution. */
+  failMatching = new Set<string>();
 
   constructor(private opts: FakeOptions) {
     this.version = opts.version ?? "0.46.2";
@@ -76,8 +80,8 @@ export class FakeComfy {
     return `http://127.0.0.1:${this.port}`;
   }
 
-  start(port = 0): void {
-    this.server = Bun.serve({ port, hostname: "127.0.0.1", fetch: (req) => this.handle(req) });
+  start(port = 0, hostname = "127.0.0.1"): void {
+    this.server = Bun.serve({ port, hostname, fetch: (req) => this.handle(req) });
     this.port = this.server.port ?? 0;
   }
 
@@ -173,9 +177,12 @@ export class FakeComfy {
     };
     const run = async (): Promise<void> => {
       await Bun.sleep(this.runMs);
-      while (this.holdRunning && !cancelled) await Bun.sleep(20);
+      const text = JSON.stringify(next.prompt);
+      const held = (): boolean => [...this.holdMatching].some((m) => text.includes(m));
+      while ((this.holdRunning || held()) && !cancelled) await Bun.sleep(20);
+      const failMatch = [...this.failMatching].some((m) => text.includes(m));
       if (!cancelled && this.running?.id === next.id) {
-        this.complete(next, this.failWith.get(next.id) ?? null, false);
+        this.complete(next, this.failWith.get(next.id) ?? (failMatch ? "Fixture failure for a matching prompt" : null), false);
       }
       finish();
       if (this.running?.id === next.id) this.running = null;
@@ -326,7 +333,7 @@ export class FakeComfy {
   }
 
   private control(body: unknown): Response {
-    const b = (body ?? {}) as { action?: string; version?: string; message?: string; id?: string };
+    const b = (body ?? {}) as { action?: string; version?: string; message?: string; id?: string; value?: string };
     switch (b.action) {
       case "version":
         this.version = b.version ?? this.version;
@@ -342,6 +349,15 @@ export class FakeComfy {
         break;
       case "release":
         this.release();
+        break;
+      case "hold-matching":
+        this.holdMatching.add(b.value ?? "");
+        break;
+      case "release-matching":
+        this.holdMatching.delete(b.value ?? "");
+        break;
+      case "fail-matching":
+        this.failMatching.add(b.value ?? "");
         break;
       default:
         return new Response("unknown action", { status: 400 });

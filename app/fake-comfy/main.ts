@@ -8,7 +8,7 @@ import { createReporter } from "../cli/report.ts";
 const report = createReporter();
 
 const { values } = parseArgs({
-  options: { port: { type: "string", default: "8189" }, comfy: { type: "string" }, data: { type: "string" }, version: { type: "string" } },
+  options: { port: { type: "string", default: "8189" }, host: { type: "string", default: "127.0.0.1" }, comfy: { type: "string" }, data: { type: "string" }, version: { type: "string" } },
 });
 if (!values.comfy) {
   report.fail("--comfy <dir> is required");
@@ -20,5 +20,5 @@ const fake = new FakeComfy({
   ...(values.data ? { dataDir: values.data } : {}),
   ...(values.version ? { version: values.version } : {}),
 });
-fake.start(Number(values.port));
+fake.start(Number(values.port), values.host);
 report.step(`fake ComfyUI listening on ${fake.url}`);
