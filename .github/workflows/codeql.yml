@@ -1,0 +1,29 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '27 4 * * 1'
+
+permissions: {}
+
+jobs:
+  code:
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    uses: vhco-pro/.github/.github/workflows/reusable-codeql-js.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main
+    with:
+      # Python covers scripts/generate_3d.py and the golden dump helper.
+      languages: javascript-typescript,python
+
+  actions:
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    uses: vhco-pro/.github/.github/workflows/reusable-codeql-actions.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main

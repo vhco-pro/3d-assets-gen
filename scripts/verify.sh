@@ -28,7 +28,7 @@ shell_checks() {
   sc="$(tool_path shellcheck)"
   local files=(scripts/verify.sh)
   shopt -s nullglob
-  files+=(scripts/deploy/*.sh scripts/deploy/lib/*.sh scripts/deploy/tests/*.bash)
+  files+=(scripts/ci/*.sh scripts/deploy/*.sh scripts/deploy/lib/*.sh scripts/deploy/tests/*.bash)
   shopt -u nullglob
   "$sc" -x "${files[@]}"
 }
