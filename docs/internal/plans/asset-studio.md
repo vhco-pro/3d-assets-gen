@@ -1,15 +1,19 @@
 ---
 status: draft
-status_description: "Owner answers folded in; waiting for the first independent spec review."
+status_description: "R-1 findings and the owner's answers applied; waiting for a new independent spec review."
 issue: null
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
   - app/
   - package.json
   - bun.lock
+  - bunfig.toml
   - tsconfig.json
+  - vite.config.ts
   - eslint.config.js
   - playwright.config.ts
+  - renovate.json
+  - scripts/generate_3d.py
   - scripts/deploy/
   - .github/workflows/
 ---
@@ -30,30 +34,39 @@ so a friend can queue many assets at once and pull them into their own engine or
 
 The app is TypeScript on Bun and runs on `win-main` beside ComfyUI. Each job is one combined ComfyUI
 graph (prompt to image to mesh, or uploaded image to mesh), and ComfyUI's own queue runs the jobs in
-order. The app keeps a small job record, collects finished files, and resubmits jobs that ComfyUI lost
-in a restart. Preview uses Google's `<model-viewer>` component. Rewriting the client in Go would not make
-generation faster: the time goes to the GPU, inside ComfyUI's PyTorch models (see Background).
+order. The app gives every submission attempt its own prompt ID, keeps a small job record, collects
+finished files and resubmits jobs that ComfyUI lost in a restart. Cancelling uses ComfyUI's per-job
+cancel, so it never stops other ComfyUI work. Preview uses Google's `<model-viewer>`, loaded only when
+an asset is opened. Rewriting the client in Go would not make generation faster: the time goes to the
+GPU, inside ComfyUI's PyTorch models (see Background).
 
 The friend reaches the app through a Tailscale node share of `win-main` and `tailscale serve` HTTPS, and
-signs in once with a shared access token. ComfyUI and the app's own port stay on localhost. The form
-offers presets (engine, 5k/10k/20k triangles, 1024 or 2048 textures, 1 to 4 variants, the style suffix
-and an optional seed). A batch holds at most 25 jobs and the app allows at most 100 unfinished jobs.
-Downloads are a GLB per asset or a zip of a selection with source images and a `manifest.json`.
+signs in once with a shared access token. The token lives only in `config.yaml` on `win-main`; the owner
+reads it over SSH and passes it on, and a deploy flag rotates it. ComfyUI and the app's own port stay
+on localhost. The form offers presets (engine, 5k/10k/20k triangles, 1024 or 2048 textures, 1 to 4
+variants, the style suffix and an optional seed). A batch holds at most 25 jobs and 200 MB of images,
+and the app allows at most 100 unfinished jobs, enforced inside one database transaction. Downloads are a
+GLB per asset or a zip of a selection with source images and a `manifest.json`.
 
 Out of scope: user accounts, engine-specific exporters, other file formats, a sync client, mesh editing,
 public exposure and changes to the ComfyUI install. Sharing the node and restricting `autogroup:shared`
 to port 443 in the tailnet ACL are steps the owner takes in the Tailscale admin console.
 
 Planned proof, none of it run yet: unit tests that compare the graphs the app builds with the Python
-builders' graphs; a fake ComfyUI server that drives queueing, cancellation, restarts and lost jobs in
-tests; Playwright journeys in Chromium and Firefox across a viewport matrix; and after deployment, a
-reachability check from another tailnet device and one real generation on `win-main`.
+builders' graphs; a fake ComfyUI server that drives queueing, cancellation, restarts, lost jobs and
+rejections in tests; Playwright journeys in Chromium, with sign-in, library and download journeys also
+in Firefox, and a layout pass across a viewport matrix in Chromium; a bundle-size check; deploy and
+rollback checks on `win-main`; and after deployment, a reachability check from another tailnet device
+and two real generations (TRELLIS.2 at the default preset and one Hunyuan3D job).
 
 The repository becomes public `vhco-pro/3d-assets-gen` under Apache-2.0, after the local history was
-scrubbed of the PC's tailnet address, Windows user name and local paths. Acceptance authorizes building
-on a feature branch, creating that repository, merging the feature PR once CI and an independent
-implementation review pass, and deploying to `win-main`. It does not authorize changing tailnet ACLs,
-sharing the node or touching ComfyUI.
+scrubbed of the PC's tailnet address, Windows user name and local paths. It gets CodeQL, Scorecard and
+a Renovate configuration, with Dependabot alerts, secret scanning and push protection turned on. The
+CI-built executable from the feature branch is deployed for the live checks before the implementation
+review, then the CI build from `main` is deployed after merge. Acceptance authorizes building on a
+feature branch, creating that repository and turning on those settings, merging the feature PR once CI
+and an independent implementation review pass, and deploying to `win-main`. It does not authorize
+changing tailnet ACLs, sharing the node or touching ComfyUI.
 
 ### Background
 
@@ -62,8 +75,8 @@ The pipeline is a pure HTTP client. `scripts/generate_3d.py:27-30` sends every r
 `scripts/generate_3d.py:42-53` polls `/history/<id>` once a second until the job finishes. The three
 graphs are built at `scripts/generate_3d.py:87` (Z-Image Turbo image), `:104` (Hunyuan3D 2.1 mesh) and
 `:136` (TRELLIS.2 textured mesh). The script runs the image graph, downloads the image, uploads it
-again and runs a mesh graph (`scripts/generate_3d.py:221-236`). All model work happens inside the ComfyUI
-server process.
+again and runs a mesh graph as a second prompt (`scripts/generate_3d.py:221-236`). All model work
+happens inside the ComfyUI server process.
 
 The measured cost is GPU time. `HANDOFF.md:34-41` records 154 to 179 seconds for the 3D step and about
 20 seconds for the image, and notes the GPU runs one job at a time. Python's share is a few HTTP calls
@@ -72,8 +85,9 @@ job. A faster runtime for the models would mean leaving ComfyUI and PyTorch. No 
 TRELLIS.2 or Hunyuan3D, and the handoff shows how easily the 3D stack breaks on version changes
 (`HANDOFF.md:29-30`).
 
-The GPU machine is `win-main` on the tailnet (`HANDOFF.md:23`). ComfyUI listens only on localhost
-(`scripts/start_headless.ps1:18`, `HANDOFF.md:25`). Measured during this run:
+The GPU machine is `win-main` on the tailnet (`HANDOFF.md:23`), with 16 GB of VRAM and 32 GB of RAM.
+ComfyUI listens only on localhost (`scripts/start_headless.ps1:18`, `HANDOFF.md:25`). Measured during
+this run:
 
 - `ssh win-main` with a PowerShell `Invoke-WebRequest http://127.0.0.1:8188/system_stats` returned
   `"comfyui_version": "0.46.2"`, so ComfyUI is up and reachable on that host.
@@ -81,10 +95,17 @@ The GPU machine is `win-main` on the tailnet (`HANDOFF.md:23`). ComfyUI listens 
   `No serve config`.
 - `curl` to `win-main`'s tailnet address on port 8188 from `fedora-43` got no answer, as expected for a
   localhost-only server.
+- In the installed ComfyUI's `server.py` (under `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI\`):
+  `POST /prompt` takes an optional client-supplied `prompt_id` that must be a canonical lowercase UUID
+  and otherwise answers 400 with `invalid_prompt_id` (lines 1180-1196);
+  `POST /api/jobs/{job_id}/cancel` cancels one job whether pending or running, interrupts only if that
+  job is still the one running, and answers `{"cancelled": false}` for a finished or unknown ID
+  (lines 1040-1079); a bare `POST /interrupt` without a `prompt_id` interrupts whatever is running
+  (lines 1287-1290).
 
 The upload helper always declares `image/png` (`scripts/generate_3d.py:79`), whatever the file is. The
 handoff lists the web features discussed: prompt or image upload, progress, a 3D preview and GLB
-download (`HANDOFF.md:50-55`).
+download (`HANDOFF.md:50-55`). `AGENTS.md:21` states that no build or test commands exist yet.
 
 Existing web front ends were checked before choosing to build. Open WebUI drives ComfyUI only for
 images, through one static workflow mapped onto its prompt and size controls, and has no 3D output.
@@ -104,12 +125,14 @@ In scope:
   watch queue progress, cancel or retry jobs, browse the library, preview a GLB in 3D and download one
   asset or a zip of a selection.
 - Reconciliation after an app restart and resubmission of jobs ComfyUI lost.
-- A deterministic fake ComfyUI server for tests and the development fixture, a seed command and a
-  Playwright suite.
-- A cross-compiled Windows executable with the page embedded, and deploy scripts that install it on
-  `win-main`, start it at logon and configure `tailscale serve`.
-- A README naming the bootstrap, seed, run, verify, deploy and clean commands; an Apache-2.0 `LICENSE`;
-  CI on GitHub Actions.
+- A deterministic fake ComfyUI server for tests and the development fixture, an idempotent seed command
+  and a Playwright suite.
+- A cross-compiled Windows executable with the page embedded, and deploy and rollback scripts that
+  install it on `win-main`, start it at logon, configure `tailscale serve` and rotate the token.
+- The public repository: an Apache-2.0 `LICENSE`, CI on GitHub Actions, CodeQL and Scorecard
+  workflows, a `renovate.json`, and the repository security settings for a public repository.
+- A README and the `AGENTS.md` "Local commands and constraints" section naming the bootstrap, seed, run,
+  verify, deploy, rollback and clean commands.
 
 Out of scope:
 
@@ -122,6 +145,7 @@ Out of scope:
 - Exposure outside the tailnet, and changes to tailnet ACLs or node sharing.
 - Removing or changing `scripts/generate_3d.py`; it stays as the reference.
 - Tagged releases; CI uploads the executable as a workflow artifact only.
+- Installing the managed Renovate GitHub App on the repository, which is an account-level change.
 
 ## Design
 
@@ -132,8 +156,8 @@ tooling. The code lives under `app/`:
 
 - `app/server/` holds the HTTP server (`Bun.serve`), the job store, the tracker and the ComfyUI client.
 - `app/pipeline/` holds the graph builders, the combiner and the preset definitions.
-- `app/web/` holds the React page, built with Vite, with TanStack Query for server state and the
-  `@google/model-viewer` web component for the preview.
+- `app/web/` holds the React page, built with Vite (`vite.config.ts` at the root), with TanStack Query
+  for server state and the `@google/model-viewer` web component for the preview.
 - `app/fake-comfy/` holds the fake ComfyUI server.
 - `app/e2e/` holds the Playwright scenarios.
 
@@ -156,9 +180,9 @@ mirror `image_graph`, `mesh_graph` and `trellis_graph` node for node, including 
 - An image job takes the mesh graph alone with IDs raised by 100; its `LoadImage` names the file the app
   uploaded for that job.
 
-Both models then run inside one ComfyUI prompt. ComfyUI loads and unloads models per node within a
-prompt the same way it does across prompts; AC-11 is the check that the combined prompt fits the
-16 GB card in practice.
+The script runs the two stages as separate prompts, so whether both models fit in one prompt on the
+16 GB card is not established by any measurement in this repository. AC-11 runs a combined prompt at the
+default TRELLIS.2 preset and a combined Hunyuan3D prompt on the real card to settle it.
 
 Presets map to builder inputs in `app/pipeline/presets.ts`:
 
@@ -169,7 +193,7 @@ Presets map to builder inputs in `app/pipeline/presets.ts`:
 | Texture | 1024, 2048 (default); TRELLIS.2 only | `tex` |
 | Variants | 1 (default) to 4; prompt batches only | number of jobs per prompt |
 | Game-asset style | on (default), off | appends the suffix at `scripts/generate_3d.py:23` |
-| Seed | empty (random) or 0 to 4294967295 | seed of the first variant; variant n uses seed + n, wrapping at 2^32 |
+| Seed | empty (random) or 0 to 4294967295 | variant k, counted from 0, uses seed + k modulo 2^32 |
 
 Image size is fixed at 1024 and Hunyuan3D's octree at 256. A random seed is drawn uniformly from
 0 to 4294967295.
@@ -182,24 +206,27 @@ above on the same golden graphs.
 
 ### ComfyUI client
 
-`app/server/comfy.ts` covers `/system_stats`, `/prompt`, `/queue` (read and delete), `/history/<id>`,
-`/interrupt`, `/view` and `/upload/image`. Upload sends the file's real content type and the name
+`app/server/comfy.ts` covers `/system_stats`, `POST /prompt` with a client-supplied `prompt_id`,
+`/queue` (read), `/history/<id>`, `POST /api/jobs/<prompt id>/cancel`, `/view` and `/upload/image`. The
+client never calls `/interrupt`. Upload sends the file's real content type and the name
 `asset-studio-<job id>.<ext>`, so two jobs never overwrite each other's input. Every call has a
-10-second timeout, and a non-2xx answer or unparsable body becomes a typed error. Each `/prompt` call
-sends `client_id` set to `asset-studio:<job id>`.
+10-second timeout. Errors are typed in three kinds: unreachable (connection failure or timeout),
+server error (5xx or an unparsable body) and rejected (4xx, carrying ComfyUI's `error` and
+`node_errors` text).
 
 ### Jobs and batches
 
 A batch is one submission: either prompts or images, plus one set of preset values. Each prompt line
 becomes as many jobs as the variant count, and each image becomes one job. A batch may hold at most 25
-jobs after this expansion, and a batch is refused when it would take the number of unfinished jobs
-above 100. Both limits live in the configuration file with these defaults.
+jobs after this expansion and at most 200 MB of images in total, and a batch is refused when it would
+take the number of unfinished (`pending` or `submitted`) jobs above 100. The three limits live in the
+configuration file with these defaults.
 
 A job has one of these states:
 
 | State | Meaning |
 | --- | --- |
-| `pending` | Recorded by the app, not yet accepted by ComfyUI |
+| `pending` | Recorded by the app, not yet confirmed accepted by ComfyUI |
 | `submitted` | Accepted by ComfyUI; queued or running there |
 | `done` | GLB and source image stored by the app |
 | `failed` | Stopped with an error message; can be retried |
@@ -207,49 +234,70 @@ A job has one of these states:
 
 The page shows `submitted` jobs as queued (with their position) or running, read from ComfyUI's
 `/queue`. Jobs and batches are stored in SQLite through `bun:sqlite` in WAL mode under the data
-directory. A job row holds its batch, preset values, seed, prompt text or upload name, ComfyUI prompt
-ID, resubmission count and error message. Files go to `data/assets/<job id>/` as `source.<ext>` and
-`model.glb`.
+directory. A job row holds its batch, preset values, seed, prompt text or upload name, the current
+attempt's prompt ID, the attempt count, the loss count, a cancel-requested flag, the error message, and
+the times it was created, last submitted, first seen running and finished. Files go to
+`data/assets/<job id>/` as `source.<ext>` and `model.glb`.
 
 ### Submission, concurrency and idempotency
 
-`POST /api/batches` validates the whole batch, then inserts the batch and all its jobs as `pending` in
-one transaction, so a batch is accepted whole or not at all. The request carries a client-generated
-batch ID; a repeat with the same ID returns the existing batch and creates nothing, so a double click
-or a retried request cannot duplicate jobs. Image bytes are written to the data directory in the same
-request, before the transaction commits.
+`POST /api/batches` carries a client-generated batch ID. The handler validates the input, then writes any
+uploaded images to `data/staging/<batch id>-<random>/`. It then opens one `BEGIN IMMEDIATE` transaction
+that checks the batch ID, counts unfinished jobs, and inserts the batch and all its jobs as `pending`.
+SQLite allows one such writer at a time, so two concurrent batches cannot both pass the limit check. On
+commit the staging directory is renamed to `data/uploads/<batch id>/`; when the transaction is refused or
+fails, the staging directory is deleted. Staging directories older than one hour are deleted at start.
 
-One tracker loop in the server does all ComfyUI work. HTTP handlers only insert rows or mark intent
-(cancel, retry, delete), so no two requests talk to ComfyUI's queue at once. Every state change is one
-SQL update guarded by the expected current state.
+A batch ID that already exists returns that batch with 200 when the request's content hash matches the
+stored one, and 409 with a message when it does not. A concurrent duplicate ends the same way, because
+the second transaction sees the first one's row. A batch over a limit gets 400 or 409 with a message
+that names the limit, and creates nothing.
+
+Bun's `maxRequestBodySize` is set to 256 MB. The handler rejects a request whose `Content-Length` is
+above 200 MB with a 413 and the app's message before reading the body, and the page checks the total
+size before uploading, so a batch over the cap gets the app's message rather than a bare refusal.
+
+One tracker loop in the server does all ComfyUI work. HTTP handlers only insert rows or set flags
+(cancel requested, retry, delete), so no two requests talk to ComfyUI's queue at once. Every state change
+is one SQL update guarded by the expected current state.
+
+Each submission attempt has its own prompt ID, a fresh lowercase UUID. The tracker writes it to the row
+before posting, so the app knows the ID of any prompt it may have created even if it crashes during the
+call.
 
 Each tick, every two seconds, the tracker:
 
-1. Submits `pending` jobs oldest first: uploads the image for an image job, posts the combined graph,
-   and stores the returned prompt ID with state `submitted` in one update. If ComfyUI is unreachable it
-   stops submitting for this tick.
-2. Reads `/queue`, then the history of each `submitted` job, in that order. ComfyUI moves a finished
+1. Handles cancel requests (see Cancel, retry and delete).
+2. Submits `pending` jobs oldest first by creation time. For a job without an attempt ID it generates
+   one and stores it. If that ID is already in ComfyUI's queue or history, which happens when the app
+   crashed after posting, the job becomes `submitted` without posting again. Otherwise it uploads the
+   image for an image job and posts the combined graph with that `prompt_id`, then marks the job
+   `submitted` and records the submission time. A rejected answer from `/prompt` or `/upload/image`
+   marks the job `failed` with ComfyUI's error text, and the tracker goes on to the next job. An
+   unreachable or server-error answer leaves the job `pending` and stops submitting for this tick.
+3. Reads `/queue`, then the history of each `submitted` job, in that order. ComfyUI moves a finished
    prompt from the queue to the history, so reading the queue first means a job that finishes between
-   the two reads is still found in the history.
-3. For a job found in the history with a success status, collects the outputs (below). With an error
-   status it marks the job `failed` with ComfyUI's error message.
-4. For a job in neither, treats it as lost (ComfyUI restarted and dropped its queue or history): it
-   returns the job to `pending` with the same seed and adds one to its resubmission count. After two
-   resubmissions the job becomes `failed` with a message saying ComfyUI lost it repeatedly. A job
-   whose ComfyUI output files can no longer be fetched is treated the same way.
-5. Interrupts and fails a job that has been running for more than 15 minutes.
+   the two reads is still found in the history. A job seen running for the first time gets its started
+   time.
+4. For a job whose attempt is in the history with a success status, collects the outputs (below). With
+   an error or interrupted status it marks the job `failed` with ComfyUI's message.
+5. For a job whose attempt is in neither, treats it as lost (ComfyUI restarted and dropped its queue or
+   history): it clears the attempt ID, returns the job to `pending` with the same seed and adds one to
+   its loss count. A job whose ComfyUI output files can no longer be fetched is treated the same way.
+   On its third loss the job becomes `failed` with a message saying ComfyUI lost it repeatedly.
+6. Cancels, through the per-job cancel, any job running for more than 15 minutes since its started time,
+   and marks it `failed` with a timeout message.
+
+Because a lost or retried job always gets a new attempt ID, an old prompt left in ComfyUI's history can
+never be mistaken for the new attempt.
 
 When ComfyUI does not answer, the tracker keeps every job in its state, backs off up to 60 seconds
 between attempts, and `/api/health` reports ComfyUI offline until it answers again.
 
-Collecting outputs is idempotent. Each file is downloaded to a temporary name and renamed into place,
-and the `done` update runs only after both files exist. A crash during collection repeats the download
-on the next tick instead of leaving a half-written asset.
-
-A crash between ComfyUI accepting a prompt and the app storing its ID would leave a `pending` row whose
-prompt is already in ComfyUI. Before submitting any `pending` job, the tracker therefore looks for its
-`client_id` in the `extra_data` of `/queue` entries and history entries. When it finds one, it stores
-that prompt ID instead of submitting again.
+Collecting outputs is idempotent. Both files are downloaded into
+`data/assets/.collect-<job id>-<attempt id>/`, which is then renamed to `data/assets/<job id>/` in one
+step, and only after that does the `done` update run. A crash during collection leaves no final
+directory and no `done` row; the next tick deletes the leftover directory and collects again.
 
 The tracker submits every pending job at once, so ComfyUI's queue sets the order: first submitted runs
 first. If the owner uses Comfy Desktop at the same time, those prompts interleave with the app's jobs in
@@ -257,36 +305,53 @@ ComfyUI's order.
 
 ### Cancel, retry and delete
 
-Cancelling a `pending` job changes its row only. Cancelling a `submitted` job deletes its prompt from
-ComfyUI's pending queue; if `/queue` shows that prompt running, the tracker calls `/interrupt` instead.
-It interrupts only when the running prompt ID is the job's own, so it never stops someone else's
-ComfyUI work. The job then becomes `cancelled`.
+Cancel sets the cancel-requested flag. On the next tick the tracker acts on it:
 
-Retry returns a `failed` or `cancelled` job to `pending` with the same preset values and seed and resets
-its resubmission count. Retry counts toward the 100 unfinished jobs limit.
+- A `pending` job becomes `cancelled` without contacting ComfyUI.
+- For a `submitted` job, the tracker first checks the history. When the attempt already finished with
+  success, the completion wins: the job is collected and becomes `done`, and the flag is cleared.
+  Otherwise the tracker calls `POST /api/jobs/<prompt id>/cancel`, which removes a pending prompt or
+  interrupts it only while it is still the one running, and marks the job `cancelled`.
+
+Retry returns a `failed` or `cancelled` job to `pending` with the same preset values and seed, clears
+its attempt ID and loss count, and adds one to its attempt count. It runs in the same kind of
+transaction as a batch insert and is refused with a message when the unfinished-job limit is reached.
 
 Delete removes a `done`, `failed` or `cancelled` job's row and its files.
 
 ### Restart, upgrade and rollback
 
-An app restart needs no separate recovery path. Rows keep their state and prompt IDs, and the next
+An app restart needs no separate recovery path. Rows keep their state and attempt IDs, and the next
 tracker tick reconciles them against ComfyUI as described above: finished jobs are collected, queued
 ones keep waiting, and lost ones are resubmitted.
 
-The database holds a schema version. Before running migrations, the app copies the database file to
-`data/backup/<version>-<timestamp>.sqlite`, then runs each migration in a transaction. Rolling back
-means stopping the scheduled task, restoring the previous executable and the backup taken before the
-upgrade. The first release has schema version 1 and nothing to migrate.
+The database holds a schema version. At start, the app refuses to run, with a message naming both
+versions, when the database's version is newer than the one it knows. Before running migrations it
+copies the database file to `data/backup/<version>-<timestamp>.sqlite`, then runs each migration in a
+transaction. The first release has schema version 1 and nothing to migrate.
+
+`scripts/deploy/rollback.sh` stops the scheduled task, puts `asset-studio.previous.exe` back, restores
+the newest backup taken by the newer version when the schema version changed, and starts the task. Jobs
+created after that backup disappear from the app; their asset directories stay on disk, and ComfyUI may
+still run their prompts, which the restored app ignores.
 
 ### Access token
 
 The configuration file holds one access token, at least 32 random bytes encoded as base64url. The deploy
-script generates it on first install and never prints or copies it off `win-main`. Every `/api` route
-except `GET /api/health` and `POST /api/session` requires either an `Authorization: Bearer <token>`
-header or the session cookie. `POST /api/session` compares the submitted token in constant time and sets
-an `HttpOnly`, `Secure`, `SameSite=Strict` cookie holding an HMAC of the token, so changing the token
-and restarting the app signs every browser out. Failed sign-ins are limited to 10 per minute per
-client address. `GET /api/health` reveals only the app version and whether ComfyUI is reachable.
+script generates it on the first install and never prints it or copies it off `win-main`. The owner
+reads it with `ssh win-main` from `config.yaml` and gives it to the friend out of band.
+`scripts/deploy/deploy.sh --rotate-token` writes a new token and restarts the app. `bun run verify:live`
+reads the token over SSH into memory for its run and never writes it to disk or logs.
+
+Every `/api` route except `GET /api/health` and `POST /api/session` requires either an
+`Authorization: Bearer <token>` header or the session cookie. `POST /api/session` compares the submitted
+token in constant time and sets an `HttpOnly`, `Secure`, `SameSite=Strict` cookie holding an HMAC of the
+token, so rotating the token signs every browser out. `GET /api/health` reveals only the app version and
+whether ComfyUI is reachable.
+
+Failed sign-ins are limited to 10 per minute per client. The client address is the `X-Forwarded-For`
+value when the socket peer is a loopback address, which is how `tailscale serve` passes on the tailnet
+source address, and the socket address otherwise.
 
 ### HTTP API
 
@@ -297,9 +362,9 @@ JSON over HTTP under `/api`; the page uses only this API.
 | `GET /api/health` | App version and ComfyUI reachability, without a token |
 | `POST /api/session` | Exchange the token for the session cookie |
 | `POST /api/batches` | Create a batch from prompts (JSON) or images (multipart) |
-| `GET /api/jobs?state=&batch=` | List jobs, newest first, with queue position for submitted jobs |
+| `GET /api/jobs?state=&batch=` | List jobs, newest first by creation time, with queue position for submitted jobs |
 | `GET /api/jobs/<id>` | One job |
-| `POST /api/jobs/<id>/cancel` | Cancel a pending or submitted job |
+| `POST /api/jobs/<id>/cancel` | Request cancellation of a pending or submitted job |
 | `POST /api/jobs/<id>/retry` | Requeue a failed or cancelled job |
 | `DELETE /api/jobs/<id>` | Delete a done, failed or cancelled job and its files |
 | `GET /api/assets/<id>/model.glb` | Download the GLB, named after the prompt |
@@ -312,10 +377,16 @@ Prompts are 1 to 500 characters after trimming; empty lines are dropped.
 ### Page
 
 The page has a sign-in screen and one main view with three areas: the submit form, the queue and the
-library. The queue polls through a TanStack Query `refetchInterval` of two seconds while any job is
-unfinished and stops when none are. A banner shows when ComfyUI is offline. The library shows source
-images as thumbnails; selecting an asset opens a `<model-viewer>` element with camera controls on its
-GLB. Downloads use the API links directly.
+library. A health query polls `/api/health` every five seconds while the page is open, and a banner
+shows when ComfyUI is offline. The job list refetches every two seconds while any job is unfinished and
+every 15 seconds otherwise, so jobs another person submits appear too. The library shows source images
+as thumbnails and an empty state when there are none. Selecting an asset loads the `<model-viewer>`
+module on demand and opens it with camera controls on the asset's GLB. Downloads use the API links
+directly.
+
+The initial page load stays within 150 kB of JavaScript after gzip, measured on the production build's
+entry chunk and its static imports. The viewer chunk loads only when an asset is opened and stays within
+350 kB after gzip. `bun run size` measures both from the Vite build output.
 
 ### Export
 
@@ -328,60 +399,93 @@ seed, face target, texture size and creation time.
 `bun build --compile --target=bun-windows-x64` produces `asset-studio.exe` with the built page
 embedded, cross-compiled on Linux. Configuration is `config.yaml` next to the executable, loaded
 strictly: listen address (default `127.0.0.1:8790`), ComfyUI URL (default `http://127.0.0.1:8188`), data
-directory, access token and the two limits.
+directory, access token and the three limits.
 
-`scripts/deploy/deploy.sh` runs from a Linux machine with SSH access to `win-main`. It copies the
+`scripts/deploy/deploy.sh <exe>` runs from a Linux machine with SSH access to `win-main`. It copies the
 executable to `%LOCALAPPDATA%\AssetStudio\`, writes `config.yaml` with a new token only when none exists,
-stops the running copy, swaps the executable, registers a logon scheduled task for the current user and
-starts it, then runs `tailscale serve --bg --https=443 http://127.0.0.1:8790`. It keeps the previous
-executable as `asset-studio.previous.exe` for rollback. The server listens on localhost only; Tailscale
-serve is the only way in from other devices.
+stops the scheduled task, renames the running executable to `asset-studio.previous.exe`, puts the new one
+in place, registers a logon scheduled task for the current user when it is missing and starts it, then
+runs `tailscale serve --bg --https=443 http://127.0.0.1:8790`. Running it again keeps the token, the
+data directory and the previous executable. The server listens on localhost only; Tailscale serve is the
+only way in from other devices.
+
+### Release path
+
+The only artifact is `asset-studio.exe`. CI builds it on every pull request and push to `main` with the
+same `bun build --compile` command and uploads it as a workflow artifact. The deployed executable is
+always a CI artifact, downloaded with `gh run download`:
+
+1. The artifact from the feature branch head is deployed to `win-main` before the implementation review,
+   so the review can observe AC-10, AC-11 and AC-15 against it.
+2. After merge, the artifact from the merge commit on `main` is deployed, and AC-10's check is repeated.
+
+The feature is delivered when step 2 has run.
 
 ### Repository and CI
 
 The repository is public `vhco-pro/3d-assets-gen` with an Apache-2.0 `LICENSE` naming VH & Co BV.
 GitHub Actions run `bun run verify` on every pull request and push to `main`, with actions pinned to
-full commit SHAs and a release-tag comment. The CI job builds the Windows executable with the same
-command the deploy script uses and uploads it as a workflow artifact. The live check never runs in CI.
+full commit SHAs and a release-tag comment and least-privilege job permissions. The repository also has:
+
+- A CodeQL workflow covering TypeScript and GitHub Actions.
+- A Scorecard workflow with `publish_results: true`.
+- A `renovate.json` for the managed Renovate app with `helpers:pinGitHubActionDigests`, covering the
+  Bun dependencies and the workflow actions.
+- Dependabot alerts, secret scanning and push protection turned on with `gh api` right after the
+  repository is created, before the first code push.
 
 ### Verification commands
 
-`bun run verify` runs the type check, lint, unit tests, the golden check, the production build and the
-Playwright suite against the fake ComfyUI. `bun run seed` loads the development fixture: done,
-submitted, failed and cancelled jobs with fixture GLBs, plus an empty profile. `bun run verify:live`
-runs one small real generation against a deployed app and is never part of CI.
+`bun run verify` runs the type check, lint, unit tests, the golden check, the production build, the size
+check and the Playwright suite against the fake ComfyUI. `bun run verify:live` runs the real generations
+against a deployed app and is never part of CI.
+
+`bun run seed` loads the development fixture and refuses to run unless the configured ComfyUI URL is
+the fake's. Fixture jobs have fixed IDs starting with `fixture-`, and a rerun replaces those rows and
+their files and leaves every other row alone. The fixture holds done jobs with fixture GLBs, a failed
+job, a cancelled job, and `submitted` jobs whose prompt IDs the fake loads at start as queued and
+running prompts that never finish, so they stay stable. `bun run seed --profile empty` loads no jobs.
+`bun run seed --reset` deletes only `fixture-` rows and their files.
 
 ## Acceptance Criteria
 
 - [ ] AC-01: For every input in the golden set, each TypeScript graph builder returns the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering and rewiring rules in Design.
-- [ ] AC-02: Submitting a batch through the page creates one pending job per prompt line and variant, or per image, and a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, or would exceed 100 unfinished jobs is rejected with a message and creates no job; repeating a submission with the same batch ID creates nothing new.
-- [ ] AC-03: Each job is submitted to ComfyUI as one prompt, jobs run in submission order, and each ends `done` with its GLB and source image stored, or `failed` with ComfyUI's error message.
-- [ ] AC-04: While ComfyUI is unreachable the page shows it offline and every job keeps its state, and jobs continue once ComfyUI answers again.
-- [ ] AC-05: A pending job can be cancelled without contacting ComfyUI; a submitted job can be cancelled and its prompt is removed from ComfyUI's queue, or interrupted only when it is the running prompt; a failed or cancelled job can be retried with the same settings and seed.
-- [ ] AC-06: After an app restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted up to twice and then fails; a prompt ComfyUI accepted before the app stored its ID is adopted rather than submitted twice; and no asset is left half written.
-- [ ] AC-07: The library lists done assets with a thumbnail and renders the selected GLB in a 3D viewer in Chromium and Firefox.
-- [ ] AC-08: A single asset downloads as a GLB, and a selection downloads as one zip holding each GLB, its source image and a `manifest.json` describing them.
+- [ ] AC-02: Submitting a batch through the page creates one pending job per prompt line and variant, or per image; a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, more than 200 MB of images, or would exceed 100 unfinished jobs is rejected with a message that names the problem and creates no job and leaves no file; concurrent batches never take the unfinished count above 100; and a repeated batch ID returns the existing batch, or a conflict when its content differs, without creating anything.
+- [ ] AC-03: Each job is submitted to ComfyUI as one prompt with its own attempt ID, jobs run in submission order, and each ends `done` with its GLB and source image stored, or `failed` with ComfyUI's error message, including when ComfyUI rejects the prompt or the upload.
+- [ ] AC-04: While ComfyUI is unreachable the page shows it offline, whether or not jobs are unfinished, and every job keeps its state; jobs continue once ComfyUI answers again.
+- [ ] AC-05: A pending job can be cancelled without contacting ComfyUI; a submitted job is cancelled through ComfyUI's per-job cancel for its own prompt ID, unless it already finished, in which case it ends `done`; a failed or cancelled job can be retried and runs again as a new ComfyUI prompt with the same settings and seed; and a retry over the unfinished-job limit is refused with a message.
+- [ ] AC-06: After an app restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted as a new prompt up to twice and fails on the third loss; a prompt ComfyUI accepted before the app recorded it as submitted is adopted rather than submitted twice; and no asset directory is left half written.
+- [ ] AC-07: The library lists done assets with a thumbnail, shows an empty state when there are none, and renders the selected GLB in a 3D viewer in Chromium and Firefox.
+- [ ] AC-08: In Chromium and Firefox, a single asset downloads as a GLB, and a selection downloads as one zip holding each GLB, its source image and a `manifest.json` describing them.
 - [ ] AC-09: The page's sign-in, submit, queue and library journeys stay readable and usable with no horizontal overflow at every size in the project viewport matrix, with keyboard access and labelled controls.
 - [ ] AC-10: The deployed app answers over HTTPS at `win-main`'s tailnet name from another tailnet device, while port 8790 and ComfyUI's port 8188 are not reachable on `win-main`'s tailnet address.
-- [ ] AC-11: One real prompt job submitted through the deployed app produces a textured GLB from the real ComfyUI on `win-main`.
-- [ ] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie, a wrong token is refused, and repeated wrong tokens from one client are rate limited.
+- [ ] AC-11: Through the deployed app, one prompt job at the default TRELLIS.2 preset and one Hunyuan3D prompt job each produce a GLB from the real ComfyUI on `win-main`, and the TRELLIS.2 one is textured.
+- [ ] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie, a wrong token is refused, and repeated wrong tokens are rate limited per client address, with clients behind `tailscale serve` counted separately; sign-in works in Chromium and Firefox.
+- [ ] AC-13: The production page's initial JavaScript stays within 150 kB after gzip, and the 3D viewer loads only when an asset is opened and stays within 350 kB after gzip.
+- [ ] AC-14: The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows, a Renovate configuration, and Dependabot alerts, secret scanning and push protection turned on.
+- [ ] AC-15: Deploying a second time keeps the access token, the data and the previous executable; rolling back restores the previous executable and the app keeps serving; and an executable refuses to start on a database with a newer schema version.
+- [ ] AC-16: The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a non-fake ComfyUI URL, and its fixture jobs keep their states while the app runs.
 
 ## Test Plan
 
 | Criterion | Proof |
 | --- | --- |
 | AC-01 | `bun test app/pipeline` compares each builder with the committed golden graphs and asserts the combiner's renumbering, the dropped `LoadImage` and every rewired input; `bun run golden:check` regenerates the golden files from the Python script with `python3 -I` and fails on any difference. |
-| AC-02 | `bun test app/server` API tests for each rejection case, the job counts and a repeated batch ID; Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) and an image batch, then each invalid case, against the fake ComfyUI. |
-| AC-03 | `bun test app/server` tracker tests against the fake ComfyUI: each job reaches the fake as one `/prompt` call whose graph matches the combiner, two batches finish in submission order with files on disk, and a fake execution error ends `failed` with its message. Playwright `queue.spec.ts` watches a job reach `done`, reloads and checks it persists. |
-| AC-04 | Tracker test stops the fake ComfyUI with jobs pending and submitted, asserts no state changes and `/api/health` reports offline, restarts the fake and asserts the jobs finish. Playwright `offline.spec.ts` checks the offline banner appears and clears. |
-| AC-05 | Tracker tests: cancel pending (the fake receives no call), cancel queued (the fake receives a queue delete for that prompt ID), cancel running (the fake receives `/interrupt` only while the job's own prompt runs, and none when another prompt runs), retry keeps preset values and seed. Playwright `queue.spec.ts` cancels and retries through the page. |
-| AC-06 | Restart tests kill and restart the server against the fake in four states: prompt finished in history (job ends `done`), prompt still queued (job stays submitted and later finishes), prompt unknown after a fake restart (job resubmitted, and after a third loss `failed`), and prompt accepted with the ID never stored (job adopts the prompt by `client_id`; the fake receives one `/prompt` call in total). A fault-injection test kills the server between the two file writes and asserts no `done` row and no file at the final path until the next tick completes. |
-| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox on the seeded fixture: thumbnails present, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors. |
-| AC-08 | Playwright `export.spec.ts` downloads one GLB and checks its glTF binary header, then selects three assets, downloads the zip and checks its six file names and that `manifest.json` parses and lists all six files with their settings. |
+| AC-02 | `bun test app/server` API tests for each rejection case (asserting the message names the limit, no rows, and an empty staging and uploads tree), the job counts, a 25-image batch at 200 MB accepted, a batch just over 200 MB refused with the app's 413 message, two concurrent batches that together exceed 100 (exactly one accepted), a repeated batch ID (200, same batch) and a reused ID with different content (409). Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) and an image batch, then each invalid case, against the fake ComfyUI. |
+| AC-03 | `bun test app/server` tracker tests against the fake ComfyUI: each job reaches the fake as one `/prompt` call with a UUID `prompt_id` and a graph matching the combiner; two batches finish in submission order with files on disk; a fake execution error ends `failed` with its message; a fake 400 from `/prompt` and from `/upload/image` each end that job `failed` with the fake's error text while the next job is still submitted. Playwright `queue.spec.ts` watches a job reach `done`, reloads and checks it persists. |
+| AC-04 | Tracker test stops the fake ComfyUI with jobs pending and submitted, asserts no state changes and `/api/health` reports offline, restarts the fake and asserts the jobs finish. Playwright `offline.spec.ts` checks the offline banner appears and clears twice: once with unfinished jobs and once on the empty profile with no jobs. |
+| AC-05 | Tracker tests with a fake that keeps finished, failed and cancelled prompts in its history: cancel pending (the fake receives no call); cancel queued and cancel running (the fake receives `POST /api/jobs/<that prompt id>/cancel` and never `/interrupt`); cancel requested after the fake already finished the prompt (job ends `done`, no cancel call); retry after a failure and retry after a cancel (the fake receives a new `/prompt` with a different `prompt_id`, the same seed and preset values, and the job ends `done`); retry at 100 unfinished jobs (refused with a message). Playwright `queue.spec.ts` cancels and retries through the page. |
+| AC-06 | Restart tests kill and restart the server against the fake in four states: prompt finished in history (job ends `done`); prompt still queued (job stays submitted and later finishes); prompt unknown after a fake restart that empties queue and history (job resubmitted with a new `prompt_id`, and on the third loss `failed`); and attempt ID stored with the prompt already posted but the job still `pending` (the job becomes `submitted`; the fake receives one `/prompt` call in total). A fault-injection test kills the server after the first file is written into the collection directory and asserts no `done` row and no `data/assets/<job id>/` directory, then that the next tick completes collection. |
+| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox: on the seeded fixture, thumbnails are present, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; on the empty profile, the library shows its empty state. |
+| AC-08 | Playwright `export.spec.ts` in Chromium and Firefox downloads one GLB and checks its glTF binary header, then selects three assets, downloads the zip and checks its six file names and that `manifest.json` parses and lists all six files with their settings. |
 | AC-09 | Playwright `layout.spec.ts` runs the sign-in, submit, queue and library journeys in Chromium at 320x568, 390x844, 390x667, 844x390, 768x1024, 1024x768, 1280x720 and 1440x900: no horizontal overflow, primary actions inside the viewport, every control has an accessible name, and sign-in and submit complete by keyboard alone. A screenshot of each size is saved and reviewed, and the review result is recorded in the evidence. |
-| AC-10 | Manual procedure after deploy, run from `fedora-43`: `curl https://win-main.<tailnet>.ts.net/api/health` returns the deployed version; `curl --connect-timeout 5` to `win-main`'s tailnet address on ports 8790 and 8188 fails to connect. |
-| AC-11 | `bun run verify:live` against the deployed URL, with the token read on `win-main`, submits the prompt `a small wooden crate` with 5k detail and 1024 textures, waits for `done`, downloads the GLB and checks that it parses as glTF with at least one material that has a base colour texture. |
-| AC-12 | `bun test app/server` auth tests: every protected route returns 401 without credentials and with a wrong token, succeeds with the bearer token and with the cookie from `POST /api/session`, and the eleventh wrong sign-in within a minute returns 429. Playwright `signin.spec.ts` signs in through the page, and a wrong token shows an error. |
+| AC-10 | Manual procedure after each deploy, run from `fedora-43`: `curl https://win-main.<tailnet>.ts.net/api/health` returns the deployed version; `curl --connect-timeout 5` to `win-main`'s tailnet address on ports 8790 and 8188 fails to connect. |
+| AC-11 | `bun run verify:live` against the deployed URL, with the token read over SSH into memory, submits `a small wooden crate` at the default TRELLIS.2 preset (10k, 2048) and `a stone pillar` with Hunyuan3D at 10k, waits for both to reach `done`, downloads both GLBs, checks both parse as glTF, and checks the TRELLIS.2 one has at least one material with a base colour texture. |
+| AC-12 | `bun test app/server` auth tests: every protected route returns 401 without credentials and with a wrong token, succeeds with the bearer token and with the cookie from `POST /api/session`; from a loopback peer, the eleventh wrong sign-in within a minute with one `X-Forwarded-For` value returns 429 while a different `X-Forwarded-For` value still gets 401; from a non-loopback peer the header is ignored. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, and shows an error for a wrong token. |
+| AC-13 | `bun run size` after `vite build` sums the gzip size of the entry chunk and its static imports (at most 150 kB) and of the viewer chunk (at most 350 kB), and fails when the viewer module is reachable from the entry's static imports. |
+| AC-14 | `scripts/deploy/check-repo.sh` after the repository is created: `gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, and secret scanning and push protection `enabled`; `gh api repos/vhco-pro/3d-assets-gen/vulnerability-alerts` returns 204; the CodeQL and Scorecard workflow files and `renovate.json` exist on the default branch. |
+| AC-15 | Manual procedure on `win-main`: run `deploy.sh` twice with two CI builds and compare the SHA-256 of `config.yaml` (unchanged), confirm `asset-studio.previous.exe` is the first build and the data directory is intact, run `rollback.sh` and confirm `/api/health` reports the first build's version. A unit test starts the server on a database whose schema version is one higher and asserts it exits with the version message. |
+| AC-16 | `bun test app/server` seed tests: running the seed twice gives the same row count and IDs; a non-fixture job inserted beforehand survives the seed and `--reset`; the seed refuses a ComfyUI URL other than the fake's; with the app and fake running for 30 seconds after seeding, every fixture job keeps its state. |
 
 ## Tasks
 
