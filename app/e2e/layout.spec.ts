@@ -71,6 +71,7 @@ for (const [w, h] of VIEWPORTS) {
 test("sign-in and submit complete by keyboard alone", async ({ page }) => {
   const s = shared();
   await page.goto(s.url);
+  await expect(page.getByLabel("Access token")).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Access token")).toBeFocused();
   await page.keyboard.type(s.token);
