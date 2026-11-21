@@ -6,6 +6,9 @@
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.ts";
 import { restoreBackup, SCHEMA_VERSION } from "./store.ts";
+import { createReporter } from "../cli/report.ts";
+
+const report = createReporter();
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -25,18 +28,18 @@ async function main(): Promise<number> {
     case "restore-backup": {
       const file = positionals[1];
       if (!file) {
-        console.error("✗ Failed: restore-backup needs a backup file");
+        report.fail("restore-backup needs a backup file");
         return 2;
       }
       const config = loadConfig(values.config);
       restoreBackup(config.dataDir, file);
-      console.log(`✓ Passed: restored ${file}`);
+      report.pass(`restored ${file}`);
       return 0;
     }
     case "serve": {
       const { startServer } = await import("./serve.ts");
       const srv = await startServer(loadConfig(values.config));
-      console.log(`› Asset Studio listening on ${srv.url}`);
+      report.step(`Asset Studio listening on ${srv.url}`);
       const stop = (): void => {
         void srv.stop().then(() => process.exit(0));
       };
@@ -49,7 +52,7 @@ async function main(): Promise<number> {
       return runSeed(loadConfig(values.config), { profile: values.profile, reset: values.reset });
     }
     default:
-      console.error(`✗ Failed: unknown command ${command}`);
+      report.fail(`unknown command ${command}`);
       return 2;
   }
 }

@@ -6,6 +6,7 @@ import { solidPng, texturedGlb } from "../fake-comfy/assets.ts";
 import type { Config } from "./config.ts";
 import { isFakeComfy } from "./serve.ts";
 import { openStore, type Store } from "./store.ts";
+import { createReporter } from "../cli/report.ts";
 
 const id = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 export const FIXTURE_BATCH_PROMPTS = id(0x100);
@@ -82,23 +83,25 @@ export function seedFixture(store: Store, config: Config, profile: string, now: 
 }
 
 export async function runSeed(config: Config, opts: { profile: string; reset: boolean }): Promise<number> {
+  const report = createReporter();
   if (!(await isFakeComfy(config.comfyuiUrl))) {
-    console.error(`✗ Failed: ${config.comfyuiUrl} is not the fake ComfyUI; the seed only runs against the fake`);
+    report.fail(`${config.comfyuiUrl} is not the fake ComfyUI; the seed only runs against the fake`);
     return 1;
   }
   if (opts.profile !== "default" && opts.profile !== "empty") {
-    console.error(`✗ Failed: unknown profile ${opts.profile} (default or empty)`);
+    report.fail(`unknown profile ${opts.profile} (default or empty)`);
     return 2;
   }
   const store = openStore(config.dataDir);
   try {
     if (opts.reset) {
       clear(store, config);
-      console.log("✓ Passed: removed fixture jobs");
+      report.pass("removed fixture jobs");
       return 0;
     }
     const n = seedFixture(store, config, opts.profile, Date.now());
-    console.log(n ? `✓ Passed: seeded ${String(n)} fixture jobs` : "∅ No results: empty profile, fixture jobs removed");
+    if (n) report.pass(`seeded ${String(n)} fixture jobs`);
+    else report.none("empty profile, fixture jobs removed");
     return 0;
   } finally {
     store.close();

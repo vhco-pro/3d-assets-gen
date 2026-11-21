@@ -3,6 +3,9 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../server/config.ts";
+import { createReporter } from "./report.ts";
+
+const report = createReporter();
 
 const root = join(import.meta.dir, "..", "..");
 const check = process.argv.includes("--check");
@@ -37,7 +40,7 @@ async function ready(url: string, until: number, test: (r: Response) => Promise<
 
 const deadline = Date.now() + 30_000;
 if (!(await ready(`${config.comfyuiUrl}/asset-studio-fake`, deadline, (r) => Promise.resolve(r.ok)))) {
-  console.error("✗ Failed: the fake ComfyUI did not start within 30 seconds");
+  report.fail("the fake ComfyUI did not start within 30 seconds");
   stopAll();
   process.exit(1);
 }
@@ -45,11 +48,11 @@ children.push(Bun.spawn(["bun", join(root, "app/server/main.ts"), "serve", "--co
 const base = `http://${config.listen}`;
 const ok = await ready(`${base}/api/health`, deadline, async (r) => r.ok && ((await r.json()) as { comfyui?: string }).comfyui === "reachable");
 if (!ok) {
-  console.error("✗ Failed: Asset Studio did not report ComfyUI reachable within 30 seconds");
+  report.fail("Asset Studio did not report ComfyUI reachable within 30 seconds");
   stopAll();
   process.exit(1);
 }
-console.log(`✓ Ready: ${base} (sign in with the token in dev/config.yaml; \`bun run seed\` loads the fixture)`);
+report.pass(`ready at ${base} (sign in with the token in dev/config.yaml; \`bun run seed\` loads the fixture)`);
 if (check) {
   stopAll();
   process.exit(0);
