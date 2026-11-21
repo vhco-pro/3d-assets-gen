@@ -845,6 +845,7 @@ None.
 | 2026-11-21 | R-4 | spec | `093c118` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 3 nits |
 | 2026-11-21 | R-5 | spec | `7ed1b66` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 5 nits |
 | 2026-11-21 | R-6 | spec | `945c51a` | claude-opus-5-5 | procedural | 2 blocking, 6 should-fix, 2 nits |
+| 2026-11-21 | R-7 | spec | `5d41ca9` | claude-opus-5-5 | procedural | 1 blocking, 10 should-fix, 2 nits |
 
 ### R-1
 
@@ -1627,6 +1628,101 @@ SEVERITY: nit
 WHERE: Context > Owner summary (lines 52-60 and 86-89); Design > Deployment and exposure (line 653-654, "The app keeps running only while the owner is signed in on `win-main`")
 EVIDENCE: Design states that the friend's app is available only while the owner is signed in on win-main. The summary describes the logon task but never says that the app is down whenever the owner is signed out. That is a trade-off the owner should see before accepting.
 PROPOSAL: Add one sentence to the summary saying that the app, like Comfy Desktop, runs only while the owner is signed in on `win-main`.
+
+### R-7
+
+TARGET: 5d41ca98fc810620e5582fcc99bb2fb30bfb6087
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Acceptance Criteria AC-18 (line 801); Test Plan row AC-18 (line 826); Design > Glossary (lines 546-566); Scope (submit form bullet, lines 186-188); Test Plan row AC-09 ("every control with an accessible name", line 817)
+EVIDENCE: AC-18 requires the page to label "job states, form fields, banners and the library with exactly the terms in the Glossary", and its proof "reads every job-state label, form-field label, banner text and the library heading and asserts each is one of the Glossary terms". The submit form must also have a prompt field ("submit a batch of prompts (one per line) or images", line 186), an image file field, and a sign-in token field, and AC-09 requires every control to have an accessible name. The Glossary (lines 550-566) has no term for the prompt field, the image field, the prompts-or-images choice or the access token field. Any correct, labelled form therefore has form-field labels that are not Glossary terms, so the AC-18 proof fails a correct implementation.
+PROPOSAL: Add Glossary rows for every form field the page shows (for example Prompts, Images and Access token), or limit AC-18 and its proof to the preset fields, job states, banners and library heading and say so in both places.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (`bun test app`, lines 758-761); Design > Runtime and layout (`app/e2e/` holds the Playwright scenarios, line 229); Test Plan row AC-20 (line 828); Test Plan row AC-17 (line 825)
+EVIDENCE: With Bun 1.4.3 on fedora-43, in a scratch tree holding `app/server/a.test.ts` and `app/e2e/submit.spec.ts`, `bun test app` printed `app/e2e/submit.spec.ts:` and ran it; Bun's discovery matches `.spec.` files, and `bun test --help` lists `--path-ignore-patterns`. The Playwright specs the Test Plan names (`submit.spec.ts`, `queue.spec.ts` and the others) sit under `app/e2e/`, so the literal `bun run verify` step loads them under Bun's runner, where `@playwright/test`'s `test()` does not run. Separately, the AC-20 memory tests live in `bun test app/server` and "run the built image", but `bun run verify` runs the unit tests before "the production build ... a local image build", so on a clean CI checkout the image they need does not exist yet, or a stale one is measured.
+PROPOSAL: State that the unit test step excludes `app/e2e/` (for example with `--path-ignore-patterns` or a bunfig setting), and either move the AC-20 memory tests after the image build in `bun run verify` or say that they build the image themselves.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (Playwright suite against the image, lines 760-761; `bun run seed`, lines 774-780; dev layout, lines 764-769); Design > Container image (`/data` named volume and `/comfy/*` mounts, lines 620-622); Test Plan rows AC-07, AC-04 and AC-18 ("on the seeded fixture", "on the empty profile")
+EVIDENCE: The Playwright suite runs "against that image with the fake ComfyUI", and AC-07 and AC-18 run "on the seeded fixture". `bun run seed` is a Bun tool that writes rows and fixture GLBs and thumbnails into the configured data directory, while the container keeps its database in a named volume at `/data`, and the executable offers only `schema-version` and `restore-backup` commands (lines 482-484). Nothing says how the fixture gets into the container's `/data`, how the fake learns the seeded prompt IDs in that setup, or how the container (UID 65532) can delete files the fake writes in a host folder owned by the CI runner's user when that folder is bind-mounted at `/comfy/output`. Two implementers would build different harnesses, and one that seeds only `.dev-data/` leaves the container's library empty.
+PROPOSAL: Say how the suite seeds the container: for example a `seed` command in the executable run against the volume, or a seeded data directory bind-mounted with ownership 65532, and how the fake's folders are made writable for the container.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary ("published as a public GHCR package", lines 80-81; authorization, line 88); Design > Versioning and release path (line 690-691); Design > Deployment and exposure (deploy step 2 "without credentials (the package is public)", lines 655-656; logon pull, lines 679-681); Test Plan row AC-17 (`check-image.sh`, line 825)
+EVIDENCE: GitHub's "Configuring a package's access control and visibility" page says a package linked to a repository "inherits the access permissions (but not the visibility) of the linked repository" and "When you first publish a package, the default visibility is private ... Once you make your package public, you cannot make your package private again." The first `release` job therefore creates a private `ghcr.io/vhco-pro/3d-assets-gen`, and deploy step 2, the logon pull and `check-image.sh` all pull without credentials. No step makes the package public, no check confirms it, and the change is a one-way setting in the package's Danger Zone that the acceptance does not name.
+PROPOSAL: Add the one-time step that sets the package public after the first publication (naming who does it and that it is irreversible), list it in the authorized actions or the owner's checklist, and have `check-image.sh` assert an anonymous pull works.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Export (file names and manifest, lines 598-601); Design > HTTP API (`GET /api/assets/<id>/model.glb` "named after the prompt", line 537); AC-08 (line 791); Test Plan row AC-08 ("checks its six file names", line 816)
+EVIDENCE: The zip holds "`<slug>-<short id>.glb` and the source image under the same base name", and the single download is "named after the prompt", but the document never defines the slug (character set, length, what an image job or a prompt with no Latin letters gives), the short ID's length, or how the prompt reaches `Content-Disposition` safely. `manifest.json` lists "prompt (or upload name), engine, seed, face target, texture size and creation time" with no field names or structure, although it is the file a friend's tooling reads. The AC-08 proof "checks its six file names", which cannot be written without the rule, and two implementers would produce different names and manifests.
+PROPOSAL: Define the slug and short ID rules, the download file name for both job kinds, and the manifest's JSON fields, and have the AC-08 proof check those exact names and fields.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (lines 436-448); Design > Submission, concurrency and idempotency (tracker step 2, lines 376-391; "When ComfyUI does not answer", lines 410-411); AC-05; Test Plan row AC-05 (line 813)
+EVIDENCE: For a `pending` job with an attempt ID the tracker "gets `POST /api/jobs/<prompt id>/cancel` first ... and then becomes `cancelled`", and for a `submitted` job only the `{"cancelled": true}` and `{"cancelled": false}` answers are defined. The user-cancel path does not say what happens when that call is unreachable or gets a server error: whether the job becomes `cancelled` anyway (leaving a prompt ComfyUI may still run) or keeps the flag for a later tick. The timeout path now defines this case (lines 407-408), the user path does not. Step 2 also does not say whether it skips a `pending` job whose cancel flag is set, so a job whose cancel failed can be posted in the same tick. The AC-05 proof has no case for either.
+PROPOSAL: State that on an unreachable or server-error cancel answer the job keeps its state and flag until a later tick, and that step 2 never submits a job with the cancel flag set. Add both cases to the AC-05 tracker tests.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Access token (cookie, lines 508-511); Context > Owner summary ("the session cookie lasts 30 days", line 53); Test Plan row AC-12 (`Max-Age` 2592000, line 820)
+EVIDENCE: The cookie's value is "HMAC-SHA256 keyed with the token over the string `asset-studio-session-v1`", so every sign-in gets the same value and the server holds no issue time. `Max-Age` only tells the browser when to drop it; the server accepts that value, from any client that has it, until the token is rotated. The summary's "the session cookie lasts 30 days" therefore overstates what the server enforces, and a copied cookie never expires. Neither the summary nor an Open Question states this trade-off.
+PROPOSAL: Either sign an issue time into the cookie and reject it after 30 days (with a test on a faked clock), or say in the summary and Design that a cookie stays valid until the token is rotated.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope (README and `AGENTS.md` bullet, lines 197-199); Acceptance Criteria (no criterion); Test Plan (no row); Frontmatter `covers`
+EVIDENCE: Scope puts in a README with the owner's node-share checklist, and the `AGENTS.md` "Local commands and constraints" section naming the bootstrap, seed, run, verify, deploy, rollback and clean commands plus a route to `conventions/terminal-output.md`. conventions/frontend-testing.md lines 28-33 require the README and agent instructions to name those commands and state readiness detection. No criterion or Test Plan row checks any of it, and neither `README.md` nor `AGENTS.md` is in `covers`, so the feature can reach `complete` with `AGENTS.md:21` still saying "No build or test commands exist yet."
+PROPOSAL: Add a criterion that the README and `AGENTS.md` name those commands, the checklist and the route, with a check (for example a test that each named command exists in `package.json` or `scripts/`), and add both files to `covers`.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (Content-Length and body limits, lines 337-344); Design > HTTP API (`POST /api/batches` "prompts (JSON)", line 531); AC-20 (line 803); Context > Owner summary (lines 59-60)
+EVIDENCE: The only body limits are the 201 MiB `Content-Length` check and Bun's 256 MiB `maxRequestBodySize`, and only the multipart path is said to stream. A prompt batch is JSON, and its valid content is at most 25 lines of 500 characters plus presets, yet a JSON body up to 201 MiB passes the checks and is parsed whole. Two such requests at once can approach the container's 1 GiB limit, which the summary says streaming keeps it inside. AC-20 tests only image batches and exports.
+PROPOSAL: Give JSON batch bodies their own small cap (for example 1 MiB) checked from `Content-Length` and while reading, answered with the app's 413 message, and add that case to the AC-02 tests.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Access token (client address and trusted peers, lines 514-521); Test Plan rows AC-12 (`signin.spec.ts`, line 820) and AC-02, AC-07, AC-08 (Playwright against the container)
+EVIDENCE: Playwright reaches the container through its published port, so every browser context arrives from the gateway without `X-Forwarded-For` and is keyed on that one socket address. `signin.spec.ts` deliberately sends wrong tokens and, after the rotation, old-cookie requests in both Chromium and Firefox, all counted in that single budget of 10 per 60 seconds, while other specs run against the same container. conventions/frontend-testing.md lines 94-95: "Separate tests that consume rate-limit or lockout budgets". The document does not separate them, so parallel journeys can receive 429 for reasons unrelated to what they test.
+PROPOSAL: State that the sign-in and rotation scenarios run against their own container instance, or serially in a separate Playwright project with the budget reset between them.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-15 ("Then stop the Compose project, remove the current image, start the `AssetStudio-Logon` task", line 823)
+EVIDENCE: `docker compose stop` keeps the service's container, and Docker refuses `docker image rm` of an image's last tag while a stopped container still references it ("conflict: unable to remove repository reference ... container ... is using its referenced image"). Followed as written, the logon step fails before the logon task is started, or an operator forces the removal, which only untags the image and leaves it present, so the task's reload is not exercised.
+PROPOSAL: Write the step as `docker compose down`, then `docker image rm` of the current tag, then confirm the image is absent before starting the task.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan row AC-16 ("`bun run dev` in CI starts and prints its ready line within 30 seconds", line 824); Design > Repository and CI (`checks` runs `bun run verify`, lines 725-727); Design > Verification commands (lines 758-762)
+EVIDENCE: The only CI job that runs checks is `checks`, which runs `bun run verify`, and the list of what `bun run verify` runs does not include starting `bun run dev`. The AC-16 proof says this check runs "in CI" without saying where.
+PROPOSAL: Add the `bun run dev` readiness check to the `bun run verify` list, or name the CI step that runs it.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("after the local history was scrubbed of the PC's tailnet address, Windows user name and local paths", lines 77-78); Review Log > R-5 F-10 (line 1521)
+EVIDENCE: The stored R-5 F-10 record, which must be kept verbatim, contains the fedora-43 path `/home/m/go/bin/cosign` (`sed -n 1521p` on the document). The summary says the history was scrubbed of local paths, but this document will carry one into the public repository.
+PROPOSAL: Qualify the summary to say which paths were scrubbed, or have the owner decide whether that one home path is acceptable in the public history.
 
 ## Sources
 
