@@ -26,6 +26,12 @@ async function renderedPixels(page: import("@playwright/test").Page): Promise<nu
 test("thumbnails load and the selected GLB renders in the viewer @firefox", async ({ page, consoleErrors }) => {
   const s = shared();
   await signIn(page, s.url, s.token);
+  const webgl = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    return c.getContext("webgl2") !== null || c.getContext("webgl") !== null;
+  });
+  // Report a missing environment rather than pass or fail on it (conventions/frontend-testing.md).
+  test.skip(!webgl, "WebGL is not available in this headless browser; the viewer render cannot be checked here");
   const asset = page.getByTestId("asset").filter({ hasText: "a wooden treasure chest" });
   const thumb = asset.getByRole("img");
   await expect(thumb).toHaveAttribute("src", /\/api\/assets\/[0-9a-f-]{36}\/thumb$/);

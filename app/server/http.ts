@@ -81,6 +81,10 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
       const h = tracker?.health() ?? { comfyui: "offline" as const, version: null };
       return Response.json({ version: APP_VERSION, commit: APP_COMMIT, comfyui: h.comfyui, comfyuiVersion: h.version });
     }
+    if (path === "/api/session" && req.method === "GET") {
+      // Lets the page learn whether its cookie is valid without a failing call; not counted as a failure.
+      return Response.json({ signedIn: authorised(req) });
+    }
     if (path === "/api/session" && req.method === "POST") {
       let token: unknown;
       try {
