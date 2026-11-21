@@ -627,6 +627,7 @@ None.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-21 | R-1 | spec | `79aed7b` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 1 nit |
 | 2026-11-21 | R-2 | spec | `b6d68e3` | claude-opus-5-5 | procedural | 1 blocking, 20 should-fix, 3 nits |
+| 2026-11-21 | R-3 | spec | `0a8d589` | claude-opus-5-5 | procedural | 2 blocking, 14 should-fix, 3 nits |
 
 ### R-1
 
@@ -939,6 +940,141 @@ SEVERITY: nit
 WHERE: Design > Runtime and layout (line 164)
 EVIDENCE: conventions/react.md line 151: "For new applications, make hook-order and dependency violations fail lint." The Design names only type-aware ESLint from typescript.md.
 PROPOSAL: Add the React hooks rules at error severity to the lint line.
+
+### R-3
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Submission, concurrency and idempotency (lines 304-314); AC-02; Test Plan row AC-02
+EVIDENCE: The handler "renames that directory to `/data/uploads/<batch id>/`, then opens one `BEGIN IMMEDIATE` transaction that checks the batch ID" (lines 304-306), and "When the transaction is refused or fails, the handler deletes the uploads directory" (lines 307-308). For a repeated image batch, `/data/uploads/<batch id>/` already exists and holds the first request's images, so rename(2) of the new staging directory onto it fails with ENOTEMPTY before any transaction runs. The statements "in both cases the handler deletes the files it just wrote" and "A concurrent duplicate ends the same way, because the second transaction sees the first one's row" (lines 311-314) are therefore false for image batches. An implementer who follows the order literally returns an error for the AC-02 case "a repeated batch ID (200, same batch, no new files)". One who treats the duplicate as a refused transaction deletes the first batch's uploads while its image jobs are still `pending`, so those jobs can no longer be uploaded to ComfyUI. Prompt batches carry no files and are unaffected. This traces to the change the previous revision made for R-2 F-04 (rename before commit).
+PROPOSAL: Check for an existing batch row before the rename (and again inside the transaction). On a rename failure or a duplicate, delete only the request's own staging directory, never `/data/uploads/<batch id>/`. Make the AC-02 repeated-ID and concurrent-duplicate cases use image batches and assert the first batch's upload files are intact.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan row AC-14; AC-14; Design > Repository and CI (lines 555-557); Context > Owner summary (lines 73-74)
+EVIDENCE: The AC-14 proof says "`gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, `delete_branch_on_merge` true, and secret scanning, push protection and the dependency graph enabled". That endpoint does not report the dependency graph. I checked a public repository of the same owner: `gh api repos/michielvha/docker-release-action --jq .security_and_analysis` returned only `dependabot_security_updates`, `secret_scanning`, `secret_scanning_non_provider_patterns`, `secret_scanning_push_protection` and `secret_scanning_validity_checks`. A `check-repo.sh` written to this proof either fails on every correct repository or silently skips the dependency graph.
+PROPOSAL: Name a check for the dependency graph that can actually be observed, for example `gh api repos/vhco-pro/3d-assets-gen/dependency-graph/sbom` returning 200, and keep the other fields on the repository endpoint.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (tracker step 2, lines 327-337; lines 320-322); Design > Jobs and batches (job row, lines 287-288); AC-06; Test Plan row AC-06
+EVIDENCE: The 30-second wait applies when "the attempt was posted less than 30 seconds ago and is in neither" (line 331). But the only place the post time is written is after the post succeeds: "posts the combined graph with that `prompt_id`, records the post time and marks the job `submitted`" (lines 333-334). The unreachable bullet only "leaves the job `pending` with its attempt ID" (lines 336-337). After a timed-out or crashed post the row has no post time for that attempt, so the next tick falls through to "Otherwise" and posts the same ID again. That is the duplicate GPU run R-2 F-03 described, since ComfyUI 0.46.2 does not reject a duplicate `prompt_id`. Whether the AC-06 case "the fake accepts a prompt only after the client's 10-second timeout" passes then depends on the fake's timing. This traces to the fix the previous revision made for R-2 F-03.
+PROPOSAL: State that the tracker writes the post time to the row, under the same update guard, immediately before each `POST /prompt`, and that the 30-second wait counts from that time. Make the AC-06 fake accept the prompt later than the next tick after the timeout, so the case fails when the time is written only on success.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (lines 297-298 and 311-313); Design > HTTP API (`POST /api/batches`, line 442); AC-02; Test Plan row AC-02
+EVIDENCE: "A batch ID that already exists returns that batch with 200 when the request's content hash matches the stored one" does not say what is hashed. An image batch is multipart (line 442), and a browser picks a new multipart boundary on every request. A hash of the raw body therefore never matches on a genuine retry and returns 409, while a hash over the parsed prompts, preset values and image bytes does match. Two implementers would build different retry behaviour. The batch ID must also be rejected "before the handler touches the filesystem" (lines 297-298). A streaming handler can only do that when the ID arrives before the file parts, and the document does not say where the ID travels (field order, header or path).
+PROPOSAL: Define the content hash over the normalised batch content (prompts or image bytes in order, plus preset values) and say where the batch ID is carried, for example a header or the first multipart field. Add an AC-02 case that resends the same image batch with a different multipart boundary and expects 200.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Versioning and release path (lines 527-540); Design > Repository and CI (lines 545-546); Context > Owner summary (lines 74-77); AC-10; AC-11; AC-15
+EVIDENCE: CI "runs `bun run verify` on every pull request and push to `main`" (lines 545-546), and the release workflow "calls `vhco-pro/version-workflow` ... after the checks pass" (lines 527-529), but no trigger is given for the release workflow. `vhco-pro/version-workflow` decides on `github.ref_name` and an open labelled PR at `github.sha` (version.yml step "Look for an open PR with the preview label at this commit"). Its example `examples/tag-after-checks/ci.yml` says "Runs on branch pushes, not pull_request ... those runs never tag", and it ships a `preview.yml` that reruns branch CI when the label is added. With checks only on `pull_request` and `main`, a feature-branch push never gets a prerelease tag. Step 1 (deploy the prerelease before the implementation review to observe AC-10, AC-11 and AC-15) therefore cannot happen. The document also does not say which arrangement it uses: one workflow (`contents: write`, no App), or a tag-triggered release workflow with a release App. The second needs a variable and a secret on the new repository that the acceptance does not list.
+PROPOSAL: State the workflow triggers and arrangement: branch-push CI (`push: branches: ['**']`) feeding version-workflow, the `pull_request: labeled` rerun workflow, and either the same-workflow release job or the tag-triggered workflow with its App credentials. Add any needed repository variable or secret to the authorised settings.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 1, lines 507-508); Design > Versioning and release path (lines 531-532 and 539-540); AC-17; Test Plan row AC-17
+EVIDENCE: Deploy "checks that its digest is the one the release recorded" and `check-image.sh` compares with "the one recorded in the release run". But "The workflow records the image's release digest" never says where (run summary, artifact, release notes or attestation) or how `deploy.sh` on `fedora-43` reads it, and a digest read back from GHCR itself makes the check vacuous. knowledge/container-release.md says "The inspected action scans after pushing. A failed scan fails the job but does not remove or quarantine the already-pushed image. Consumers must wait for the security gates". conventions/containers.md says "Verify the scan, signature, and attestation results before allowing consumers to use a published image". Deploy verifies only the Cosign signature, so a version whose Trivy scan failed after the push can be deployed. containers.md also asks to "Configure package ownership and visibility intentionally", and the document states neither the GHCR package's visibility nor how `fedora-43` authenticates to pull it.
+PROPOSAL: Name where the release digest is recorded (written only after the scan passes) and how `deploy.sh` and `check-image.sh` read it. Have both verify the provenance and SBOM attestations as well as the signature, and state the package's visibility.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: AC-17; Test Plan row AC-17
+EVIDENCE: AC-17 says "The published image runs as the non-root user with a read-only root filesystem and serves the page". The proof runs the UID 65532, read-only and page checks only on the image `bun run verify` builds locally. For the published image it checks only the signature and the digest. The release image is built by `michielvha/docker-release-action` with different build arguments, so the proof passes even when the published image differs from the one tested locally. conventions/containers.md: "Prove it starts under its declared user with the expected filesystem restrictions; a successful build does not establish runtime compatibility."
+PROPOSAL: Have `check-image.sh <version>` also run the published digest with `--read-only` and the declared mounts, and assert UID 65532, a failed write to `/`, and the page and `/api/health` answering with that version and commit.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 4, lines 515-516; line 520); Design > Restart, upgrade and rollback (lines 408-409); AC-15; Test Plan row AC-15
+EVIDENCE: Step 4 "records the running tag as the previous one" on every run, while line 520 says "Running it again keeps the token, the data volume and the record of the previous tag". Rerunning `deploy.sh` with the version that is already running records that version as the previous one and loses the real previous tag, after which `rollback.sh` rolls back to the same version. AC-15 says "Deploying a second time keeps ... the record of the previous version", but its proof deploys two different versions and never reruns the same one.
+PROPOSAL: Say that the previous tag is updated only when the running tag differs from the one being deployed. Add a same-version rerun to the AC-15 procedure that confirms the recorded previous version is unchanged.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Access token (lines 428-432); AC-12; Test Plan row AC-12
+EVIDENCE: The client address is `X-Forwarded-For` "when the socket peer is a loopback address or the Docker gateway, which is how `tailscale serve` and Docker's port forwarding pass on the source". Background measures that the container is reachable, but not the peer address that a connection through Docker Desktop's published `127.0.0.1:8790` has inside the container. "The Docker gateway" is not tied to a network either (the default bridge, the Compose network, or Docker Desktop's host address). If the deployed peer is none of these, the header is ignored and every friend and owner device shares one rate-limit bucket, which breaks AC-12's "clients behind `tailscale serve` counted separately". The proof uses only a loopback peer in a unit test, so it passes either way.
+PROPOSAL: State how the trusted peer set is determined (for example the Compose network's gateway read at start) and cite a peer address measured through Docker Desktop's port publishing. Add a deployed check in which two tailnet clients' failed attempts are counted separately.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (lines 458-462); Design > Access token (lines 424-432); AC-12; Test Plan row AC-12
+EVIDENCE: Every cookie that does not match "on any protected route" counts toward one limit of 10 per minute per client, and "Rotating the token therefore signs every browser out". The page refetches the job list every 2 or 15 seconds, and the document never says what the page does on a 401. A tab left open after a rotation keeps polling with the old cookie and uses up its client's 10 failures within a minute or two. It then keeps the limit exhausted, so the friend's sign-in with the new token from the same device gets 429 for as long as the tab stays open.
+PROPOSAL: Specify that a 401 from any API call stops the job list query and any other query that needs a session, and shows the sign-in screen. Add a Playwright or unit case where an old cookie gets 401 and a sign-in from the same client with the new token then succeeds.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (compose memory limit, line 503); Design > Submission, concurrency and idempotency (lines 297-304); Design > HTTP API (`POST /api/exports`, line 451); Design > Export (lines 479-481)
+EVIDENCE: The container has "a 1 GiB memory limit". A batch can be 201 MiB, and the document does not say that uploads stream to disk. `Request.formData()` in Bun buffers the whole body, so two concurrent maximum-size batches plus their parsing copies come close to the limit. `POST /api/exports` zips "the selected done jobs" with no limit on the selection and no statement that the zip streams. The library grows without bound, and each TRELLIS.2 asset at 2048 textures plus a source image of up to 20 MiB can be tens of MiB, so a buffered export of a large selection exceeds 1 GiB. An out-of-memory kill restarts the whole server, tracker included. Two implementers would build different memory behaviour, and no proof covers it.
+PROPOSAL: State that uploads stream to the staging directory and the export zip streams to the response, or cap the export selection and the number of concurrent uploads. Add a test that exports or uploads at the limits within the memory budget.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (collection paragraph, lines 355-360; startup cleanup, lines 308-309); Design > Files in ComfyUI's folders (lines 389-393); Design > Restart, upgrade and rollback (lines 410-411); AC-06; AC-11
+EVIDENCE: ComfyUI files are deleted only "After `done`" and on delete. A crash or a failed delete between the `done` update and that cleanup leaves the job's files in ComfyUI's folders for good, because nothing revisits `done` rows. After a rollback, "ComfyUI may still run their prompts, which the restored app ignores", and their outputs under `output/asset-studio/` are never removed. At start the app deletes an orphaned uploads directory only when it "is older than one hour", although no request can be in flight at start. A restart soon after the crash therefore leaves the orphan until some later restart. AC-06 says "no asset directory or upload is left half written or orphaned", and neither the AC-02 nor the AC-06 proof covers any of these windows.
+PROPOSAL: Add a sweep, at start and periodically, that deletes the ComfyUI subfolders and uploads of `done`, deleted or unknown jobs, and orphaned uploads directories. Add fault-injection cases that kill the server after the `done` update, and that crash shortly before a restart.
+
+FINDING: F-13
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (tracker step 2, lines 335-337); Design > ComfyUI client (lines 258-260); AC-03; Test Plan row AC-03
+EVIDENCE: "An unreachable or server-error answer leaves the job `pending` with its attempt ID and stops submitting for this tick." A server error includes a 5xx or "an unparsable body". A graph or upload that makes ComfyUI answer 500 every time is retried forever at the head of the oldest-first order. Every later job waits behind it with no message, while `/api/health` still reports ComfyUI reachable. There is no bound or failure rule for repeated server errors, and no proof covers them.
+PROPOSAL: Bound repeated server errors per job, for example fail the job after a stated number of consecutive 5xx answers while ComfyUI's `/system_stats` still answers. Add a fake case that returns 500 for one job's `/prompt` while the next job still gets submitted.
+
+FINDING: F-14
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (lines 227-240); Context > Owner summary (lines 41-42 and 52-53); AC-11; Test Plan row AC-11
+EVIDENCE: "The 20k preset and 2048 textures with Hunyuan3D are not measured" mixes two things, because Hunyuan3D takes no texture size ("Texture | 1024, 2048 (default); TRELLIS.2 only", line 237). What Background measured is TRELLIS.2 at 10k and 2048 (sampled peak 14.32 GB of 15.99 GB) and Hunyuan3D at 10k. The form still offers 20k for both engines and 1024 for TRELLIS.2, and AC-11 repeats only the two measured cases. A preset that runs out of memory or passes the 15-minute timeout in a combined prompt therefore passes every criterion. The owner summary says the combined prompt "fit the 16 GB card" without saying this was at 10k.
+PROPOSAL: Correct the sentence. Either add a live check of TRELLIS.2 at 20k with 2048 textures and Hunyuan3D at 20k to AC-11, or raise an Open Question on offering presets that were not measured. Qualify the owner summary.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Open Questions; Design > Jobs and batches (state table, lines 276-284); Design > Pipeline port and combined graphs (presets table, lines 233-240); Acceptance Criteria
+EVIDENCE: conventions/feature-documents.md (Open questions): "User-facing terms the feature introduces or changes appear in a glossary row and are held to it by a criterion." The page introduces user-facing terms: the job states (`pending`, `submitted`, `done`, `failed`, `cancelled`), the form fields "Detail", "Variants" and "Game-asset style", the ComfyUI states "offline" and "incompatible", and the library. The document has no glossary and no criterion that holds the page's labels to one.
+PROPOSAL: Add a glossary of the labels the page shows (state names, form fields, banner states), and a criterion with a Test Plan row that the page uses exactly those terms.
+
+FINDING: F-16
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure; Design > Verification commands; Scope (AGENTS.md "Local commands and constraints" section, lines 168-169)
+EVIDENCE: The feature adds command-line tools that people read: `deploy.sh`, `rollback.sh`, `check-repo.sh`, `check-image.sh`, `bun run seed`, `bun run size`, `bun run verify:live` and the executable's `restore-backup` command. The central AGENTS.md at the pinned revision says "For command-line output or terminal interaction, read the required terminal output standard". conventions/terminal-output.md requires labelled status words, `NO_COLOR` handling and plain output on non-TTY streams, enforced by output tests in the adopting repository. The repository's AGENTS.md does not route to that page, and the document does not say whether these tools follow it. Adding that route would change the repository instructions.
+PROPOSAL: Raise an Open Question on whether these tools follow conventions/terminal-output.md and whether AGENTS.md routes to it. If they do, state it in Design and add a Test Plan check.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Files in ComfyUI's folders (line 389); Design > Submission, concurrency and idempotency (lines 359-360)
+EVIDENCE: "ComfyUI writes each attempt's outputs under `output/asset-studio/<job id>/<attempt id>/`" is not what ComfyUI 0.46.2 does with the prefix `asset-studio/<job id>/<attempt id>`. `folder_paths.get_save_image_path` sets `subfolder = os.path.dirname(...)` and `filename = os.path.basename(...)` (folder_paths.py:556-557), and `SaveGLB.execute` uses the same function (nodes_save_3d.py:567). The source PNG and the GLB are written as `output/asset-studio/<job id>/<attempt id>_NNNNN_.png` and `.glb`, and only the thumbnail lands inside `<attempt id>/`. Line 359 also says the app deletes "the attempt's files", while line 392 deletes "that job's directory". Deleting the job directory still removes everything.
+PROPOSAL: Describe the real layout, and say once that cleanup deletes `output/asset-studio/<job id>/`.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Submission, concurrency and idempotency (collection paragraph, lines 355-358)
+EVIDENCE: Collection "downloads all three files", but an image job's combined graph is "the mesh graph alone" plus the thumbnail branch (lines 218-222), with no `SaveImage` of the source. ComfyUI therefore has no source image to download; it is in `/data/uploads/<batch id>/`.
+PROPOSAL: Say that for an image job the source is copied from the batch's uploads directory into the collection directory.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Background (line 140)
+EVIDENCE: The citation `HANDOFF.md:50-55` runs past the end of the file, which has 54 lines (`git show 0a8d589:HANDOFF.md | wc -l` printed 54).
+PROPOSAL: Cite `HANDOFF.md:50-54`.
 
 ## Sources
 
