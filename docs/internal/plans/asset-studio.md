@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "R-8 findings, the owner's answers and the agreed trim applied; waiting for a new independent spec review."
+status: planned
+status_description: "Accepted by the owner on 2026-11-21 at review R-9; ready for tasks."
 issue: null
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
