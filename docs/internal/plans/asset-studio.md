@@ -900,7 +900,8 @@ deletes only flagged fixture rows and their files.
 
 ## Tasks
 
-- [ ] T1 `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `tsconfig.*.json`, `eslint.config.js`, `.gitignore` - Bun project with strict TypeScript, type-aware ESLint and the React hooks rules at error, the script names Design lists (`bootstrap`, `dev`, `seed`, `verify`, `verify:live`, `clean`, `golden:check`, `size`); `bun run typecheck` and `bun run lint` pass on the empty tree (Design)
+- [x] T1 `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `tsconfig.*.json`, `eslint.config.js`, `.gitignore` - Bun project with strict TypeScript, type-aware ESLint and the React hooks rules at error, the script names Design lists (`bootstrap`, `dev`, `seed`, `verify`, `verify:live`, `clean`, `golden:check`, `size`); `bun run typecheck` and `bun run lint` pass on the empty tree (Design)
+      Evidence: `bun run typecheck` (tsc -b over tsconfig.web.json and tsconfig.node.json) and `bun run lint` both exit 0 at this commit; no tests yet.
 - [ ] T2 `app/pipeline/dump_graphs.py`, `app/pipeline/golden/` - dump helper that loads `scripts/generate_3d.py` by path and the committed golden graphs for the fixed inputs; `bun run golden:check` regenerates them with no diff (AC-01)
 - [ ] T3 `app/pipeline/graphs.test.ts` - failing tests for the three builders against the golden graphs and for the combiner's renumbering, rewiring, prefix and thumbnail branch; fail because the modules do not exist (AC-01)
 - [ ] T4 `app/pipeline/graphs.ts`, `app/pipeline/combine.ts`, `app/pipeline/presets.ts` - builders, combiner and presets with per-line random seeds; T3 passes (AC-01)

@@ -1,0 +1,3 @@
+[test]
+# Playwright specs and the image-dependent memory tests have their own runners; see scripts/verify.sh.
+pathIgnorePatterns = ["app/e2e/**", "app/memory/**", "node_modules/**"]
