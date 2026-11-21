@@ -60,6 +60,10 @@ export class FakeComfy {
   acceptAfterMs = 0;
   /** Hold prompts running until released (for timeout and cancel tests). */
   holdRunning = false;
+  /** Prompt IDs that finish successfully at the moment a cancel arrives, so the cancel answers false. */
+  finishOnCancel = new Set<string>();
+  /** When set, per-job cancel calls answer with this HTTP status instead of acting. */
+  cancelStatus: number | null = null;
 
   constructor(private opts: FakeOptions) {
     this.version = opts.version ?? "0.46.2";
@@ -232,7 +236,10 @@ export class FakeComfy {
     if (path === "/prompt" && req.method === "POST") return this.postPrompt(body);
     if (path === "/interrupt") return new Response(null, { status: 200 });
     const cancel = /^\/api\/jobs\/([^/]+)\/cancel$/.exec(path);
-    if (cancel && req.method === "POST") return Response.json({ cancelled: this.cancel(cancel[1] ?? "") });
+    if (cancel && req.method === "POST") {
+      if (this.cancelStatus !== null) return new Response("cancel failed", { status: this.cancelStatus });
+      return Response.json({ cancelled: this.cancel(cancel[1] ?? "") });
+    }
     if (path === "/upload/image" && req.method === "POST") return this.upload(req);
     if (path === "/view") {
       const file = Bun.file(join(this.opts.outputDir, url.searchParams.get("subfolder") ?? "", url.searchParams.get("filename") ?? ""));
@@ -268,6 +275,20 @@ export class FakeComfy {
   }
 
   private cancel(id: string): boolean {
+    if (this.finishOnCancel.has(id)) {
+      this.finishOnCancel.delete(id);
+      const item = this.running?.id === id ? this.running : this.pending.find((p) => p.id === id);
+      if (item) {
+        this.pending = this.pending.filter((p) => p.id !== id);
+        if (this.running?.id === id) {
+          this.running.cancel();
+          this.running = null;
+        }
+        this.complete(item, null, false);
+        this.pump();
+      }
+      return false;
+    }
     if (this.running?.id === id) {
       const item = this.running;
       this.running.cancel();
