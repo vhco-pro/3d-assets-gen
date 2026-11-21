@@ -12,7 +12,8 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
-const backups = (): string[] => (existsSync(join(dir, "backup")) ? readdirSync(join(dir, "backup")).sort() : []);
+// Only finished backups count; SQLite may keep a -journal file beside one while VACUUM INTO writes it.
+const backups = (): string[] => (existsSync(join(dir, "backup")) ? readdirSync(join(dir, "backup")).filter((n) => n.endsWith(".sqlite")).sort() : []);
 
 test("a new store is at schema 1 in WAL mode and writes no backup", () => {
   expect(SCHEMA_VERSION).toBe(1);
