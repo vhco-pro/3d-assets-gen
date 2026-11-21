@@ -729,6 +729,7 @@ None.
 | 2026-11-21 | R-1 | spec | `79aed7b` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 1 nit |
 | 2026-11-21 | R-2 | spec | `b6d68e3` | claude-opus-5-5 | procedural | 1 blocking, 20 should-fix, 3 nits |
 | 2026-11-21 | R-3 | spec | `0a8d589` | claude-opus-5-5 | procedural | 2 blocking, 14 should-fix, 3 nits |
+| 2026-11-21 | R-4 | spec | `093c118` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 3 nits |
 
 ### R-1
 
@@ -1176,6 +1177,162 @@ SEVERITY: nit
 WHERE: Context > Background (line 140)
 EVIDENCE: The citation `HANDOFF.md:50-55` runs past the end of the file, which has 54 lines (`git show 0a8d589:HANDOFF.md | wc -l` printed 54).
 PROPOSAL: Cite `HANDOFF.md:50-54`.
+
+### R-4
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Versioning and release path (`version` bullet, lines 603-606)
+EVIDENCE: The document pins `vhco-pro/version-workflow` at `v0.1.2` (`a59c42c7e4ecc074cd5204e8e585e05900144c5a`). `gh api repos/vhco-pro/version-workflow/git/ref/tags/v0.1.2 --jq .object` returned `{"sha":"a59c42c7...","type":"tag"}`, so that SHA is the annotated tag object, not a commit. `gh api repos/vhco-pro/version-workflow/git/tags/a59c42c7e4ecc074cd5204e8e585e05900144c5a` gives `object.sha` `46a1ac93fdbd3abaa3a7d17259c5565edd2053c0` (type commit), and `gh api repos/vhco-pro/version-workflow/tags` lists `v0.1.2 46a1ac93fdbd3abaa3a7d17259c5565edd2053c0`. conventions/delivery.md (Pinning and updates): "Pin external GitHub Actions and reusable workflows to full 40-character commit SHAs" and "Resolve the current ref, including annotated tags, to its commit". A `uses:` built from this document names a non-commit object, so the release path fails or pins the wrong identity. This SHA was added by the previous revision. (The docker-release-action pin `c499e52...` is a commit and is correct.)
+PROPOSAL: Pin `vhco-pro/version-workflow/.github/workflows/version.yml@46a1ac93fdbd3abaa3a7d17259c5565edd2053c0 # v0.1.2`.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Versioning and release path (`version` bullet, "That job has `contents: write`", lines 605-606); Design > Repository and CI ("every job has least-privilege permissions", line 631)
+EVIDENCE: version.yml at 46a1ac9 says "same workflow: contents: write, pull-requests: read and no App", and its preview step runs `gh pr list --head "$BRANCH" --state open --label "$LABEL"` inside `echo "labelled=$(...)"`. When the caller job grants only `contents: write`, every other scope is `none`. The PR lookup then cannot read pull requests, the substitution yields an empty value without failing the step, and `gate` decides not to tag. Feature-branch pushes then never get a prerelease, so release-path step 1 (deploying the prerelease before the implementation review, so AC-10, AC-11 and AC-15 can be observed) cannot happen. The permission list was added by the previous revision.
+PROPOSAL: State that the `version` job has `contents: write` and `pull-requests: read`, and give the `release` job's permissions too (`contents: read`, `packages: write`, `id-token: write`, `attestations: write`, as knowledge/container-release.md lists).
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy.sh steps 2 and 3, lines 579-584); Test Plan row AC-15
+EVIDENCE: Step 2 runs `docker load` on `win-main` over SSH. Only step 3 then ensures Docker Desktop is running in the owner's session. Background records that Docker Desktop "was stopped when first checked" (line 114), and that one started from SSH stops when the session ends and loses loaded images (lines 144-150). Followed in order, a deploy against a stopped Docker Desktop fails at step 2. If an implementer starts the engine some other way first, the image can go into an instance that does not survive. The AC-15 procedure restarts Docker Desktop, so the order matters there.
+PROPOSAL: Move "ensure Docker Desktop runs in the owner's session" ahead of the `docker load` step in deploy.sh, and in rollback.sh before any reload, and give the wait a bounded timeout with a clear failure when the owner is not signed in.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback ("which happens after Docker Desktop restarts (Background)", lines 449-451); Context > Background (lines 144-146); Test Plan row AC-15 ("restart Docker Desktop, run `rollback.sh` and confirm it reloads the first image"); AC-15
+EVIDENCE: Background only observed lost images for "the Docker Desktop instance started from SSH". The Design generalises this to every Docker Desktop restart. On win-main now, `docker volume ls` lists other projects' named volumes (`svelte-go-dating_postgres_data` and others) that have survived restarts in the owner's session, which suggests that store persists. If restarts in the owner's session keep images, a correct rollback.sh (which reloads only "when that image is no longer loaded") does not reload, and the AC-15 step "confirm it reloads the first image" fails it. If restarts really do drop images, the running image and the `/data` volume go too, and `restart: unless-stopped` cannot bring the app back after the owner signs in again. Nothing in the design then covers that case.
+PROPOSAL: Establish the behaviour with a restart in the owner's session and cite it. Then make the AC-15 procedure remove the first image explicitly (`docker image rm`) before running rollback.sh, or, if restarts drop images, design a reload of the current image at logon.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Container image (runtime stage "with that executable and those libraries only", lines 556-562); Design > Deployment and exposure (compose.yaml, lines 569-571); AC-17
+EVIDENCE: A new named volume takes the ownership of the image's mount point, and is root-owned 0755 when the image has no such directory. Observed here: `docker run --rm --user 65532:65532 --read-only -v <new volume>:/data alpine:3.22 sh -c 'ls -ld /data; touch /data/x'` printed `drwxr-xr-x root root /data` and `touch: /data/x: Permission denied`. A distroless runtime holding only the executable and libraries has no `/data`, and has no shell to create it at start, so the non-root app cannot open its SQLite database on a fresh deploy.
+PROPOSAL: State that the runtime stage creates `/data` (and its subdirectories if wanted) owned by 65532:65532, for example `COPY --chown=nonroot:nonroot` of an empty directory from the builder. Have the AC-17 start checks use a fresh named volume.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (rename inside the transaction, lines 331-341); Design > Submission, concurrency and idempotency (sweep, lines 394-398); AC-02; AC-06; Test Plan rows AC-02 and AC-06
+EVIDENCE: The handler renames staging to `/data/uploads/<batch id>/` "still inside the transaction", before commit. The sweep runs every ten minutes and deletes "in `/data/uploads/`, every directory with no batch row", and it exempts only "staging and collection director[ies] not in use by a running request". Under WAL, a sweep reading through another connection does not see the uncommitted batch row. A sweep that runs between the rename and the commit therefore deletes the new batch's uploads, and its image jobs are then `pending` with no source to upload. This traces to the previous revision's changes for R-3 F-01 and R-3 F-12, which moved the rename into the transaction and added the periodic sweep.
+PROPOSAL: Exempt uploads directories of batches a running request is inserting, or serialise the sweep with batch inserts (for example, have the sweep's uploads check run inside its own `BEGIN IMMEDIATE`). Add a test that runs the sweep between the rename and the commit.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (job row and `/data/assets/<job id>/`, lines 304-309); Design > Submission, concurrency and idempotency (idempotent collection, lines 386-391); Design > Restart, upgrade and rollback (lines 451-452); Design > HTTP API (`<id>` routes, lines 487-493); Design > Files in ComfyUI's folders (lines 427-432); Design > Verification commands (`fixture-` IDs, line 662)
+EVIDENCE: The document never defines the job ID format, yet it goes into `/data/assets/<job id>/`, `output/asset-studio/<job id>/`, `input/asset-studio/<job id>.<ext>` and the API paths. Fixture IDs are "fixed IDs starting with `fixture-`", which implies free text. If an implementer uses SQLite integer IDs, a rollback that restores an older database reuses IDs whose asset directories "stay in the volume" (line 451). Collection then finds "`/data/assets/<job id>/` already holds the GLB, source image and thumbnail", "only runs the `done` update", and marks a new job done with another job's files. Unvalidated `<id>` path parameters also reach the filesystem, unlike the batch ID, which must be a canonical UUID.
+PROPOSAL: Define job IDs as canonical lowercase UUIDs generated by the app (fixture IDs in a fixed validated form), and validate every `<id>` path parameter against that form before any database or filesystem access.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (cancel handling lines 406-414, retry lines 416-418); Design > ComfyUI client (three server errors in a row, lines 276-278); Design > Jobs and batches (job row fields, lines 305-307); Test Plan row AC-05
+EVIDENCE: Retry "clears its attempt ID and loss count", but not the consecutive server-error count or the cancel-requested flag. The flag is said to be cleared only when "the completion wins" (line 412). A job that failed after three server errors and is retried fails on its next single server error. A cancelled job keeps its flag after retry, so the next tick's step 1 may cancel it again at once. Two implementers would reset different fields. The server-error count was added by the previous revision for R-3 F-13.
+PROPOSAL: State that retry and every lost-job resubmission reset the consecutive server-error count, that the count resets on any successful job call, and that the tracker clears the cancel-requested flag when it marks a job `cancelled` (and retry clears it too).
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > ComfyUI client (version check "at start and after every period in which ComfyUI was unreachable", lines 280-284); Design > Submission, concurrency and idempotency (tracker steps 3 to 6, lines 369-381); AC-04; Test Plan row AC-04
+EVIDENCE: The tracker re-reads `comfyui_version` only after unreachability. The AC-04 proof expects the fake to get no `/prompt` or cancel "until it reports 0.46.2", which a fake that changes its reported version while staying up never triggers under the Design. A correct implementation can then fail the proof, or an implementer adds an undocumented periodic re-read. The Design also does not say whether steps 3 to 6 run while ComfyUI is incompatible. If they do, a downgraded ComfyUI that lost its queue makes step 5 move `submitted` jobs back to `pending`, which contradicts AC-04's "every job keeps its state".
+PROPOSAL: State when the version is re-read while incompatible (for example every tick, or every N seconds), and that reconciliation steps 3 to 6 are suspended while incompatible. Make the AC-04 proof switch the fake's version both with and without a restart.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (backup naming and rollback, lines 441-452); AC-15; Test Plan row AC-15
+EVIDENCE: rollback.sh runs the previous image's `restore-backup` "on the newest backup when the schema version changed". The document does not say whether the running container is stopped first, although the command replaces the database and deletes `-wal` and `-shm` under a live writer. It does not say how rollback.sh learns that the schema version changed, or whether `<version>` in `/data/backup/<version>-<timestamp>.sqlite` is the app or the schema version. "Before running migrations it writes a consistent copy" also leaves open whether a backup is taken on every start. If it is, the newest backup after a restart of the migrated app has the new schema, and the restored old executable refuses it. The AC-15 proof never exercises a schema change.
+PROPOSAL: State that rollback stops the service before restoring, that a backup is written only when migrations will run and is named with the schema version it holds, and that rollback restores the newest backup whose schema version equals the previous image's.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Versioning and release path (`release-<version>` workflow artifact, lines 610-612); Design > Deployment and exposure (deploy step 1, lines 575-578); Design > Restart, upgrade and rollback (reload "the way `deploy.sh` does", lines 449-451); Test Plan row AC-17 (`check-image.sh` reads the artifact)
+EVIDENCE: The only release record is a workflow artifact, and "A version without that artifact is never deployed". Workflow artifacts expire. Observed: `gh api repos/vhco-pro/stackweaver-launcher/actions/artifacts` shows artifacts created 2026-11-20 with `expires_at` 2027-02-18 (90 days) and some sooner (2026-12-20 and 2026-11-25). After expiry, deploy and check-image of that version fail, and so does a rollback that must reload an image no longer loaded, which is exactly when rollback is needed. The artifact record was added by the previous revision.
+PROPOSAL: Keep the release record somewhere durable, for example a GitHub Release asset or the tag annotation written only after the scan passes, or set and state the artifact retention and accept the window. Say what rollback does when the record is gone.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 1, lines 576-578); Test Plan row AC-17 (`check-image.sh`)
+EVIDENCE: Deploy "verifies the Cosign signature and the provenance and SBOM attestations for that digest with `gh attestation verify --repo vhco-pro/3d-assets-gen`". `gh attestation verify --help` shows `--predicate-type` with default `"https://slsa.dev/provenance/v1"`, so one call checks provenance only, not the SBOM attestation. It does not verify the Cosign keyless signature, which the action creates with `cosign sign`. A literal implementation skips two of the three checks that AC-17 requires.
+PROPOSAL: Name the checks: `cosign verify` with the expected certificate identity and issuer for the signature, and `gh attestation verify oci://...@<digest> --repo ...` once for provenance and once with the SPDX predicate type for the SBOM, in both deploy.sh and check-image.sh.
+
+FINDING: F-13
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan row AC-17 ("A CI test of the release job runs it with a scan step forced to fail and asserts no `release-<version>` artifact is uploaded"); AC-17; Design > Versioning and release path (`release` bullet)
+EVIDENCE: The `release` job calls `michielvha/docker-release-action`, which pushes `<version>`, `latest` and `<sha>` tags (action.yaml lines 113-123 at c499e52) before Trivy runs (lines 202-208). Running the real job "with a scan step forced to fail" therefore publishes a failing image, and moves `latest`, in the public package under some version. The row does not say which workflow, trigger or version the test uses, or how the scan is made to fail inside a pinned external action. The proof is not executable as written.
+PROPOSAL: Define the check concretely, for example a workflow test that asserts the artifact upload step follows the action step in the same job with no `if: always()` or `continue-on-error`, or a stub local action in a test workflow that fails in place of the release action.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-20; AC-20; Design > Container image (`ENTRYPOINT`, lines 553-559); Design > Deployment and exposure (1 GiB memory limit, line 571); Context > Owner summary (lines 56-57)
+EVIDENCE: The proof runs the server "under `--smol`", but the Design never runs the deployed executable with `--smol`, so the test measures a different configuration from production. The proof also asserts that "peak resident memory, read from `/sys/fs/cgroup/memory.peak`, stays under 1 GiB" under `--memory 1g`. cgroup v2 `memory.peak` counts page cache as well as anonymous memory, and it cannot exceed `memory.max`. Writing 400 MiB of uploads and reading an export fills the cache toward the limit, so the assertion either fails a correct server or passes vacuously. AC-20 was added by the previous revision.
+PROPOSAL: Either embed `--smol` in the compiled executable and say so in Design, or drop it from the proof. Assert that the container is not OOM-killed (`docker inspect` `OOMKilled` false) and bound anonymous memory, for example `memory.stat` `anon` below a stated value such as 512 MiB.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-12 (unit case "the eleventh failed authentication within a minute ... returns 429" and deployed case "ten wrong sign-ins from `fedora-43` reach 429"); Design > Access token ("one limit of 10 per minute per client", "Over the limit", lines 469-471)
+EVIDENCE: The Design allows 10 failures per minute and answers 429 only over the limit, and the unit test checks that the eleventh is 429. The deployed procedure says ten wrong sign-ins "reach 429". Read literally, it fails a correct implementation, while the unit test fails the alternative. The deployed check was added by the previous revision.
+PROPOSAL: Make the deployed step send eleven wrong sign-ins from `fedora-43` and expect 429 on the eleventh. State whether the minute is a fixed or a sliding window.
+
+FINDING: F-16
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (CodeQL bullet, lines 634-636); AC-14; Test Plan row AC-14; Context > Owner summary (CodeQL, lines 75-76)
+EVIDENCE: conventions/repository-security.md: "Run CodeQL code scanning with the reusable CodeQL workflow in `vhco-pro/.github` for each language in the repository." The repository has Python (`scripts/generate_3d.py`, and the golden dump helper runs it). The Design calls only `reusable-codeql-js.yml` (input `languages`, default `javascript-typescript`) and `reusable-codeql-actions.yml`. `gh api repos/vhco-pro/.github/contents/.github/workflows` lists no Python workflow.
+PROPOSAL: Pass `languages: javascript-typescript,python` to `reusable-codeql-js.yml` (it uses `build-mode: none`), or record why Python is excluded. Make the AC-14 check name the Python analysis.
+
+FINDING: F-17
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Export (lines 545-549); Design > HTTP API (`POST /api/exports`, line 494); AC-08; AC-20
+EVIDENCE: An export takes "the selected done jobs" with no cap, and the library grows without bound. Each asset adds a GLB of TRELLIS.2 2048 textures (colour, ORM and normal maps, HANDOFF.md:38) plus a source image of up to 20 MiB. A select-all of a few hundred assets passes 4 GiB, or 65,535 entries in larger libraries. A streamed zip without ZIP64 is then corrupt, and the document does not mention ZIP64. AC-20 exports only 100 fixture assets, which stay far below that.
+PROPOSAL: Either cap the export selection (count and total bytes) with a message, or require ZIP64 records and add a test that exports past 4 GiB with sparse fixture files.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope (AGENTS.md and README commands bullet, lines 182-184); Design > Verification commands (lines 654-667); Design > Container image (configuration, lines 563-565)
+EVIDENCE: conventions/frontend-testing.md lines 28-33 require the README and agent instructions to name the bootstrap, seed, run, verify and clean commands, and to "State which dependencies and services are needed and how an agent detects readiness". Lines 45-48 ask for a stable nonproduction identity and its login. The Design defines `seed`, `verify` and `verify:live` but no run command for the development stack. It does not say where its configuration file lives outside the container, which token a developer signs in with, how the fake is started, or how `seed` recognises "the fake's" URL. Two implementers would build different development paths.
+PROPOSAL: Define the development run command, its configuration file and fixed nonproduction token, how it starts the fake ComfyUI and what readiness signal it waits for, and how seed identifies the fake (for example a marker endpoint the fake answers).
+
+FINDING: F-19
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-19 ("`bats`-style shell tests in `scripts/deploy/tests/`")
+EVIDENCE: "`bats`-style" leaves open whether the repository adds the `bats` tool (not installed on fedora-43: `which bats` found nothing) or a hand-written Bash runner. conventions/delivery.md requires tools to be pinned in a manifest the updater reads, with a verified checksum. The document names neither the tool nor its pin.
+PROPOSAL: Name the shell test runner. If it is `bats-core`, say how it is pinned and verified (for example a Bun dev dependency in `bun.lock`).
+
+FINDING: F-20
+KIND: factual
+SEVERITY: nit
+WHERE: Design > ComfyUI client (incompatible "with the version it found", lines 282-284); Design > Access token (health "reveals only the app version, the build commit and ComfyUI's state", lines 466-467); Design > HTTP API (`GET /api/health` row); Design > Glossary ("ComfyUI incompatible ... older than 0.46.2", line 518)
+EVIDENCE: One place says health reports the version found, and another says health reveals only the state. The glossary covers "older" but the Design also treats a missing version as incompatible.
+PROPOSAL: Say once whether `/api/health` includes ComfyUI's reported version, and make the glossary row read "older than 0.46.2 or reports no version".
+
+FINDING: F-21
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy step 5, line 588)
+EVIDENCE: deploy.sh "runs on `fedora-43`" and "Waits until `/api/health` on `127.0.0.1:8790` reports the new version", but that address is `win-main`'s loopback, not `fedora-43`'s.
+PROPOSAL: Say the health wait runs on `win-main` over SSH.
+
+FINDING: F-22
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Submission, concurrency and idempotency ("HTTP handlers only insert rows or set flags (cancel requested, retry, delete)", lines 343-345); Design > Cancel, retry and delete (Delete, lines 420-423); Design > HTTP API (`DELETE /api/jobs/<id>`)
+EVIDENCE: One sentence makes delete a flag for the tracker. The Delete paragraph has the request remove the row and files, so it could be synchronous.
+PROPOSAL: State whether `DELETE` acts synchronously in the handler or sets a flag the tracker acts on, and what the response and later `GET` show in between.
 
 ## Sources
 
