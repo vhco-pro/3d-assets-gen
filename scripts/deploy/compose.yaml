@@ -1,0 +1,23 @@
+# Asset Studio on win-main. deploy.sh copies this file to %LOCALAPPDATA%\AssetStudio\ and writes .env
+# (ASSET_STUDIO_IMAGE) from current.json; Compose takes LOCALAPPDATA from the owner's environment, so no
+# user name or local path is committed. The image is loaded by deploy.sh or the logon script, never pulled here.
+name: asset-studio
+services:
+  app:
+    image: ${ASSET_STUDIO_IMAGE:?ASSET_STUDIO_IMAGE is written to .env by deploy.sh}
+    pull_policy: never
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    mem_limit: 1g
+    ports:
+      - "127.0.0.1:8790:8790"
+    tmpfs:
+      - /tmp
+    volumes:
+      - data:/data
+      - ${LOCALAPPDATA:?}/Comfy-Desktop/ComfyUI-Shared/input/asset-studio:/comfy/input
+      - ${LOCALAPPDATA:?}/Comfy-Desktop/ComfyUI-Shared/output/asset-studio:/comfy/output
+      - ${LOCALAPPDATA:?}/AssetStudio/config.yaml:/config/config.yaml:ro
+volumes:
+  data:
