@@ -772,6 +772,7 @@ None.
 | 2026-11-21 | R-2 | spec | `b6d68e3` | claude-opus-5-5 | procedural | 1 blocking, 20 should-fix, 3 nits |
 | 2026-11-21 | R-3 | spec | `0a8d589` | claude-opus-5-5 | procedural | 2 blocking, 14 should-fix, 3 nits |
 | 2026-11-21 | R-4 | spec | `093c118` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 3 nits |
+| 2026-11-21 | R-5 | spec | `7ed1b66` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 5 nits |
 
 ### R-1
 
@@ -1375,6 +1376,113 @@ SEVERITY: nit
 WHERE: Design > Submission, concurrency and idempotency ("HTTP handlers only insert rows or set flags (cancel requested, retry, delete)", lines 343-345); Design > Cancel, retry and delete (Delete, lines 420-423); Design > HTTP API (`DELETE /api/jobs/<id>`)
 EVIDENCE: One sentence makes delete a flag for the tracker. The Delete paragraph has the request remove the row and files, so it could be synchronous.
 PROPOSAL: State whether `DELETE` acts synchronously in the handler or sets a flag the tracker acts on, and what the response and later `GET` show in between.
+
+### R-5
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (job row fields, lines 310-315); Design > Submission, concurrency and idempotency (tracker step 3 "A job seen running for the first time gets its started time", lines 380-383; step 5 lost-job reset, lines 386-390; step 6 timeout, lines 391-392); Design > Cancel, retry and delete (retry, lines 430-433); AC-05; AC-06; Test Plan rows AC-05 and AC-06
+EVIDENCE: The row keeps the times the job was "first seen running and finished", and the 15-minute timeout counts "since its started time". Retry clears "its attempt ID, loss count, server-error count and cancel-requested flag" (lines 430-431), and a lost job only "clears the attempt ID, returns the job to `pending` ... and adds one to its loss count" (lines 387-388). Neither resets the started time, the finished time or the error message. Take a job that timed out after 15 minutes, or one lost when ComfyUI restarted 10 minutes into its run. When it is retried or resubmitted and runs again, it is not "seen running for the first time", so step 6 measures from the old start and cancels it as timed out on the first tick, or shortly after. The AC-05 retry case ("the job ends `done` without being cancelled again") and the AC-06 lost-job case run on a clock that is not advanced, so they pass on that implementation.
+PROPOSAL: State that retry and every lost-job resubmission clear the started time, the finished time and the error message, so the next attempt's timeout counts from when that attempt is first seen running. Add a tracker test that retries a job after a timeout on a faked clock and asserts the new attempt is not cancelled before it has run 15 minutes.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Container image (configuration list "listen address ..., ComfyUI URL ..., the access token and the three limits", lines 590-591; writable paths `/data`, `/comfy/input`, `/comfy/output`, lines 587-588); Design > Files in ComfyUI's folders (lines 444-450); Design > Verification commands (`bun run dev` with data under `.dev-data/`, lines 696-701); Test Plan rows AC-06 and AC-16
+EVIDENCE: The configuration is "loaded strictly" and lists only the listen address, ComfyUI URL, token and limits. The data directory and the two ComfyUI folders the app deletes from appear only as the fixed container paths `/data`, `/comfy/input` and `/comfy/output`. `bun run dev` runs the server outside a container with "data under `.dev-data/`", and the sweep and cleanup tests in AC-06 assert on "the fake's `asset-studio` folders", so the server must delete files in folders the fake writes. The document does not say how the server learns its data directory or the ComfyUI folders outside the container. A strict loader rejects any key it does not list, so two implementers would add different config keys, environment variables or flags, or hard-code paths that only exist in the container.
+PROPOSAL: Add the data directory and the ComfyUI input and output `asset-studio` folders to the configuration schema with the container paths as defaults, and say what `dev/config.yaml` sets them to and which folders the fake ComfyUI writes in development and tests.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Files in ComfyUI's folders ("The container mounts only those two `asset-studio` subfolders of ComfyUI's shared input and output folders", lines 447-448); Design > Container image (mounts, lines 587-589); Design > Deployment and exposure (compose.yaml "the mounts above", lines 595-597; deploy step 4 "brings the Compose project up", lines 615-617); AC-11
+EVIDENCE: The host side of the two ComfyUI mounts is never named, and nothing says how deploy.sh finds it. The running Comfy Desktop process on win-main, read over SSH, has `--input-directory C:\Users\<user>\AppData\Local\Comfy-Desktop\ComfyUI-Shared\input --output-directory ...\ComfyUI-Shared\output`. Those paths contain the Windows user name, which the summary says was scrubbed from the public repository (line 74-75), and Comfy Desktop can move them. `Test-Path` for `input\asset-studio` and `output\asset-studio` under that folder both returned False today. The document also does not say where compose.yaml lives when Compose runs on win-main, or whether it runs remotely from fedora-43. No observation shows that UID 65532 in the container can delete files ComfyUI wrote on NTFS through Docker Desktop's bind mount, yet cleanup, the sweep and AC-11's "gone from ComfyUI's `asset-studio` folders" depend on it.
+PROPOSAL: Name the host paths as `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\{input,output}\asset-studio` (or read them from the Comfy Desktop process), say that deploy.sh creates them and copies compose.yaml to a named place on win-main, and cite a measured delete by UID 65532 through such a mount, or make that the first deploy check.
+
+FINDING: F-04
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Context > Background ("Whether images in the owner's instance survive a Docker Desktop restart was not tested", lines 149-150); Design > Deployment and exposure ("The app keeps running only while the owner is signed in on `win-main`", lines 621-622; `restart: unless-stopped`, line 597); Design > Restart, upgrade and rollback; AC-15; Open Questions
+EVIDENCE: The design expects the app to come back by itself after win-main reboots and the owner signs in: the logon task starts Docker Desktop and `restart: unless-stopped` restarts the container. Background records that the Docker Desktop instance started from SSH and the one in the owner's session showed different image lists, and that image persistence across a restart in the owner's session was never tested. If the image does not survive, the container cannot start after a reboot and the friend's URL stays down until someone reruns deploy.sh. No criterion or Test Plan row covers recovery after a restart, and checking it means restarting Docker Desktop, which stops the owner's other containers.
+PROPOSAL: Raise an Open Question. Option A: the owner allows one Docker Desktop restart (or sign-out and sign-in) during the AC-15 procedure, which then confirms that `/api/health` answers again without a redeploy. Option B: the logon task also reloads the current image from its Release record when it is missing. Option C: accept the gap and record it as a limitation in the summary.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope > Out of scope ("Installing the managed Renovate GitHub App on the repository", line 202); Design > Repository and CI (`renovate.json` bullet, lines 671-672); Design > Command-line output ("pinned with its integrity hash in `bun.lock`, which Renovate updates", lines 686-687); Context > Owner summary (lines 76-77, 61-63); AC-14; Test Plan row AC-14
+EVIDENCE: `gh api orgs/vhco-pro/installations` lists `vhco-renovate selected`, so the managed Renovate App only covers repositories added to it one by one. A new `vhco-pro/3d-assets-gen` is not covered until someone adds it, which the document treats as out of scope but does not list among the owner's steps or the README checklist. knowledge/managed-renovate.md: "A config file is not proof that the App is installed or that its newest run succeeded. Check the Dependency Dashboard or update PRs after adoption." conventions/delivery.md: "Adding a dependency includes confirming the updater will propose its next version." The AC-14 proof checks only that `renovate.json` exists on `main`, so the claim that Renovate updates `bats`, the base images and the actions can stay false while AC-14 is met.
+PROPOSAL: Name adding the repository to the `vhco-renovate` installation as an owner step in the summary and the README checklist, and either add a check that the Dependency Dashboard issue or a Renovate PR exists, or qualify the "which Renovate updates" statements until the owner has done it.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Frontmatter `covers` (lines 6-22); Design > Verification commands (committed `dev/config.yaml`, `.dev-data/` ignored by Git, lines 696-698); Test Plan rows AC-16 and AC-17 (`bun test .github` and the test workflow with a local stub action)
+EVIDENCE: The feature commits `dev/config.yaml`, whose token and fake-only rule AC-16 checks, and adds `.dev-data/` to `.gitignore`. The AC-17 proof adds tests run as `bun test .github` and a local stub action, which normally sit under `.github/` outside `.github/workflows/`. The convention says "`covers` lists every path whose change can affect the feature", but `covers` lists none of `dev/`, `.gitignore` or `.github/` beyond `workflows/`, so `fresh` and `feature_tree_clean` ignore changes there.
+PROPOSAL: Add `dev/`, `.gitignore`, and the directory holding the `.github` tests and the stub action (or `.github/` as a whole) to `covers`.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan row AC-17 ("and a test workflow in which a local stub action fails in place of the release action ends with no Release created"); AC-17
+EVIDENCE: The row does not say where that test workflow lives, what triggers it, which tag or version its Release step would use, or how "no Release created" is observed. `bun test` cannot run a GitHub workflow, and the sentence is joined to the `bun test .github` check. A workflow that only copies the job's shape around a stub tests GitHub's step semantics, not `ci.yml`. Two implementers would build different checks, or none that runs in `bun run verify` or CI. This row text came from the previous revision's change for R-4 F-13.
+PROPOSAL: Either drop the test workflow and rely on the `ci.yml` structure assertions, or name its file, its trigger (for example `workflow_dispatch` on the feature branch), the tag it would release and the `gh release view` check that must fail afterwards.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (submitted job: history check, then per-job cancel, lines 423-426); Design > Submission, concurrency and idempotency (sweep "every job directory and upload whose job is `done`, deleted or unknown", lines 405-407); Design > Files in ComfyUI's folders (cleanup, lines 448-449); AC-05; AC-06
+EVIDENCE: The tracker checks the history and then calls `POST /api/jobs/<prompt id>/cancel`. A prompt that finishes between those two calls makes the cancel a no-op: server.py at lines 1060-1079 on win-main returns `{"cancelled": false}` for a finished ID. The Design marks the job `cancelled` anyway, so a job that finished ends `cancelled`, against AC-05's "unless it already finished, in which case it ends `done`". Its GLB and PNG stay in `output/asset-studio/<job id>/`, because cleanup runs only after `done` and on delete, and the sweep skips `failed` and `cancelled` jobs. The same is true of the partial outputs of every cancelled or timed-out job, which stay in ComfyUI's output folder until someone deletes the job.
+PROPOSAL: State that when the per-job cancel answers `{"cancelled": false}`, the tracker reads the history again and collects a success. Also state whether the sweep, or the transition to `failed` or `cancelled`, removes that job's ComfyUI output directory.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > HTTP API (`POST /api/exports`, line 515); Design > Page ("Downloads use the API links directly", line 554); Design > Export (lines 566-572); AC-08; Test Plan row AC-08
+EVIDENCE: The export is a POST carrying the selection, so it cannot be a plain link. The document does not give the request body or say how the browser turns the streamed response into a download. A `fetch` that buffers into a Blob holds up to 2 GiB in the browser tab. A form POST navigation needs a form-encoded body and gets a 413 page instead of the app's message. The server streams so its memory stays flat (AC-20), but the AC-08 journey downloads a three-asset zip, which both approaches pass.
+PROPOSAL: Define the export request format and the browser mechanism, for example a form POST or a short-lived GET link issued by `POST /api/exports` that the browser downloads natively, and how the 413 message reaches the page.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 2, `cosign verify` and `gh attestation verify`, lines 606-611); Test Plan row AC-17 (`scripts/deploy/check-image.sh`)
+EVIDENCE: deploy.sh and check-image.sh verify the image with `cosign` and `gh` from whatever is installed on fedora-43 (`which cosign` there gives `/home/m/go/bin/cosign`, a `go install` build with no recorded version). conventions/delivery.md: "Download executable tools at an exact version and verify an independently pinned checksum before executing them. Do not silently accept a different preinstalled version", and a pin must sit in a manifest the updater reads. The document names no version, checksum or manifest for these verification tools, so two implementers would differ, and the security gate depends on an unpinned binary.
+PROPOSAL: State that the scripts fetch cosign (and pin gh, or check its version) at an exact version with a checksum kept where Renovate tracks it, for example a custom-manager pin, or record an explicit exception for host tools on fedora-43.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Versioning and release path ("as `vhco-pro/version-workflow`'s `tag-after-checks` example arranges it", lines 629-630; "`preview.yml`, copied from the same example", line 647)
+EVIDENCE: At 46a1ac9, `examples/tag-after-checks/ci.yml` uses the separate-workflows arrangement: the `version` job has `contents: read`, passes `vars.RELEASE_APP_CLIENT_ID` and `secrets.RELEASE_APP_PRIVATE_KEY`, and says "The App's tag push starts the repository's tag-triggered release workflow". The single-workflow arrangement the document uses (`contents: write`, no App, a dependent release job) is the one described in the header comment of `version.yml`, not the example. `preview.yml` does match the example.
+PROPOSAL: Say that ci.yml follows the "same workflow" arrangement described in `version.yml` and takes its trigger and concurrency layout from the example.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Access token (client address, lines 492-496)
+EVIDENCE: "The client address is the last `X-Forwarded-For` value when the socket peer is trusted." A request from a trusted peer that has no `X-Forwarded-For` header has no defined client address. That covers the Playwright suite through the published port, deploy.sh's health wait and any direct call to `127.0.0.1:8790` on win-main.
+PROPOSAL: Say that a trusted peer without the header is keyed on its socket address.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan row AC-20 ("sample `anon` from `/sys/fs/cgroup/memory.stat` every 100 ms")
+EVIDENCE: `/sys/fs/cgroup/memory.stat` is the path inside the container. The runtime image is distroless with no shell or `cat`, so the test cannot read it with `docker exec`. From the test process it has to read the container's cgroup on the host, for example `/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.stat`.
+PROPOSAL: Name the host-side cgroup path, or the method the test uses to read the container's `memory.stat`.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Submission, concurrency and idempotency (tracker step 2 "oldest first by creation time", line 365); Design > HTTP API (`GET /api/jobs` "newest first by creation time", line 507)
+EVIDENCE: Every job in a batch is inserted in one transaction and can share a creation time, so the order of prompt lines and variants within a batch is not defined for submission or for the list.
+PROPOSAL: Add a tie-break, for example the insertion order within the batch.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy steps 2 to 4, lines 606-617; compose "on the image tag being deployed", lines 595-596); Design > Restart, upgrade and rollback ("When the previous image is not loaded", line 467)
+EVIDENCE: Step 2 pulls `ghcr.io/vhco-pro/3d-assets-gen@<digest>`, and an image pulled by digest has no tag. Step 3 saves and loads it, but Compose (`pull_policy: never`), the record of the previous tag and rollback's "not loaded" check all use a tag. No step creates it.
+PROPOSAL: Say that deploy.sh tags the verified image `ghcr.io/vhco-pro/3d-assets-gen:<version>` before `docker save`, so the loaded image carries that tag.
 
 ## Sources
 
