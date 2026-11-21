@@ -86,8 +86,9 @@ live checks before the implementation review; the release image from `main` is d
 
 Acceptance authorizes building on a feature branch, creating that repository and turning on those
 settings, adding the repository to the `vhco-renovate` App installation, publishing images to GHCR, merging the feature PR once CI and an independent implementation
-review pass, and deploying to `win-main`, including a scheduled task there that, at each logon, starts
-Docker Desktop in the owner's session and brings the app back, reloading its image if it is missing. It does not authorize changing tailnet ACLs, sharing the node, changing Docker
+review pass, and deploying to `win-main`, including two scheduled tasks there: one that starts Docker
+Desktop in the owner's session for deploys, and one that, at each logon, brings the app back and
+reloads its image if it is missing. It does not authorize changing tailnet ACLs, sharing the node, changing Docker
 Desktop's or WSL's settings, or touching ComfyUI beyond deleting the app's own files in its input and
 output folders.
 
