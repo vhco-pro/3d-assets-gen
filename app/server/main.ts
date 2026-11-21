@@ -17,7 +17,7 @@ const { positionals, values } = parseArgs({
 });
 const command = positionals[0] ?? "serve";
 
-function main(): number {
+async function main(): Promise<number> {
   switch (command) {
     case "schema-version":
       console.log(String(SCHEMA_VERSION));
@@ -33,11 +33,26 @@ function main(): number {
       console.log(`✓ Passed: restored ${file}`);
       return 0;
     }
+    case "serve": {
+      const { startServer } = await import("./serve.ts");
+      const srv = await startServer(loadConfig(values.config));
+      console.log(`› Asset Studio listening on ${srv.url}`);
+      const stop = (): void => {
+        void srv.stop().then(() => process.exit(0));
+      };
+      process.on("SIGTERM", stop);
+      process.on("SIGINT", stop);
+      return -1;
+    }
+    case "seed": {
+      const { runSeed } = await import("./seed.ts");
+      return runSeed(loadConfig(values.config), { profile: values.profile, reset: values.reset });
+    }
     default:
       console.error(`✗ Failed: unknown command ${command}`);
       return 2;
   }
 }
 
-const code = main();
+const code = await main();
 if (code >= 0) process.exit(code);
