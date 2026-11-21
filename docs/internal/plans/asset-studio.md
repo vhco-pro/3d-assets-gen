@@ -896,6 +896,7 @@ None.
 | 2026-11-21 | R-5 | spec | `7ed1b66` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 5 nits |
 | 2026-11-21 | R-6 | spec | `945c51a` | claude-opus-5-5 | procedural | 2 blocking, 6 should-fix, 2 nits |
 | 2026-11-21 | R-7 | spec | `5d41ca9` | claude-opus-5-5 | procedural | 1 blocking, 10 should-fix, 2 nits |
+| 2026-11-21 | R-8 | spec | `b810be8` | claude-opus-5-5 | procedural | 3 blocking, 11 should-fix, 4 nits |
 
 ### R-1
 
@@ -1773,6 +1774,134 @@ SEVERITY: nit
 WHERE: Context > Owner summary ("after the local history was scrubbed of the PC's tailnet address, Windows user name and local paths", lines 77-78); Review Log > R-5 F-10 (line 1521)
 EVIDENCE: The stored R-5 F-10 record, which must be kept verbatim, contains the fedora-43 path `/home/m/go/bin/cosign` (`sed -n 1521p` on the document). The summary says the history was scrubbed of local paths, but this document will carry one into the public repository.
 PROPOSAL: Qualify the summary to say which paths were scrubbed, or have the owner decide whether that one home path is acceptable in the public history.
+
+### R-8
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > ComfyUI client (version check, lines 301-306); Test Plan row AC-04 (line 861); AC-04 (line 835); Context > Owner summary ("stops submitting with a clear banner otherwise", lines 50-51); Design > Glossary ("ComfyUI incompatible" row, line 576)
+EVIDENCE: Design says the tracker reads `comfyui_version` "at start, after every period in which ComfyUI was unreachable, and on every tick while ComfyUI is incompatible" (lines 302-303). Nothing re-reads the version while ComfyUI is reachable and was last seen as compatible. The AC-04 proof needs "a fake that switches to `comfyui_version` 0.46.1 while staying up" to make `/api/health` report incompatible and to get no `/prompt` or cancel call. Under the Design that switch is never read, so the tracker keeps submitting and a correct implementation fails the proof. The second case, "one that restarts reporting 0.46.1 with its queue emptied", has the same problem whenever the fake's restart falls between two 2-second ticks: the tracker never sees an unreachable period, so it never re-reads the version, and step 5 treats every `submitted` job as lost and posts it again to the old fake. This gap traces to the change made for R-4 F-09, which added only the re-read while already incompatible.
+PROPOSAL: Re-read `/system_stats` and its version on every tick (or before every submission step), so a change while reachable is detected. Alternatively, drop the "while staying up" case and make the restart case's downtime span at least one tick, and say so in the row.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Verification commands (Playwright seeding, lines 802-806; `bun run dev`, lines 811-819; `bun run seed`, lines 821-828); AC-16 (line 847); Test Plan row AC-16 (line 873); Test Plan rows AC-07 and AC-18 ("on the seeded fixture")
+EVIDENCE: The seed "refuses to run unless the configured ComfyUI URL answers that marker endpoint" (lines 822-823), so the fake has to be running before the seed runs. The fake loads the seeded `submitted` jobs' prompt IDs "at start as queued and running prompts" (lines 825-826), and in the Playwright harness "the fake reads the seeded prompt IDs from the same data directory at start" (line 806), so the fake has to start after the seed. Both cannot hold. In the documented development flow, `bun run dev` starts the fake and the server, and `bun run seed` then writes `submitted` fixture rows whose prompt IDs the already-running fake never loaded. Tracker step 5 then finds those attempts "in neither" the queue nor the history, returns the jobs to `pending` and resubmits them, so the fixture's `submitted` jobs change state, against AC-16 ("its fixture jobs keep their states while the app runs") and the inert-seed rule in conventions/frontend-testing.md lines 69-72. The AC-16 proof ("with the app and fake running ... after seeding") fails an implementation that follows these lines.
+PROPOSAL: Have the fake look up seeded prompt IDs from the data directory on every `/queue` and `/history` request (or reload them on a control call the seed makes), instead of only at start. Alternatively, let the seed check the marker in a way that does not need the fake to load fixture state, and state the start order for `bun run dev`, `bun run seed` and the Playwright harness.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Glossary (lines 557-587); AC-18 (line 849); Test Plan row AC-18 (line 875); AC-08 and Test Plan row AC-08 ("selects three assets", lines 839 and 865); Design > Page (viewer "retry button", lines 598-600); AC-07 (line 838); Test Plan row AC-09 ("every control with an accessible name", line 866)
+EVIDENCE: The AC-18 proof "reads every job-state label, form-field label, button label, banner text and the library heading on the sign-in screen and the main view and asserts each is one of the Glossary terms". "Download selected" needs a selection control on each library asset (the AC-08 journey "selects three assets"), and the AC-09 proof requires every control to have an accessible name. The Glossary has no term for that selection control, so any correct, labelled checkbox fails the proof. The viewer's error state also has "a retry button that imports it again" (line 599), while the Glossary defines "Retry" only as "The button that retries a failed or cancelled job" (line 584). The viewer button therefore either contradicts the Glossary meaning or carries a label that is not a Glossary term. This traces to the change made for R-7 F-01, which added only Prompts, Images and Access token.
+PROPOSAL: Add Glossary rows for every control the page shows, at least the per-asset selection control and the viewer's retry button (with its own meaning), and check the page for any other control (for example a viewer close button). Alternatively, limit the AC-18 proof to the categories AC-18 names and list them exactly.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan rows AC-02 (line 859), AC-03 (line 860), AC-08 (line 865), AC-12 (line 869) and AC-16 (line 873), which name `bun test app/server`; Design > Verification commands (unit test step and memory tests, lines 794-798); Test Plan row AC-20 (line 877)
+EVIDENCE: The memory tests live in `app/server/memory/` and need the built image (lines 797-798, 877). `bun test` takes positional arguments as path filters. With Bun 1.4.3 in a scratch tree holding `app/server/a.test.ts` and `app/server/memory/m.test.ts`, `bun test app/server` printed "Ran 2 tests across 2 files", so it ran the memory test too. The `bun run verify` step excludes `app/server/memory/**` explicitly, but the five Test Plan rows name plain `bun test app/server`. A reviewer who runs those proofs as written also starts the memory tests, which fail or measure a stale image when the image has not just been built.
+PROPOSAL: Name the proof command as `bun test app/server --path-ignore-patterns 'app/server/memory/**'` in those rows (or move the memory tests out of `app/server/`, for example to `app/memory/`), so each row runs only the tests it names.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Access token ("at least 32 random bytes encoded as base64url", line 510); Design > Container image (configuration "loaded strictly" including the access token, lines 657-660); Design > Verification commands (dev token `dev-token-not-for-production`, lines 811-812); AC-16 (line 847)
+EVIDENCE: The configuration is loaded strictly and its token is described as "at least 32 random bytes encoded as base64url". The committed development token `dev-token-not-for-production` is 28 base64url characters, which decode to 21 bytes. A loader that enforces the stated form refuses `dev/config.yaml`, so `bun run dev` never reports ready and the AC-16 readiness step fails. A loader that does not enforce it accepts any short token in production. Two implementers would build different loaders.
+PROPOSAL: Say whether the loader enforces the token format. If it does, make the development token meet it (for example a fixed 43-character base64url value that still reads as non-production) or name the exception for the token the fake-marker rule already guards.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (one image with one seeded data directory and one fake, lines 802-808); Test Plan rows AC-04 (`offline.spec.ts`, line 861), AC-07 (empty profile, line 864), AC-05 and AC-03 (`queue.spec.ts`), AC-08 (`export.spec.ts`) and AC-18 (`glossary.spec.ts`)
+EVIDENCE: Only the sign-in and token-rotation scenarios get their own container (lines 806-808). Every other journey shares one container, one seeded data directory and one fake. `offline.spec.ts` stops the fake and switches it to an incompatible version, which halts submission, cancel and collection for every journey running at the same time. The AC-07 and AC-04 empty-profile cases need a data directory with no jobs, which the shared seeded fixture is not. `queue.spec.ts` and `export.spec.ts` cancel, retry and download fixture jobs that `glossary.spec.ts` and `library.spec.ts` read. conventions/frontend-testing.md lines 78-79: "Mutating scenarios use dedicated owned identities/data so parallel tests and persistent demonstrations cannot overwrite each other."
+PROPOSAL: State which specs get their own container, data directory and fake (at least the offline and incompatible cases and the empty profile), or that those projects run serially, and that mutating journeys act only on rows they create.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (mount paths, `compose.yaml`, `current.json` and `.env`, lines 664-673; logon script, lines 712-718; deploy step 4, lines 700-705); Design > Restart, upgrade and rollback (rollback rewrites `.env`, lines 502-504); Design > Container image (`config.yaml` bind mount from `%LOCALAPPDATA%`, line 656)
+EVIDENCE: "`deploy.sh` resolves `%LOCALAPPDATA%` on `win-main` at deploy time", but the document never says where the resolved host paths go. `deploy.sh` "copies `compose.yaml`", and `.env` "holds `ASSET_STUDIO_IMAGE=<tag>`" and is rewritten from `current.json` by `deploy.sh`, `rollback.sh` and the logon script, none of which is said to know the paths. One implementer substitutes the paths into the copied `compose.yaml`. Another relies on Compose interpolating `${LOCALAPPDATA}` from the process environment, which then needs no resolution step. A third writes them to `.env` from `deploy.sh`, and the next rollback or logon rewrite of `.env` drops them, so the container no longer mounts the ComfyUI folders or `config.yaml`.
+PROPOSAL: Name the one place the host paths live (for example `${LOCALAPPDATA}` interpolation in `compose.yaml`, or a second env file only `deploy.sh` writes) and say that the `.env` rewrite by all three scripts preserves it.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope (README and `AGENTS.md` bullet naming bootstrap, seed, run, verify, deploy, rollback and clean commands, lines 202-204); AC-21 (line 852); Test Plan row AC-21 (line 878); Design > Verification commands (lines 792-828)
+EVIDENCE: AC-21 and its proof require both files to "name the seven commands", including bootstrap and clean. Design defines `bun run dev`, `bun run seed` (with `--profile empty` and `--reset`), `bun run verify`, `bun run verify:live`, `deploy.sh` and `rollback.sh`, but no bootstrap command and no clean command. It is not said whether clean is `bun run seed --reset`, a removal of `.dev-data/`, or something else, or whether bootstrap is `bun install` or a script. conventions/frontend-testing.md lines 28-29 require all five development commands. Two implementers would name different commands, and the AC-21 test cannot tell which one is "clean".
+PROPOSAL: Define the bootstrap and clean commands in Design (name, what they do and what clean deletes, within the fixture's ownership boundary), and have the AC-21 test assert those exact names.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Versioning and release path (`release` bullet, lines 738-745); Design > Container image (version and commit as build arguments, lines 648-649); AC-17 (line 848)
+EVIDENCE: At c499e52 `michielvha/docker-release-action`'s `action.yaml` has `registry` defaulting to `docker.io`, requires `username`, `password` and `project`, builds the tags as `${registry}/${username}/${project}:<version>`, and passes caller build arguments only through `build-args`. The document gives the action "that version and the required security profile" and nothing else. knowledge/container-release.md: "Supply the actual registry, credentials, project, computed version, context, and platforms required by the selected action." Without `registry: ghcr.io`, `username: vhco-pro` and `project: 3d-assets-gen` the image is not `ghcr.io/vhco-pro/3d-assets-gen`. Without `build-args` carrying the version and commit, the published image cannot report them, which AC-17 and the deploy health wait need.
+PROPOSAL: List the release call's remaining inputs: `registry: ghcr.io`, `username: vhco-pro`, `password: ${{ secrets.GITHUB_TOKEN }}`, `project: 3d-assets-gen`, `platforms: linux/amd64`, and `build-args` with the version and commit argument names the Dockerfile reads.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy step 3, "checks that the loaded image ID equals the pulled one", lines 697-698); Test Plan row AC-15
+EVIDENCE: On fedora-43, `docker info` reports Docker 29.9.3 with storage driver `overlayfs` and `driver-type io.containerd.snapshotter.v1`. With the containerd image store, `docker image inspect --format '{{.Id}}'` is the manifest or index digest. With the classic store it is the config digest, and `docker save | docker load` drops `RepoDigests`. Background records only that `docker load` on win-main printed "Loaded image: alpine:3.22" (line 154). It does not record which ID win-main reports for a loaded image, and an SSH `docker info` against win-main did not return within 60 seconds during this review. The document does not say which identity is compared, so the check can fail every correct deploy when the two hosts use different image stores, or compare a value that proves nothing.
+PROPOSAL: Name the identity the check compares (for example the image config digest from `docker image inspect --format '{{.Id}}'` under a stated store, or the config digest read from the saved archive) and cite a measured save and load between fedora-43 and win-main that shows the values match.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Access token (rate limit, lines 525-527); AC-12 (line 843); Test Plan row AC-12 (line 869)
+EVIDENCE: "Over the limit, those requests get 429", where "those requests" are wrong sign-ins, wrong bearer tokens and cookies that do not match. A correct token from a limited client is still accepted, so a guessing client sees 429 for a wrong token and success for the right one. That is the same information it gets from 401, so the limit does not slow guessing. Read the other way, every authentication request from a limited client gets 429, which also locks out a correct sign-in from that device for up to 60 seconds. The AC-12 proof never sends a correct token while the client is over the limit, so both readings pass it.
+PROPOSAL: State whether a correct sign-in or bearer token from a client over the limit gets 429 or succeeds, and add that case to the AC-12 auth tests. If correct tokens still succeed, say in Design that the token's entropy, not the limit, is the defence against guessing.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (pending job with an attempt ID, lines 445-447); Design > Submission, concurrency and idempotency (30-second wait after a post, lines 388-394); AC-05 (line 836); Test Plan row AC-05 (line 862)
+EVIDENCE: A `pending` job can hold an attempt whose post timed out less than 30 seconds ago, the case step 2 waits for because ComfyUI may still be accepting the prompt (lines 388-390), and ComfyUI 0.46.2 does not reject an unknown ID on cancel ("answers `{"cancelled": false}` for a finished or unknown ID", line 133). The cancel path calls the per-job cancel, gets `{"cancelled": false}` because ComfyUI has not queued the prompt yet, and marks the job `cancelled`. ComfyUI then accepts the late post and runs it for several minutes ahead of later jobs, and its results are ignored. The AC-05 proof covers only a pending job whose prompt the fake has already queued.
+PROPOSAL: Apply the same 30-second rule to cancel: a `pending` job whose recorded post time is less than 30 seconds old keeps its flag until the attempt shows up or the window passes, then is cancelled. Add a fake that accepts the post after the cancel call to the AC-05 tests.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Export (lines 612-619); Design > HTTP API (`GET /api/exports/<export id>`, line 552); Design > Cancel, retry and delete (Delete, lines 465-470)
+EVIDENCE: `POST /api/exports` checks the selection and issues a link that stays valid for five minutes. Delete is allowed on any `done` job at any time. The document covers a file deleted while a download is streaming (lines 468-470), but not a job deleted, or its files gone, after the link was issued and before the GET starts. One implementer skips the missing asset and writes a `manifest.json` that no longer matches the selection. Another answers an error, and because the page navigates the browser to the link, the friend lands on a JSON error page instead of the app. The two size limits were checked at POST time and could also change.
+PROPOSAL: Say what `GET /api/exports/<export id>` does when a selected job no longer exists or its files are missing (for example answer 409 before streaming, with the page showing the message) and add that case to the AC-08 export tests.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (presets table Seed row and "A random seed is drawn uniformly", lines 276-279); Design > Glossary ("Seed: The seed of the first variant", line 574); Context > Owner summary ("an optional seed", line 60)
+EVIDENCE: With the seed field empty, "A random seed is drawn uniformly from 0 to 4294967295", but the document does not say how many are drawn: one per batch (every prompt line then shares it, variant k using seed + k), one per prompt line, or one per job. It also does not say which seed an image batch with an empty field uses for each image. Two implementers would produce different seeds for the same batch, and the manifest's `seed` values would differ.
+PROPOSAL: State the unit a random seed is drawn for (for example one per prompt line or image, with variant k using that seed + k modulo 2^32), and assert it in a tracker or API test.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Background (per-job cancel citation "lines 1040-1079", line 133)
+EVIDENCE: In the installed `server.py` on win-main, `@routes.post("/api/jobs/{job_id}/cancel")` is at line 1063 and its `return web.json_response({"cancelled": cancelled})` at line 1079. Lines 1040-1062 belong to the `GET /api/jobs/{job_id}` handler, which starts at line 1011.
+PROPOSAL: Cite lines 1063-1079.
+
+FINDING: F-16
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("One stored review record keeps a `fedora-43` home path, which the owner accepted", lines 80-81); Review Log > R-5 F-10 (line 1572); Review Log > R-7 F-13 (line 1774)
+EVIDENCE: The fedora-43 home path appears in two stored records: R-5 F-10's EVIDENCE (line 1572) and R-7 F-13's EVIDENCE (line 1774), which quotes it again. The sentence was added by the previous revision for R-7 F-13.
+PROPOSAL: Say "Two stored review records keep the same `fedora-43` home path", and confirm the owner's acceptance covers both.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Verification commands ("the golden check" in `bun run verify`, lines 794-800; "Bun and Docker are the only dependencies; Python is needed only for `golden:check`", lines 818-819); Design > Pipeline port and combined graphs (lines 281-286)
+EVIDENCE: The unit tests already compare against the committed golden files, so "the golden check" in the `bun run verify` list is `bun run golden:check`, which regenerates them with `python3 -I`. Python is then needed for the aggregate verify command, not only for a separate check, and frontend-testing.md lines 32-33 ask the README to state the needed dependencies.
+PROPOSAL: Say that `bun run verify` needs `python3` for its golden check, or name the golden check in `verify` as the committed-file comparison and run `golden:check` separately.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (acceptance "does not authorize ... touching ComfyUI beyond deleting the app's own files in its input and output folders", lines 96-98); Design > Deployment and exposure (deploy step 4 "Creates the two ComfyUI `asset-studio` folders when missing", line 700)
+EVIDENCE: Deploy creates `input\asset-studio` and `output\asset-studio` inside ComfyUI's shared folders, which the summary's limit, read literally, does not cover.
+PROPOSAL: Say the acceptance also covers creating the two `asset-studio` subfolders in ComfyUI's input and output folders.
 
 ## Sources
 
