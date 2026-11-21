@@ -1,7 +1,8 @@
 ---
-status: planned
-status_description: "Accepted by the owner on 2026-11-21 at review R-9; ready for tasks."
+status: in-progress
+status_description: "Claimed on 2026-11-21; being implemented on feat/asset-studio."
 issue: null
+branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
   - app/
