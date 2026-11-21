@@ -50,10 +50,12 @@ test("health is public and reveals only version, commit and ComfyUI state", asyn
 });
 
 test("every protected route refuses missing, wrong and forged credentials and accepts the bearer token", async () => {
-  for (const [method, path] of PROTECTED) {
-    expect((await call(method, path)).status).toBe(401);
-    expect((await call(method, path, { authorization: "Bearer wrong" })).status).toBe(401);
-    expect((await call(method, path, { cookie: `session=${String(Math.floor(now / 1000))}.forged` })).status).toBe(401);
+  // Each route counts its failures against its own forwarded client, so the limiter stays out of the way.
+  for (const [i, [method, path]] of PROTECTED.entries()) {
+    const xff = { "x-forwarded-for": `100.64.1.${String(i)}` };
+    expect((await call(method, path, xff)).status).toBe(401);
+    expect((await call(method, path, { ...xff, authorization: "Bearer wrong" })).status).toBe(401);
+    expect((await call(method, path, { ...xff, cookie: `session=${String(Math.floor(now / 1000))}.forged` })).status).toBe(401);
     expect((await call(method, path, { authorization: `Bearer ${TEST_TOKEN}` })).status).not.toBe(401);
   }
 });
