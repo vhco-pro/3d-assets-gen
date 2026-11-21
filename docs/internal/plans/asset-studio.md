@@ -1,6 +1,6 @@
 ---
 status: draft
-status_description: "R-7 findings and the owner's answers applied; waiting for a new independent spec review."
+status_description: "R-8 findings, the owner's answers and the agreed trim applied; waiting for a new independent spec review."
 issue: null
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
@@ -77,8 +77,8 @@ published image as the non-root user with a read-only root filesystem; deploy an
 real generations.
 
 The repository becomes public `vhco-pro/3d-assets-gen` under Apache-2.0, after the local history was
-scrubbed of `win-main`'s tailnet address, its Windows user name and its Windows paths. One stored review
-record keeps a `fedora-43` home path, which the owner accepted. It gets the organisation's
+scrubbed of `win-main`'s tailnet address, its Windows user name and its Windows paths. Two stored review
+records keep the same `fedora-43` home path, which the owner accepted. It gets the organisation's
 CodeQL and Scorecard workflows, a Renovate configuration, and the dependency graph, Dependabot alerts,
 secret scanning, push protection and automatic branch deletion. Images are published to a GHCR package,
 which is switched to public after the first publication (an irreversible GitHub setting the owner
@@ -94,8 +94,8 @@ the package public, merging the feature PR once CI and an independent implementa
 review pass, and deploying to `win-main`, including two scheduled tasks there: one that starts Docker
 Desktop in the owner's session for deploys, and one that, at each logon, brings the app back and
 reloads its image if it is missing. It does not authorize changing tailnet ACLs, sharing the node, changing Docker
-Desktop's or WSL's settings, or touching ComfyUI beyond deleting the app's own files in its input and
-output folders.
+Desktop's or WSL's settings, or touching ComfyUI beyond creating the two `asset-studio` subfolders in its input and output
+folders and deleting the app's own files there.
 
 ### Background
 
@@ -130,7 +130,7 @@ Tailscale (`HANDOFF.md:45-47`). ComfyUI listens only on localhost (`scripts/star
   and otherwise answers 400 with `invalid_prompt_id` (lines 1180-1196);
   `POST /api/jobs/{job_id}/cancel` cancels one job whether pending or running, interrupts only if that
   job is still the one running, and answers `{"cancelled": false}` for a finished or unknown ID
-  (lines 1040-1079); a bare `POST /interrupt` without a `prompt_id` interrupts whatever is running
+  (lines 1063-1079); a bare `POST /interrupt` without a `prompt_id` interrupts whatever is running
   (lines 1287-1290).
 - Combined prompts (the image graph plus a mesh graph rewired as Design describes, built from the
   Python builders and posted with a client `prompt_id` through an SSH tunnel) both succeeded, and
@@ -226,6 +226,7 @@ Bun runs the server, the tests and the build, as `conventions/coding.md` require
 tooling. The code lives under `app/`:
 
 - `app/server/` holds the HTTP server (`Bun.serve`), the job store, the tracker and the ComfyUI client.
+- `app/memory/` holds the memory tests, which need the built image.
 - `app/pipeline/` holds the graph builders, the combiner and the preset definitions.
 - `app/web/` holds the React page and its `index.html`; it is the Vite root, configured by
   `vite.config.ts` at the repository root. The page uses TanStack Query for server state and the
@@ -275,8 +276,9 @@ Presets map to builder inputs in `app/pipeline/presets.ts`:
 | Game-asset style | on (default), off | appends the suffix at `scripts/generate_3d.py:23` |
 | Seed | empty (random) or 0 to 4294967295 | variant k, counted from 0, uses seed + k modulo 2^32 |
 
-Image size is fixed at 1024 and Hunyuan3D's octree at 256. A random seed is drawn uniformly from
-0 to 4294967295.
+Image size is fixed at 1024 and Hunyuan3D's octree at 256. With the seed field empty, one random seed
+is drawn uniformly from 0 to 4294967295 for each prompt line or image, and variant k of that line uses
+that seed + k modulo 2^32.
 
 The graph test checks the builders against the Python script. A dump helper in `app/pipeline/` loads
 `scripts/generate_3d.py` by path under `python3 -I` and prints each builder's graph as JSON for a fixed
@@ -299,8 +301,9 @@ last error text, so one bad job cannot hold up the queue. The count resets on an
 on retry and on every lost-job resubmission.
 
 The app requires ComfyUI 0.46.2 or newer, the first version known to accept a client `prompt_id` and
-to offer the per-job cancel. The tracker reads `comfyui_version` from `/system_stats` at start, after
-every period in which ComfyUI was unreachable, and on every tick while ComfyUI is incompatible. While the
+to offer the per-job cancel. The tracker reads `/system_stats`, and with it `comfyui_version`, at the start
+of every tick before any other step, so a version change is seen within one tick whether or not
+ComfyUI was unreachable in between. While the
 version is older or missing, the tracker runs none of its tick steps: it submits, reconciles, cancels and
 times out nothing, so every job keeps its state. `/api/health` then reports ComfyUI as incompatible
 together with the version it found (or none), and the page shows that in its banner.
@@ -443,8 +446,11 @@ ComfyUI's order.
 Cancel sets the cancel-requested flag. On the next tick the tracker acts on it:
 
 - A `pending` job without an attempt ID becomes `cancelled` without contacting ComfyUI.
-- A `pending` job with an attempt ID gets `POST /api/jobs/<prompt id>/cancel` first, which is a no-op
-  when ComfyUI does not know the ID, and then becomes `cancelled`.
+- A `pending` job with an attempt ID whose recorded post time is less than 30 seconds old keeps its
+  flag until the attempt shows up in ComfyUI's queue or history (then it is cancelled as a `submitted`
+  job below) or the 30 seconds pass.
+- A `pending` job with an attempt ID whose post time is older than that gets `POST /api/jobs/<prompt id>/cancel`
+  first, which is a no-op when ComfyUI does not know the ID, and then becomes `cancelled`.
 - When the per-job cancel is unreachable or gets a server error, for a `pending` or a `submitted` job,
   the job keeps its state and its flag, and the tracker tries again on a later tick.
 - For a `submitted` job, the tracker first checks the history. When the attempt already finished with
@@ -507,7 +513,8 @@ volume, and ComfyUI may still run their prompts, which the restored app ignores.
 
 ### Access token
 
-The configuration file holds one access token, at least 32 random bytes encoded as base64url. The deploy
+The configuration file holds one access token, at least 32 random bytes encoded as base64url without
+padding (43 or more characters from the base64url alphabet); the loader refuses any other value. The deploy
 script generates it on the first install and never prints it or copies it off `win-main`. The owner
 reads it with `ssh win-main` from `config.yaml` and gives it to the friend out of band.
 `scripts/deploy/deploy.sh --rotate-token` writes a new token and restarts the app. `bun run verify:live`
@@ -524,7 +531,10 @@ commit, ComfyUI's state (reachable, offline or incompatible) and the ComfyUI ver
 
 Every failed authentication counts toward one limit of 10 in any sliding 60-second window per client: a wrong token on
 `POST /api/session`, a wrong bearer token or a cookie that does not match on any protected route. Over
-the limit, those requests get 429 until fewer than 10 failures fall within the last 60 seconds. The client address is the last
+the limit, failed attempts get 429 instead of 401 until fewer than 10 failures fall within the last 60
+seconds. A correct token or cookie is always accepted, even from a client over the limit, so nobody is
+locked out; the token's 256 bits of randomness, not the limit, are what stop guessing, and the limit
+only keeps a misbehaving client from flooding the logs. The client address is the last
 `X-Forwarded-For` value when the socket peer is trusted and sends that header, and the socket address
 otherwise, including a trusted peer without the header. Trusted peers
 are loopback addresses and the container's default gateway, which the server reads from
@@ -556,7 +566,7 @@ Prompts are 1 to 500 characters after trimming; empty lines are dropped.
 
 ### Glossary
 
-The page uses exactly these terms for what it shows:
+The page uses exactly these terms for job states, preset fields, banners and the library heading:
 
 | Term on the page | Meaning |
 | --- | --- |
@@ -574,17 +584,7 @@ The page uses exactly these terms for what it shows:
 | Seed | The seed of the first variant |
 | ComfyUI offline | The banner when ComfyUI does not answer |
 | ComfyUI incompatible | The banner when ComfyUI is older than 0.46.2 or reports no version |
-| Library | The list of done assets |
-| Access token | The sign-in field for the shared token |
-| Sign in | The sign-in button |
-| Prompts | The text field for a prompt batch, one prompt per line |
-| Images | The file field for an image batch |
-| Generate | The button that submits a batch |
-| Cancel | The button that cancels a job |
-| Retry | The button that retries a failed or cancelled job |
-| Delete | The button that deletes a finished job |
-| Download | The button that downloads one asset's GLB |
-| Download selected | The button that downloads a zip of the selected assets |
+| Library | The heading of the list of done assets |
 
 ### Page
 
@@ -616,7 +616,10 @@ library at most 90 characters per line, no label or button text clipped, and no 
 answers `{"url": "/api/exports/<export id>"}`, where the export ID is a random UUID that expires after
 five minutes or one use. Fetching it still needs a valid session cookie or bearer token, like every
 protected route; it is not tied to the particular session that created it. The page sets the browser's location
-to that URL, so the browser downloads the zip natively without holding it in memory.
+to that URL, so the browser downloads the zip natively without holding it in memory. Before it streams
+anything, `GET /api/exports/<export id>` checks again that every selected job exists, is `done` and has
+its files; when one does not, it answers with a redirect to `/?export=gone`, and the page shows that the
+selection changed and asks for a new export.
 
 File names use a slug and a short ID. The slug is the prompt, or for an image job the upload's file name
 without its extension, lowercased, with every run of characters outside `a-z` and `0-9` replaced by one
@@ -665,8 +668,10 @@ three limits.
 `pull_policy: never`, the port published only on `127.0.0.1:8790`, the mounts above, `read_only: true`,
 `restart: unless-stopped` and a 1 GiB memory limit. The two ComfyUI mounts come from
 `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\input\asset-studio` and `...\output\asset-studio`, the
-folders the running ComfyUI uses (Background); `deploy.sh` resolves `%LOCALAPPDATA%` on `win-main` at
-deploy time, so no user name or local path is committed. Compose runs on `win-main` from
+folders the running ComfyUI uses (Background). `compose.yaml` writes these and the `config.yaml` mount
+as `${LOCALAPPDATA}/...`, which Compose interpolates from the owner's environment on `win-main`, so no
+user name or local path is committed and no script writes the paths; `.env` holds only
+`ASSET_STUDIO_IMAGE`. Compose runs on `win-main` from
 `%LOCALAPPDATA%\AssetStudio\`, where `deploy.sh` copies `compose.yaml`. Next to it, `current.json` holds
 the version, tag and digest that should run, and `.env` holds `ASSET_STUDIO_IMAGE=<tag>` derived from
 it. `deploy.sh`, `rollback.sh` and the logon script all write `.env` from `current.json`, so Compose
@@ -695,7 +700,9 @@ Renovate custom manager in `renovate.json` updates. They never run a preinstalle
    type `https://spdx.dev/Document/v2.3` that the action's `actions/attest` step records for its SPDX
    SBOM.
 3. Tags the verified image `ghcr.io/vhco-pro/3d-assets-gen:<version>`, streams it with `docker save`
-   over SSH into `docker load` on `win-main`, and checks that the loaded image ID equals the pulled one. Registry pulls over SSH fail on `win-main` (Background), so the
+   over SSH into `docker load` on `win-main`, and checks that `docker image inspect --format '{{json .RootFS.Layers}}'`
+   gives the same layer diff IDs on both hosts. Image IDs can differ between Docker's classic and
+   containerd image stores, while the uncompressed layer diff IDs do not. Registry pulls over SSH fail on `win-main` (Background), so the
    image never comes from a pull there.
 4. Creates the two ComfyUI `asset-studio` folders when missing, copies `compose.yaml` and
    `start-asset-studio.ps1`, registers `AssetStudio-Logon` when missing, and writes `config.yaml` with a
@@ -736,7 +743,10 @@ the trigger and concurrency layout of its `tag-after-checks` example:
   `contents: write` and `pull-requests: read`, which the reusable workflow needs to find the labelled
   PR.
 - `release` runs only when `version` pushed a tag. It calls `michielvha/docker-release-action` at `v2`
-  (`c499e52a1a05e5bdd8cf03ba19a423d4c7ec25e3`) with that version and the required security profile
+  (`c499e52a1a05e5bdd8cf03ba19a423d4c7ec25e3`) with `registry: ghcr.io`, `username: vhco-pro`,
+  `password: ${{ secrets.GITHUB_TOKEN }}`, `project: 3d-assets-gen`, `platforms: linux/amd64`,
+  `build-args` carrying `APP_VERSION` and `APP_COMMIT` (the build arguments the Dockerfile reads), that
+  version, and the required security profile
   (`trivy-scan`, `trivy-severity: HIGH,CRITICAL`, `trivy-exit-code: '1'`, `cosign-sign`, `sbom`,
   `attest-provenance`, `attest-sbom`). Only after that step succeeds, scan included, does the next step
   create a GitHub Release for the tag (marked prerelease for a prerelease version) with one asset,
@@ -792,10 +802,10 @@ repository is in the `vhco-renovate` installation.
 ### Verification commands
 
 `bun run verify` runs, in this order: the type check; lint; unit tests (`bun test app
---path-ignore-patterns 'app/e2e/**' --path-ignore-patterns 'app/server/memory/**'` plus
+--path-ignore-patterns 'app/e2e/**' --path-ignore-patterns 'app/memory/**'` plus
 `bun test ./.github` for the workflow tests, since Bun's discovery skips dot-directories and would
-otherwise load the Playwright specs); the golden check; the production build and size check; the local
-image build with its start check; the memory tests (`bun test ./app/server/memory`) against that image;
+otherwise load the Playwright specs); the golden check (`bun run golden:check`, which needs `python3`); the production build and size check; the local
+image build with its start check; the memory tests (`bun test ./app/memory`) against that image;
 the `bun run dev` readiness check; the docs check (AC-21); and the Playwright suite against that image
 with the fake ComfyUI.
 
@@ -803,27 +813,37 @@ The Playwright suite starts the image with a host data directory and the fake's 
 folders bind-mounted, all created by the harness and given to UID 65532 with `chmod 0777` on the
 temporary folders, so the container can write and delete there. It seeds by running the image's own
 `seed` command (the executable's subcommand behind `bun run seed`) against that data directory before
-the server starts, and the fake reads the seeded prompt IDs from the same data directory at start. The
-sign-in and token-rotation scenarios run in a separate Playwright project against their own container
-instance, so the failures they cause never share a rate-limit budget with the other journeys. `bun run verify:live` runs the real generations against a deployed app and is never part
+the server starts. The fake looks up fixture prompt IDs in the data directory's database on every
+`/queue` and `/history` request, so it serves seeded `submitted` jobs as queued or running whether the
+seed ran before or after the fake started.
+
+Each of these Playwright projects runs against its own container, data directory and fake: the sign-in
+and token-rotation scenarios (their failures consume the rate-limit budget), the offline and
+incompatible-version scenarios (they stop or change the fake), and the empty-profile scenarios. The
+remaining journeys share one seeded container; those that change data (submit, cancel, retry, delete)
+act only on jobs they created in the same test. `bun run verify:live` runs the real generations against a deployed app and is never part
 of CI.
 
 `bun run dev` starts the fake ComfyUI on `127.0.0.1:8189` and the server on `127.0.0.1:8790` with the
-committed `dev/config.yaml`, whose token is `dev-token-not-for-production`, with the data directory
+committed `dev/config.yaml`, whose token is `ZGV2LXRva2VuLW5vdC1mb3ItcHJvZHVjdGlvbi0wMDA` (base64url of
+`dev-token-not-for-production-000`, 32 bytes, so it passes the loader), with the data directory
 `.dev-data/data` and the ComfyUI folders `.dev-data/comfy/input/asset-studio` and
 `.dev-data/comfy/output/asset-studio` (`.dev-data/` is ignored by Git). The fake ComfyUI writes its
 outputs and uploads under `.dev-data/comfy/`, and the tests give each run its own temporary copy of that
 layout. It reports ready once `/api/health` answers with ComfyUI reachable. The server refuses to
 start with that token unless the ComfyUI URL answers the fake's marker endpoint
-`GET /asset-studio-fake`, so the development token can never serve a real ComfyUI. Bun and Docker are
-the only dependencies; Python is needed only for `golden:check`.
+`GET /asset-studio-fake`, so the development token can never serve a real ComfyUI. Bun, Docker and
+`python3` (for the golden check) are the only dependencies.
+
+`bun run bootstrap` runs `bun install --frozen-lockfile` and installs the Playwright browsers.
+`bun run clean` deletes `.dev-data/` and the ignored `.artifacts/` test output folder and nothing else.
 
 `bun run seed` runs the executable's `seed` subcommand, which loads the development fixture into the
 configured data directory and refuses to run unless the configured ComfyUI URL answers that marker
 endpoint. Fixture jobs have fixed UUIDs and the fixture flag, and a rerun replaces those rows and
 their files and leaves every other row alone. The fixture holds done jobs with
 fixture GLBs and thumbnails, a failed job, a cancelled job, and `submitted` jobs whose prompt IDs the
-fake loads at start as queued and running prompts that never finish. The tracker's timeout skips
+fake serves as queued and running prompts that never finish. The tracker's timeout skips
 flagged jobs, so they stay stable. `bun run seed --profile empty` loads no jobs. `bun run seed --reset`
 deletes only flagged fixture rows and their files.
 
@@ -846,36 +866,36 @@ deletes only flagged fixture rows and their files.
 - [ ] AC-15: Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; and an executable refuses to start on a database with a newer schema version.
 - [ ] AC-16: The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
 - [ ] AC-17: The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
-- [ ] AC-18: The page labels job states, form fields, banners and the library with exactly the terms in the Glossary.
+- [ ] AC-18: The page labels job states, the preset fields (Engine, Detail, Texture, Variants, Game-asset style, Seed), the two banners and the library heading with exactly the terms in the Glossary.
 - [ ] AC-19: The command-line tools print labelled status lines, add no colour or cursor control when `NO_COLOR` is nonempty or the stream is not a terminal, offer an ASCII mode, and exit non-zero whenever a step failed.
 - [ ] AC-20: A 25-image batch at the 200 MiB cap, two such batches at once, and an export of 100 assets each complete without the container being killed for memory under its 1 GiB limit, and the server's anonymous memory stays below 512 MiB.
-- [ ] AC-21: The README names the bootstrap, seed, run, verify, deploy, rollback and clean commands, how readiness is detected, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
+- [ ] AC-21: The README names `bun run bootstrap`, `bun run dev`, `bun run seed`, `bun run verify`, `scripts/deploy/deploy.sh`, `scripts/deploy/rollback.sh` and `bun run clean`, how readiness is detected, the dependencies, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
 
 ## Test Plan
 
 | Criterion | Proof |
 | --- | --- |
 | AC-01 | `bun test app/pipeline` compares each builder with the committed golden graphs and asserts the combiner's renumbering, the dropped `LoadImage`, every rewired input, the `asset-studio/<job id>/<attempt id>` prefix on every save node, and the thumbnail branch's nodes and inputs; `bun run golden:check` regenerates the golden files from the Python script with `python3 -I` and fails on any difference. |
-| AC-02 | `bun test app/server` API tests for each rejection case (asserting the message names the limit, no rows, and empty staging and uploads trees), a non-UUID `X-Batch-Id` such as `../x` (400, nothing written), the job counts, a 25-image batch with exactly 200 MiB of image bytes accepted, a batch with 200 MiB plus one byte of images refused with the app's 413 message, two concurrent batches that together exceed 100 (exactly one accepted), a repeated image batch ID sent again with a different multipart boundary (200, same batch, the first batch's upload files byte-identical), two concurrent requests with the same image batch ID (one creates the batch, the other answers 200, uploads intact), a reused ID with different content (409, uploads intact), and a JSON prompt batch over 1 MiB (413 with the app's message). Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) in Chromium, an image batch in Chromium and Firefox, then each invalid case, against the fake ComfyUI. |
-| AC-03 | `bun test app/server` tracker tests against the fake ComfyUI: each job reaches the fake as one `/prompt` call with a UUID `prompt_id` and a graph matching the combiner with that attempt's prefix; two batches finish in submission order with three files on disk; a fake execution error ends `failed` with its message; a fake 400 from `/prompt` and from `/upload/image` each end that job `failed` with the fake's error text while the next job is still submitted; a fake that answers one job's `/prompt` with 500 every time fails that job after the third answer while the next job is submitted and finishes. Playwright `queue.spec.ts` watches a job reach `done`, reloads and checks it persists. |
-| AC-04 | Tracker tests: stopping the fake ComfyUI with jobs pending and submitted leaves every state unchanged and `/api/health` reports offline, and restarting it lets the jobs finish; a fake that switches to `comfyui_version` 0.46.1 while staying up, and one that restarts reporting 0.46.1 with its queue emptied, each make `/api/health` report incompatible with that version, leave every job state unchanged and receive no `/prompt` or cancel call, until the fake reports 0.46.2 again and the jobs finish. Playwright `offline.spec.ts` checks the banner appears and clears for offline with unfinished jobs, for offline on the empty profile, and for an incompatible version. |
-| AC-05 | Tracker tests with a fake that keeps finished, failed and cancelled prompts in its history: cancel pending without an attempt ID (the fake receives no call); cancel pending with an attempt ID the fake has queued (the fake receives `POST /api/jobs/<that id>/cancel`); cancel queued and cancel running (the fake receives the per-job cancel for that prompt ID and never `/interrupt`); cancel requested after the fake already finished the prompt (job ends `done`, no cancel call); the fake finishes the prompt between the history read and the cancel and answers `{"cancelled": false}` (job ends `done`); retry after a failure and retry after a cancel (the fake receives a new `/prompt` with a different `prompt_id` and prefix, the same seed and preset values, the cancel-requested flag, server-error count, started time and error message are cleared, and the job ends `done` without being cancelled again); retry after a timeout on a faked clock (the new attempt is not cancelled before it has run 15 minutes); retry at 100 unfinished jobs (refused with a message); a per-job cancel that is unreachable or answers 500 leaves the job in its state with the flag set, the job is not submitted meanwhile, and the next tick's successful cancel ends it `cancelled`. Playwright `queue.spec.ts` cancels and retries through the page. |
+| AC-02 | `bun test app/server` (which no longer contains the memory tests) API tests for each rejection case (asserting the message names the limit, no rows, and empty staging and uploads trees), a non-UUID `X-Batch-Id` such as `../x` (400, nothing written), the job counts, a 25-image batch with exactly 200 MiB of image bytes accepted, a batch with 200 MiB plus one byte of images refused with the app's 413 message, two concurrent batches that together exceed 100 (exactly one accepted), a repeated image batch ID sent again with a different multipart boundary (200, same batch, the first batch's upload files byte-identical), two concurrent requests with the same image batch ID (one creates the batch, the other answers 200, uploads intact), a reused ID with different content (409, uploads intact), and a JSON prompt batch over 1 MiB (413 with the app's message). Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) in Chromium, an image batch in Chromium and Firefox, then each invalid case, against the fake ComfyUI. |
+| AC-03 | `bun test app/server` (which no longer contains the memory tests) tracker tests against the fake ComfyUI: each job reaches the fake as one `/prompt` call with a UUID `prompt_id` and a graph matching the combiner with that attempt's prefix; two batches finish in submission order with three files on disk; a fake execution error ends `failed` with its message; a fake 400 from `/prompt` and from `/upload/image` each end that job `failed` with the fake's error text while the next job is still submitted; a fake that answers one job's `/prompt` with 500 every time fails that job after the third answer while the next job is submitted and finishes. Playwright `queue.spec.ts` watches a job reach `done`, reloads and checks it persists. |
+| AC-04 | Tracker tests: stopping the fake ComfyUI with jobs pending and submitted leaves every state unchanged and `/api/health` reports offline, and restarting it lets the jobs finish; a fake that switches to `comfyui_version` 0.46.1 while staying up, and one that restarts within a single tick reporting 0.46.1 with its queue emptied, each make `/api/health` report incompatible with that version, leave every job state unchanged and receive no `/prompt` or cancel call, until the fake reports 0.46.2 again and the jobs finish. Playwright `offline.spec.ts` checks the banner appears and clears for offline with unfinished jobs, for offline on the empty profile, and for an incompatible version. |
+| AC-05 | Tracker tests with a fake that keeps finished, failed and cancelled prompts in its history: cancel pending without an attempt ID (the fake receives no call); cancel pending with an attempt ID the fake has queued (the fake receives `POST /api/jobs/<that id>/cancel`); cancel queued and cancel running (the fake receives the per-job cancel for that prompt ID and never `/interrupt`); cancel requested after the fake already finished the prompt (job ends `done`, no cancel call); the fake finishes the prompt between the history read and the cancel and answers `{"cancelled": false}` (job ends `done`); retry after a failure and retry after a cancel (the fake receives a new `/prompt` with a different `prompt_id` and prefix, the same seed and preset values, the cancel-requested flag, server-error count, started time and error message are cleared, and the job ends `done` without being cancelled again); retry after a timeout on a faked clock (the new attempt is not cancelled before it has run 15 minutes); retry at 100 unfinished jobs (refused with a message); cancel of a pending job whose post timed out 5 seconds earlier, with a fake that accepts the post 10 seconds after the cancel request (the job keeps its flag, the late prompt appears, receives the per-job cancel, and the job ends `cancelled`); a per-job cancel that is unreachable or answers 500 leaves the job in its state with the flag set, the job is not submitted meanwhile, and the next tick's successful cancel ends it `cancelled`. Playwright `queue.spec.ts` cancels and retries through the page. |
 | AC-06 | Restart tests kill and restart the server against the fake in these states: prompt finished in history (job ends `done`); prompt still queued (job stays submitted and later finishes); prompt unknown after a fake restart that empties queue and history (job resubmitted with a new `prompt_id` and prefix, and on the third loss `failed`); attempt ID stored with the prompt already posted but the job still `pending` (the job becomes `submitted`; the fake receives one `/prompt` call in total); the fake accepts a prompt 15 seconds after the client's 10-second timeout, later than the next tick (the job becomes `submitted` and the fake receives one `/prompt` call in total); the fake reports the previous attempt's files missing (the resubmitted prompt carries a different prefix). Fault-injection tests kill the server after the first file is written into the collection directory, and again after the rename and before the `done` update; each time the next tick ends with a `done` row and three complete files. A timeout test on a faked clock has the fake finish the prompt just before the per-job cancel, which answers `{"cancelled": false}`, and asserts the job ends `done`. Sweep tests: kill the server after the `done` update and before ComfyUI cleanup, and after a batch's uploads rename and before its commit, restart immediately, and assert the fake's `asset-studio` folders and `/data/uploads/` hold nothing for those jobs after the start sweep. |
 | AC-07 | Playwright `library.spec.ts` in Chromium and Firefox: on the seeded fixture, thumbnails load from `/api/assets/<id>/thumb`, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; with the viewer chunk blocked, the error state and retry button appear, and after unblocking, retry loads the viewer; on the empty profile, the library shows its empty state. |
-| AC-08 | Playwright `export.spec.ts` in Chromium and Firefox downloads one GLB and checks its glTF binary header, then selects three assets, starts the export, receives the browser download from the one-time link, and checks its six file names follow the slug and short ID rule and that `manifest.json` matches the documented schema with the six files and their settings; a fixture prompt with only non-Latin characters downloads as `asset-<short id>.glb`; a second request to the same link answers 404. `bun test app/server` export tests: 101 assets refused with 413 and the split message, a selection whose fixture files add up to just over 2 GiB (sparse files) refused the same way, a link fetched without credentials refused with 401, and a link older than five minutes refused (clock faked). |
+| AC-08 | Playwright `export.spec.ts` in Chromium and Firefox downloads one GLB and checks its glTF binary header, then selects three assets, starts the export, receives the browser download from the one-time link, and checks its six file names follow the slug and short ID rule and that `manifest.json` matches the documented schema with the six files and their settings; a fixture prompt with only non-Latin characters downloads as `asset-<short id>.glb`; a second request to the same link answers 404. `bun test app/server` (which no longer contains the memory tests) export tests: 101 assets refused with 413 and the split message, a selection whose fixture files add up to just over 2 GiB (sparse files) refused the same way, a link fetched without credentials refused with 401, a link whose selection lost a job after it was issued redirected to `/?export=gone` before any byte of zip is sent, and a link older than five minutes refused (clock faked). |
 | AC-09 | Playwright `layout.spec.ts` runs the sign-in, submit, queue and library journeys in Chromium at 320x568, 390x844, 390x667, 844x390, 768x1024, 1024x768, 1280x720 and 1440x900, and at 640x450 as the reflow equivalent of 1280x900 at 200 percent zoom: no horizontal overflow, body text at least 14 px, prompt lines at most 90 characters, no label or button whose `scrollWidth` exceeds its `clientWidth`, primary actions inside the viewport, every control with an accessible name, and sign-in and submit completed by keyboard alone. The library and viewer journey also runs with `reducedMotion: 'reduce'` and asserts the viewer has no auto-rotate and interpolation off. A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots. All screenshots are reviewed and the review result is recorded in the evidence. |
 | AC-10 | Manual procedure after each deploy, run from `fedora-43`: `curl https://win-main.<tailnet>.ts.net/api/health` returns the deployed version and commit; `curl --connect-timeout 5` to `win-main`'s tailnet address on ports 8790 and 8188 fails to connect. |
 | AC-11 | `bun run verify:live` against the deployed URL, with the token read over SSH into memory, submits `a small wooden crate` at the default TRELLIS.2 preset (10k, 2048) and `a stone pillar` with Hunyuan3D at 10k, waits for both to reach `done`, downloads both GLBs, checks both parse as glTF and the TRELLIS.2 one has at least one material with a base colour texture, then lists ComfyUI's `output/asset-studio/` and `input/asset-studio/` over SSH every ten seconds and passes once no entry for either job remains, failing if any remains after two minutes. |
-| AC-12 | `bun test app/server` auth tests: every protected route returns 401 without credentials, with a wrong bearer token and with a forged cookie, and succeeds with the bearer token and with the cookie from `POST /api/session` (whose `Max-Age` is 2592000), and refuses that cookie once the faked clock passes 30 days and a cookie with a future issue time; from the trusted gateway peer, the eleventh failed authentication within 60 seconds with one `X-Forwarded-For` value returns 429, counting wrong sign-ins, wrong bearer tokens and forged cookies together, a different `X-Forwarded-For` value still gets 401, and after 60 seconds without failures the first value gets 401 again (clock faked); from an untrusted peer the header is ignored. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, shows an error for a wrong token, and after the token is rotated shows the sign-in screen and sends no further job-list requests, then signs in with the new token. After deploy, from `fedora-43` and from a second tailnet device: the eleventh wrong sign-in from `fedora-43` within a minute gets 429 while the second device's next wrong sign-in still gets 401. |
+| AC-12 | `bun test app/server` (which no longer contains the memory tests) auth tests: every protected route returns 401 without credentials, with a wrong bearer token and with a forged cookie, and succeeds with the bearer token and with the cookie from `POST /api/session` (whose `Max-Age` is 2592000), and refuses that cookie once the faked clock passes 30 days and a cookie with a future issue time; from the trusted gateway peer, the eleventh failed authentication within 60 seconds with one `X-Forwarded-For` value returns 429, counting wrong sign-ins, wrong bearer tokens and forged cookies together, a different `X-Forwarded-For` value still gets 401, and after 60 seconds without failures the first value gets 401 again (clock faked); from an untrusted peer the header is ignored; a correct token from a client over the limit still succeeds. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, shows an error for a wrong token, and after the token is rotated shows the sign-in screen and sends no further job-list requests, then signs in with the new token. After deploy, from `fedora-43` and from a second tailnet device: the eleventh wrong sign-in from `fedora-43` within a minute gets 429 while the second device's next wrong sign-in still gets 401. |
 | AC-13 | `bun run size` after `vite build` gzips at level 9 and sums the entry chunk, its static imports and every `modulepreload` link in the built `index.html` (at most 150 KiB), and the viewer chunk (at most 350 KiB), and fails when the viewer module is reachable from the entry's static imports. Its own tests run it on two fixture builds and assert failure on one that imports the viewer statically and on one whose entry is above 150 KiB. |
 | AC-14 | `scripts/deploy/check-repo.sh` after the first merge: `gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, `delete_branch_on_merge` true, and `security_and_analysis.secret_scanning` and `secret_scanning_push_protection` enabled; `gh api repos/vhco-pro/3d-assets-gen/dependency-graph/sbom` returns 200; `gh api repos/vhco-pro/3d-assets-gen/vulnerability-alerts` returns 204; the CodeQL and Scorecard workflow files call the named reusable workflows at a full commit SHA, with `languages` naming `javascript-typescript` and `python`; `gh run list` shows a completed successful run of each on `main`, and code scanning lists analyses for JavaScript/TypeScript, Python and Actions; `renovate.json` exists on `main`; the repository is listed in the `vhco-renovate` installation's repositories, and a Renovate Dependency Dashboard issue or Renovate PR exists. |
 | AC-15 | Manual procedure on `win-main`: deploy two prerelease versions in turn and compare the SHA-256 of `config.yaml` (unchanged), confirm the recorded previous version is the first one and the job rows are intact, rerun `deploy.sh` with the second version and confirm the recorded previous version is still the first one, remove the first image with `docker image rm`, run `rollback.sh` and confirm it stops the app, reloads the first image, `current.json` and `.env` name the first version, and `/api/health` reports the first version and commit. Then run `docker compose down`, remove the current image with `docker image rm`, confirm `docker image inspect` reports it absent, start the `AssetStudio-Logon` task and confirm `/api/health` answers with the current version within five minutes. Unit tests: write rows without a checkpoint, take the backup, run `restore-backup` on a copy and find every row; start the server on a database whose schema version is one higher and assert it exits with the version message; with a test migration from schema 1 to 2, assert a `schema-1-*` backup is written only on the migrating start and not on the next start, and that the rollback logic picks the newest `schema-1-*` backup. |
-| AC-16 | `bun test app/server` seed tests: running the seed twice gives the same row count and IDs; a non-fixture job inserted beforehand survives the seed and `--reset`; the seed refuses a ComfyUI URL that does not answer `/asset-studio-fake`; with the app and fake running on a faked clock advanced 20 minutes after seeding, every fixture job keeps its state; the server refuses to start with `dev-token-not-for-production` against a ComfyUI without the marker. The `bun run dev` readiness step of `bun run verify` starts it and sees its ready line within 30 seconds. |
+| AC-16 | `bun test app/server` (which no longer contains the memory tests) seed tests: running the seed twice gives the same row count and IDs; a non-fixture job inserted beforehand survives the seed and `--reset`; the seed refuses a ComfyUI URL that does not answer `/asset-studio-fake`; with the app and fake running on a faked clock advanced 20 minutes after seeding, every fixture job keeps its state, both when the seed ran before the fake started and when it ran after; the loader refuses a token shorter than 43 base64url characters; the server refuses to start with `ZGV2LXRva2VuLW5vdC1mb3ItcHJvZHVjdGlvbi0wMDA` against a ComfyUI without the marker. The `bun run dev` readiness step of `bun run verify` starts it and sees its ready line within 30 seconds. |
 | AC-17 | `bun run verify` builds the image and runs it with `--read-only`, the declared mounts and a new named volume at `/data`: the process runs as UID 65532, a write to `/` fails, the database is created in `/data`, and the page and `/api/health` answer. After publication, `scripts/deploy/check-image.sh <version>` checks that an anonymous `docker pull` of the digest works (the package is public), reads `release.json` from the GitHub Release, runs the same `cosign verify` and two `gh attestation verify` checks as `deploy.sh` with the pinned tools, then runs that digest the same way with a new named volume and asserts UID 65532, a failed write to `/`, and the page and `/api/health` answering with that version and commit. `bun test ./.github` parses `ci.yml` and asserts the Release step comes after the release action in the same job with no `if: always()`, `if: failure()` or `continue-on-error`, and that no other step or job creates a Release or uploads `release.json`. |
-| AC-18 | Playwright `glossary.spec.ts` on the seeded fixture reads every job-state label, form-field label, button label, banner text and the library heading on the sign-in screen and the main view and asserts each is one of the Glossary terms, and that each Glossary term appears where the fixture can show it. |
+| AC-18 | Playwright `glossary.spec.ts` on the seeded fixture reads the job-state labels, the labels of the six preset fields, the two banner texts and the library heading, and asserts each equals its Glossary term. |
 | AC-19 | `bun test app/cli` and `bats` tests in `scripts/deploy/tests/` capture each tool's output for passed, failed, skipped and partial runs: with `NO_COLOR` absent, empty, `0` and `1`, on a pseudoterminal and redirected to a file, in Unicode and `--ascii` mode; they assert the status words, no ANSI or cursor-control bytes in plain captures, and a non-zero exit whenever a step failed. |
-| AC-20 | The memory tests in `app/server/memory/`, run by `bun run verify` after the image build, run the built image with `docker run --memory 1g`, find the container's cgroup on the host from `docker inspect` (`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.stat` on a systemd host) and sample its `anon` value every 100 ms while it accepts a 25-image 200 MiB batch, two such batches concurrently, and streams an export of 100 fixture assets; they assert `docker inspect` reports `OOMKilled` false and every `anon` sample stays below 512 MiB. |
-| AC-21 | `bun test ./app/docs` reads `README.md` and `AGENTS.md`, extracts every `bun run <name>` and `scripts/...` command they name, and asserts each exists in `package.json` scripts or on disk, that both files name the seven commands, that the README contains the checklist items, that `AGENTS.md` links `conventions/terminal-output.md`, and that the sentence saying no commands exist is gone. |
+| AC-20 | The memory tests in `app/memory/`, run by `bun run verify` after the image build, run the built image with `docker run --memory 1g`, find the container's cgroup on the host from `docker inspect` (`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.stat` on a systemd host) and sample its `anon` value every 100 ms while it accepts a 25-image 200 MiB batch, two such batches concurrently, and streams an export of 100 fixture assets; they assert `docker inspect` reports `OOMKilled` false and every `anon` sample stays below 512 MiB. |
+| AC-21 | `bun test ./app/docs` reads `README.md` and `AGENTS.md` and asserts both name the seven commands exactly as listed in AC-21, that each `bun run` name exists in `package.json` scripts and each script path exists on disk, that the README lists the dependencies, the readiness signal and the checklist items, that `AGENTS.md` links `conventions/terminal-output.md`, and that the sentence saying no commands exist is gone. |
 
 ## Tasks
 
