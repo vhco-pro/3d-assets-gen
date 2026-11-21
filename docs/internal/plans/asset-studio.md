@@ -500,6 +500,7 @@ None.
 | Date | Review | Kind | Commit | Model | Isolation | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-21 | R-1 | spec | `79aed7b` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 1 nit |
+| 2026-11-21 | R-2 | spec | `b6d68e3` | claude-opus-5-5 | procedural | 1 blocking, 20 should-fix, 3 nits |
 
 ### R-1
 
@@ -642,6 +643,176 @@ SEVERITY: nit
 WHERE: Design > Pipeline port and combined graphs (presets table, Seed row, line 172)
 EVIDENCE: "seed of the first variant; variant n uses seed + n" does not say whether n starts at 0 or 1. If the first variant is n = 1, it gets seed + 1, which contradicts "seed of the first variant".
 PROPOSAL: Say "variant k, counted from 0, uses seed + k modulo 2^32".
+
+### R-2
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Submission, concurrency and idempotency (lines 256-258); Design > Jobs and batches (lines 220-223); Context > Owner summary (lines 47-48); AC-02; Test Plan row AC-02
+EVIDENCE: Design says "The handler rejects a request whose `Content-Length` is above 200 MB with a 413", and the AC-02 proof requires "a 25-image batch at 200 MB accepted". A multipart body carries boundaries, part headers and the batch ID and preset fields as well as the image bytes. A batch holding exactly 200 MB of images therefore has a `Content-Length` above 200 MB. An implementation that follows the Design returns 413 for it, so the proof fails a correct implementation. The document also never says whether MB means 10^6 or 2^20 bytes, and the boundary cases ("at 200 MB", "just over 200 MB", 20 MB per image) depend on that. This traces to the fix for R-1 F-05.
+PROPOSAL: Apply the 200 MB limit to the total image bytes the handler or the page counts, and set the `Content-Length` pre-check to that limit plus a stated allowance for multipart overhead (or drop it in favour of the 256 MB body limit). Define MB once, in Design, and use that unit in the AC-02 boundary cases.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (tracker step 5, lines 284-287); Design > Pipeline port and combined graphs (lines 174-181); AC-06; Test Plan row AC-06
+EVIDENCE: Step 5 says "A job whose ComfyUI output files can no longer be fetched is treated the same way" and resubmits it "with the same seed", so the new attempt posts the same graph again. ComfyUI on win-main skips an output node whose result is cached: execution.py:468 `if cached is not None and (unique_id in executed or not _should_force_output_rerun(class_def))`, and comfy/cli_args.py:145 describes `--force-output-rerun` as the flag that makes output nodes "write their output files again". RAM-pressure caching is the default (cli_args.py:139), and the running Comfy Desktop process command line has no `--force-output-rerun` or `--cache-none`. A resubmitted identical graph can therefore return the same missing file names from history without writing them again. The job is then lost twice more and fails without ever being regenerated. The Design never says which `filename_prefix` the app passes to `SaveImage` and `SaveGLB`, so nothing makes an attempt's graph differ from the previous one.
+PROPOSAL: State the `filename_prefix` the app uses and include the attempt ID in it, so each attempt's output nodes have different inputs and run again, and include that prefix in the golden inputs. Add an AC-06 case where the fake reports the previous attempt's files as missing and the resubmitted prompt's prefix differs.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (lines 264-266 and tracker step 2, lines 271-277); Context > Owner summary (lines 36-38); AC-06; Test Plan row AC-06
+EVIDENCE: Step 2 reposts a stored attempt ID whenever the ID is in neither the queue nor the history. ComfyUI 0.46.2 does not reject a duplicate `prompt_id`: `validate_job_id` in comfy_execution/jobs.py only checks the canonical UUID form, and post_prompt (server.py:1180-1235) calls `prompt_queue.put` with no lookup of existing IDs (execution.py:1345 `heapq.heappush`). A POST that hits the 10-second timeout while ComfyUI is still validating or queueing it leaves the job `pending`. The next tick does not find the ID yet, posts it again, and the same job then runs twice on the GPU under one ID. AC-06 states that an accepted prompt "is adopted rather than submitted twice", and the proof only covers a crash after a completed post.
+PROPOSAL: Say that after an unreachable or timed-out `/prompt` answer the tracker waits a stated interval and checks the queue and history again before reposting the same ID. Alternatively, accept and document that a duplicate run can happen in that window. Add a fake that accepts the prompt after the client timeout to the AC-06 tests.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (collection paragraph, lines 297-300; staging paragraph, lines 244-249); AC-06; Test Plan rows AC-06 and AC-02
+EVIDENCE: "A crash during collection leaves no final directory and no `done` row" does not hold for a crash after the rename to `data/assets/<job id>/` but before the `done` update. The next tick then collects into a new `.collect-` directory, and renaming it onto the existing non-empty directory fails on Windows and on Linux, so the job never reaches `done`. That outcome is undefined. The batch path has the same window: a crash after the commit but before staging is renamed to `data/uploads/<batch id>/` leaves `pending` image jobs whose files sit in a staging directory that is "deleted at start" after one hour. The AC-06 fault injection only kills the server after the first file is written, so it passes on both defects.
+PROPOSAL: Define recovery for both windows. For example, collection treats an existing final directory with both files as collected and runs the `done` update, and the batch rename happens before the commit, with the directory deleted when the transaction fails. Add kill points after each rename to the AC-06 and AC-02 tests.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (line 310); AC-05; Test Plan row AC-05
+EVIDENCE: "A `pending` job becomes `cancelled` without contacting ComfyUI." A `pending` job can already have a stored attempt ID whose prompt ComfyUI accepted, which is the crash-after-post case in step 2 and the timeout case in F-03. Cancelling it then leaves that prompt queued or running on the GPU for minutes, ahead of every other job, and its results are ignored. AC-05 says the same thing ("A pending job can be cancelled without contacting ComfyUI").
+PROPOSAL: For a `pending` job that has an attempt ID, call `POST /api/jobs/<prompt id>/cancel` before marking it `cancelled`, which is harmless when ComfyUI does not know the ID. Adjust AC-05 and add that case to its proof.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > ComfyUI client (lines 209-215); Context > Background (lines 98-104); Design > Submission, concurrency and idempotency (tracker step 5)
+EVIDENCE: The design depends on two ComfyUI features that this repository has only seen in 0.46.2: a client-supplied `prompt_id` (server.py:1180-1196) and `POST /api/jobs/{job_id}/cancel` (server.py:1063-1079). Comfy Desktop updates and reinstalls ComfyUI outside the app's control. A ComfyUI that ignores `prompt_id` mints its own ID, so the tracker never finds its attempt. Every job is then treated as lost and runs on the GPU three times before it fails. No minimum version is stated and no startup or health check reads `comfyui_version` from `/system_stats`.
+PROPOSAL: State the minimum ComfyUI version, check `comfyui_version` from `/system_stats` before submitting, and report an incompatible ComfyUI through `/api/health` and the page instead of submitting. Add a fake-version case to the tests.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 328-336); AC-15; Test Plan row AC-15
+EVIDENCE: The database runs in WAL mode (line 236), and before migrating the app "copies the database file to `data/backup/<version>-<timestamp>.sqlite`". Deploy and rollback stop the scheduled task, which ends the process without a clean close, so committed transactions can remain in the `-wal` file. A copy of the main file alone then misses them. When rollback puts that copy back next to a newer `-wal` and `-shm`, SQLite's result is unspecified. The AC-15 proof never exercises a backup or a restore.
+PROPOSAL: Take the backup with `VACUUM INTO` or the SQLite backup API after opening the database, and make rollback remove the `-wal` and `-shm` files when it restores. Add a unit test that restores a backup taken after uncheckpointed writes.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Access token (line 349, "the app version"); Design > HTTP API (`GET /api/health`, line 362); Design > Release path (lines 414-420); Test Plan rows AC-10 and AC-15
+EVIDENCE: The AC-10 proof checks that `/api/health` "returns the deployed version", and the AC-15 proof checks that it "reports the first build's version" after rollback. Tagged releases are out of scope (line 147) and the document never defines where the version comes from. If it comes from `package.json`, two CI builds report the same value, and both proofs pass whichever executable is running.
+PROPOSAL: Define the version as a value that differs per build, for example the commit SHA that CI embeds at compile time, and name it in both proofs.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (lines 244-249); Design > HTTP API (`POST /api/batches`, line 364)
+EVIDENCE: "`POST /api/batches` carries a client-generated batch ID", and that ID goes straight into the paths `data/staging/<batch id>-<random>/` and `data/uploads/<batch id>/`. The document never gives the ID's format. A value such as `..\..\x` from a token holder would write outside the data directory on `win-main`.
+PROPOSAL: Require the batch ID to be a canonical lowercase UUID, reject anything else with 400 before touching the filesystem, and add that rejection to the AC-02 tests.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Access token (lines 346-354); AC-12; Test Plan row AC-12
+EVIDENCE: Design limits only "Failed sign-ins", but AC-12 says "repeated wrong tokens are rate limited per client address". Every protected route also accepts `Authorization: Bearer <token>`, so wrong bearer tokens on those routes are either limited or not, and the AC-12 proof only tests `POST /api/session`. Two implementers would build different limiters. The cookie's lifetime is not stated either: "signs in once" (line 44) suggests a persistent cookie, but no `Max-Age` or `Expires` is given, and the HMAC key is not named.
+PROPOSAL: State whether wrong bearer tokens count toward the same per-client limit and make AC-12 and its proof match. Give the cookie's lifetime and the HMAC key.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 443-448); Design > Submission, concurrency and idempotency (tracker step 6, lines 288-289); AC-16; Test Plan row AC-16
+EVIDENCE: The fixture's `submitted` jobs map to fake prompts that run and "never finish". Tracker step 6 cancels and fails any job running for more than 15 minutes after its started time, so a development stack left running turns the running fixture job into `failed` after 15 minutes. That breaks AC-16's "its fixture jobs keep their states while the app runs" and the inert-seed rule in conventions/frontend-testing.md lines 69-72. The AC-16 proof watches for only 30 seconds, so it passes on this behaviour.
+PROPOSAL: Define how running fixture jobs avoid the timeout, for example a running time the fake reports or a fixture marker the timeout skips. Run the AC-16 check with a fake clock past 15 minutes.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 426-435); Scope (line 132-133); Context > Owner summary (lines 63-64 and 66-68); AC-14; Test Plan row AC-14
+EVIDENCE: conventions/repository-security.md (Public repositories) requires the dependency graph as well as Dependabot alerts, secret scanning and push protection, and CodeQL and Scorecard "with the reusable CodeQL workflow in `vhco-pro/.github`" and "the reusable Scorecard workflow from the same repository". The document lists no dependency graph and describes its own workflows. conventions/delivery.md lines 12-14 require `delete_branch_on_merge` on each repository, which is neither in the settings acceptance authorizes nor in AC-14. The AC-14 proof only checks that the workflow files exist, so a workflow that never runs passes it.
+PROPOSAL: Add the dependency graph and `delete_branch_on_merge` to the Design, the owner summary's authorization and AC-14. Say that the CodeQL and Scorecard workflows call the pinned reusable workflows, and have the proof check a completed run of each on the default branch.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Frontmatter `covers` (lines 6-18); AC-14
+EVIDENCE: The convention says "`covers` lists every path whose change can affect the feature". AC-14 asserts the Apache-2.0 licence, but `LICENSE` is not covered. A Vite project's `index.html` lives at the Vite root, which is the repository root when `vite.config.ts` is there (line 159), and solution-style tsconfig files (`tsconfig.*.json`, which frontend-testing.md line 38 asks for) would also sit at the root. Neither pattern is covered, so `fresh` and `feature_tree_clean` ignore changes to them.
+PROPOSAL: Add `LICENSE`, the root `index.html` (or move the Vite root under `app/web/`) and any root `tsconfig.*.json` to `covers`.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: AC-09; Test Plan row AC-09
+EVIDENCE: conventions/frontend-testing.md lines 156-159 require reduced motion and 200 percent browser zoom on affected flows, with a manual check where automation cannot set zoom, and lines 132-147 ask for the readability invariants to be stated as criteria or visual tests. AC-09 says "stay readable", and its proof checks only overflow, the position of primary actions, accessible names and keyboard completion. It has no zoom, no reduced-motion check (the viewer's camera controls and any auto-rotate are affected) and no stated readability bound.
+PROPOSAL: Add a 200 percent zoom check (or a recorded manual one) and a reduced-motion run of the library and viewer journey to the AC-09 proof, and replace "readable" with the invariants the screenshots and assertions check.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan rows AC-02, AC-07, AC-08, AC-09 and AC-12; Design > Verification commands (lines 439-441); Context > Owner summary (lines 57-58)
+EVIDENCE: conventions/react.md line 167 requires Chromium and Firefox for "file transfer", and frontend-testing.md lines 103-105 name browser APIs. The image-upload journey in `submit.spec.ts` runs only in Chromium. frontend-testing.md lines 108-109 and react.md line 168 require deployment-sensitive paths, such as the `Secure` session cookie and the embedded page, to run against the built application. The document never says whether Playwright drives the Bun server serving the production build or the Vite dev server.
+PROPOSAL: Run the image-upload part of `submit.spec.ts` in Firefox too, and state that the Playwright suite runs against the Bun server serving the production build. Update the owner summary's list of Firefox journeys to match.
+
+FINDING: F-16
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-13; Design > Page (lines 387-389)
+EVIDENCE: conventions/react.md lines 136-141 require the budget check to count the complete static entry graph "including shared chunks and explicit preloads", to "State the compression settings", and to "Test that the check rejects a representative leak and budget breach". The AC-13 proof does not name the gzip level, does not mention preloads, and has no case showing that `bun run size` fails on a leaked viewer import or an oversized entry.
+PROPOSAL: Name the gzip level and count modulepreload links, and add tests in which `bun run size` fails on a fixture build that imports the viewer statically and on one that exceeds 150 kB.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (lines 382-385); AC-07; Test Plan row AC-07
+EVIDENCE: conventions/react.md lines 119-121 require "explicit recovery for a missing module" and exercising "delayed and failed imports". The viewer module loads on demand, and no design text or proof covers a failed or slow viewer import. react.md line 131 says "Size images for their rendered dimensions", but the library uses the full source images, which are 1024 pixels and PNG for prompt jobs, as thumbnails. ComfyUI's `/view` can serve a compressed preview, and Bun has no built-in resizer.
+PROPOSAL: Define the loading and error states for the viewer import and add a Playwright case that blocks the viewer chunk. Specify a thumbnail size and how thumbnails are produced, for example a small preview stored at collection time.
+
+FINDING: F-18
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (lines 183-185); AC-11; Context > Owner summary (lines 35-37)
+EVIDENCE: The document admits that whether both models fit in one prompt on the 16 GB card "is not established by any measurement", and leaves AC-11 to settle it after implementation. Queue order, per-job cancel, adoption and the timeout all assume one prompt per job. If the combined prompt runs out of memory, the accepted design cannot meet AC-11 and has to be redesigned after acceptance. Running one combined prompt on `win-main` would settle the question now.
+PROPOSAL: Run one combined TRELLIS.2 prompt and one combined Hunyuan3D prompt on `win-main` before acceptance and cite the result, or raise an Open Question naming the fallback (two prompts per job) and what it changes.
+
+FINDING: F-19
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Frontmatter `goal` (line 5); AC-10; Test Plan row AC-10; Context > Owner summary (lines 43-53)
+EVIDENCE: The goal is that "A friend opens a private tailnet URL". AC-10 is checked only from `fedora-43`, which is in the owner's tailnet. Nothing checks the path through the node share, which the owner sets up outside the feature, or that the friend's device reaches the HTTPS name and nothing but port 443. The feature can be complete while the friend cannot reach the app.
+PROPOSAL: Add a manual check from a device that receives the share, run after the owner shares the node, or state in the criterion and the summary that delivery stops before the share and name the owner step that completes the goal.
+
+FINDING: F-20
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (line 427); Design > Build, deployment and exposure (lines 399-410); Design > Verification commands (lines 439-441)
+EVIDENCE: The only deployment target is Windows, but `bun run verify` and every automated test run on Linux in CI. Windows behaves differently on exactly the paths this design relies on: renaming a directory, deleting or renaming a file that a download, export or thumbnail request has open, and path separators. Delete (line 320) can happen while a GLB is streaming. Only the manual AC-15 and live AC-11 checks touch Windows.
+PROPOSAL: Run the `app/server` tests on a `windows-latest` runner as well, and say what Delete does when a file is in use.
+
+FINDING: F-21
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (lines 236-240); Design > Cancel, retry and delete (line 320); Scope > Out of scope (line 143)
+EVIDENCE: Every job leaves its outputs in ComfyUI's shared output folder and its upload in ComfyUI's input folder (`--output-directory` and `--input-directory` on the running Comfy Desktop process). The app also keeps its own copy under `data/assets/` and the batch images under `data/uploads/<batch id>/`. Delete removes only "a job's row and its files", and nothing says whether that includes the upload or ComfyUI's copies. Two implementers would differ on whether the app deletes files in ComfyUI's folders, which Scope may count as touching the ComfyUI install.
+PROPOSAL: State which files Delete removes, whether the app removes its own files from ComfyUI's input and output folders after collection, and when `data/uploads/<batch id>/` is removed.
+
+FINDING: F-22
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Background (line 88)
+EVIDENCE: "The GPU machine is `win-main` on the tailnet (`HANDOFF.md:23`)". HANDOFF.md:23 reads "Windows 11 PC `win-main`, RTX 4070 Ti SUPER 16 GB, 32 GB RAM." and does not mention the tailnet. Tailscale appears at HANDOFF.md:45-47.
+PROPOSAL: Cite HANDOFF.md:23 for the hardware and HANDOFF.md:45-47 for the tailnet.
+
+FINDING: F-23
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Jobs and batches (lines 235-236); Design > Submission, concurrency and idempotency (lines 260-262); Design > HTTP API (`GET /api/jobs`, line 365)
+EVIDENCE: The page shows queue positions "read from ComfyUI's `/queue`", while "HTTP handlers only insert rows or set flags". The document does not say that `GET /api/jobs` serves positions from the tracker's last `/queue` snapshot rather than calling ComfyUI.
+PROPOSAL: Say that the tracker keeps the latest queue snapshot and that `GET /api/jobs` reads positions from it.
+
+FINDING: F-24
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Runtime and layout (line 164)
+EVIDENCE: conventions/react.md line 151: "For new applications, make hook-order and dependency violations fail lint." The Design names only type-aware ESLint from typescript.md.
+PROPOSAL: Add the React hooks rules at error severity to the lint line.
 
 ## Sources
 
