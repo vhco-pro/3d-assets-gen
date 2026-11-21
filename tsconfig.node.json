@@ -6,5 +6,5 @@
     "lib": ["ES2023"],
     "types": ["bun"]
   },
-  "include": ["app/server", "app/pipeline", "app/fake-comfy", "app/cli", "app/memory", "app/docs", "app/e2e", ".github/tests", "*.config.ts"]
+  "include": ["app/test-setup.ts", "app/server", "app/pipeline", "app/fake-comfy", "app/cli", "app/memory", "app/docs", "app/e2e", ".github/tests", "*.config.ts"]
 }

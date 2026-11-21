@@ -71,6 +71,9 @@ export function openStore(dataDir: string, opts: { migrations?: Migration[] } = 
   mkdirSync(dataDir, { recursive: true });
   const db = new Database(join(dataDir, DB_FILE), { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL");
+  // NORMAL is the recommended setting with WAL: the database stays consistent; only the last commits
+  // before a power loss can be lost.
+  db.run("PRAGMA synchronous = NORMAL");
   db.run("PRAGMA busy_timeout = 5000");
   db.run("PRAGMA foreign_keys = ON");
   const store: Store = {

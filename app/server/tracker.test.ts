@@ -32,7 +32,7 @@ function tracker(opts: { timeoutMs?: number; faults?: Faults } = {}): Tracker {
   return new Tracker({
     store,
     config: dirs.config,
-    comfy: new ComfyClient(dirs.config.comfyuiUrl, { timeoutMs: opts.timeoutMs ?? 2000 }),
+    comfy: new ComfyClient(dirs.config.comfyuiUrl, { timeoutMs: opts.timeoutMs ?? 10_000 }),
     now: () => clock.t,
     ...(opts.faults ? { faults: opts.faults } : {}),
   });
@@ -113,7 +113,7 @@ describe("AC-03 submission and completion", () => {
     const order = [...first, ...second].map((id) => job(id).finished_at ?? 0);
     expect([...order].sort((x, y) => x - y)).toEqual(order);
     const submitted = promptBodies().map((b) => b.prompt_id);
-    expect(submitted).toEqual([...first, ...second].map((id) => job(id).prompt_id));
+    expect(submitted).toEqual([...first, ...second].map((id) => job(id).prompt_id ?? ""));
   });
 
   test("an image job uploads its file and keeps the upload as its source", async () => {
@@ -128,8 +128,10 @@ describe("AC-03 submission and completion", () => {
   test("an execution error ends the job failed with ComfyUI's message", async () => {
     const [id] = addBatch(["x"]);
     const t = tracker();
+    fake.holdRunning = true;
     await t.tick();
     fake.failWith.set(job(id ?? "").prompt_id ?? "", "CUDA out of memory");
+    fake.release();
     await runUntil(t, () => job(id ?? "").state !== "submitted");
     expect(job(id ?? "").state).toBe("failed");
     expect(job(id ?? "").error).toContain("CUDA out of memory");
@@ -152,16 +154,12 @@ describe("AC-03 submission and completion", () => {
   test("three server errors in a row fail the job while later jobs still run", async () => {
     const [a, b] = addBatch(["broken", "fine"]);
     const t = tracker();
-    // Every attempt of the first job answers 500: register its prompt ID as soon as the tracker stores it.
-    const watch = setInterval(() => {
-      const pid = getJob(store, a ?? "")?.prompt_id;
-      if (pid) fake.serverErrorFor.add(pid);
-    }, 1);
-    try {
-      await runUntil(t, () => job(a ?? "").state === "failed" && job(b ?? "").state === "done");
-    } finally {
-      clearInterval(watch);
-    }
+    // The first job's attempt ID is known up front, so every post of it can answer 500.
+    const pid = crypto.randomUUID();
+    store.db.run("UPDATE jobs SET prompt_id = ? WHERE id = ?", [pid, a ?? ""]);
+    fake.serverErrorFor.add(pid);
+    await runUntil(t, () => job(a ?? "").state === "failed" && job(b ?? "").state === "done");
+    expect(fake.promptCalls().filter((c) => (c.body as { prompt_id: string }).prompt_id === pid)).toHaveLength(3);
     expect(job(a ?? "").error).toContain("500");
   });
 });
@@ -250,15 +248,17 @@ describe("AC-05 cancel and retry", () => {
     requestCancel(store, c ?? "");
     await runUntil(t, () => job(c ?? "").state !== "submitted");
     expect(job(c ?? "").state).toBe("done");
-    void b;
+    expect(job(b ?? "").state).toBe("done");
   });
 
   test("retry after a failure or a cancel runs a new prompt with the same seed and cleared flags", async () => {
     const [a] = addBatch(["a"]);
     const t = tracker();
+    fake.holdRunning = true;
     await t.tick();
     const firstId = job(a ?? "").prompt_id ?? "";
     fake.failWith.set(firstId, "boom");
+    fake.release();
     await runUntil(t, () => job(a ?? "").state === "failed");
     expect(retryJob(store, dirs.config, a ?? "").ok).toBe(true);
     expect(job(a ?? "")).toMatchObject({ state: "pending", prompt_id: null, error: null, started_at: null, server_errors: 0, cancel_requested: 0, attempts: 2 });
@@ -268,7 +268,7 @@ describe("AC-05 cancel and retry", () => {
     expect(ids[1]).not.toBe(firstId);
     const seeds = promptBodies().map((b) => JSON.stringify(b.prompt).match(/"seed":(\d+)/)?.[1]);
     expect(seeds[0]).toBe(seeds[1]);
-    const prefixes = promptBodies().map((b) => (b.prompt["36"] as { inputs: { filename_prefix: string } } | undefined)?.inputs.filename_prefix);
+    const prefixes = promptBodies().map((b) => (b.prompt["136"] as { inputs: { filename_prefix: string } } | undefined)?.inputs.filename_prefix);
     expect(prefixes[0]).not.toBe(prefixes[1]);
     const [c] = addBatch(["c"]);
     requestCancel(store, c ?? "");
@@ -300,7 +300,7 @@ describe("AC-05 cancel and retry", () => {
     store.db.run("UPDATE jobs SET state = 'failed' WHERE id = ?", [extra ?? ""]);
     const res = retryJob(store, dirs.config, extra ?? "");
     expect(res.ok).toBe(false);
-    void ids;
+    expect(ids).toHaveLength(100);
   });
 
   test("a pending job whose post timed out keeps its cancel until the late prompt appears, then cancels it", async () => {
@@ -398,12 +398,14 @@ describe("AC-06 restarts, losses and replay", () => {
   test("missing output files count as a loss and the next attempt has a new prefix", async () => {
     const [a] = addBatch(["a"]);
     const t = tracker();
+    fake.holdRunning = true;
     await t.tick();
     const first = job(a ?? "").prompt_id ?? "";
+    fake.release();
     await Bun.sleep(150);
     fake.dropOutputs(first);
     await runUntil(t, () => job(a ?? "").state === "done");
-    const prefixes = promptBodies().map((b) => (b.prompt["36"] as { inputs: { filename_prefix: string } }).inputs.filename_prefix);
+    const prefixes = promptBodies().map((b) => (b.prompt["136"] as { inputs: { filename_prefix: string } }).inputs.filename_prefix);
     expect(prefixes).toHaveLength(2);
     expect(prefixes[0]).not.toBe(prefixes[1]);
   });
@@ -412,7 +414,9 @@ describe("AC-06 restarts, losses and replay", () => {
     for (const point of ["afterFirstFile", "afterRename"] as const) {
       const [a] = addBatch([point]);
       const crashing = tracker({ faults: { [point]: () => { throw new Error("crash"); } } });
+      fake.holdRunning = true;
       await runUntil(crashing, () => job(a ?? "").state === "submitted");
+      fake.release();
       await Bun.sleep(150);
       await crashing.tick().catch(() => undefined);
       expect(job(a ?? "").state).toBe("submitted");
@@ -436,7 +440,9 @@ describe("AC-06 restarts, losses and replay", () => {
   test("the start sweep removes leftovers in ComfyUI's folders and orphaned uploads", async () => {
     const [a] = addBatch(["a"]);
     const crashing = tracker({ faults: { afterDone: () => { throw new Error("crash"); } } });
+    fake.holdRunning = true;
     await runUntil(crashing, () => job(a ?? "").state === "submitted");
+    fake.release();
     await Bun.sleep(150);
     await crashing.tick().catch(() => undefined);
     expect(job(a ?? "").state).toBe("done");
@@ -455,7 +461,7 @@ describe("AC-06 restarts, losses and replay", () => {
     const fixtureFake = new FakeComfy({ outputDir: join(dirs.root, "fx-out"), inputDir: join(dirs.root, "fx-in"), dataDir: dirs.config.dataDir });
     fixtureFake.start();
     try {
-      const t = new Tracker({ store, config: dirs.config, comfy: new ComfyClient(fixtureFake.url, { timeoutMs: 2000 }), now: () => clock.t });
+      const t = new Tracker({ store, config: dirs.config, comfy: new ComfyClient(fixtureFake.url, { timeoutMs: 10_000 }), now: () => clock.t });
       clock.t += 20 * 60_000;
       await t.tick();
       expect(job(f ?? "").state).toBe("submitted");
