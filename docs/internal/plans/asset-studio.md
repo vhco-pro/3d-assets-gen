@@ -819,6 +819,7 @@ None.
 | 2026-11-21 | R-3 | spec | `0a8d589` | claude-opus-5-5 | procedural | 2 blocking, 14 should-fix, 3 nits |
 | 2026-11-21 | R-4 | spec | `093c118` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 3 nits |
 | 2026-11-21 | R-5 | spec | `7ed1b66` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 5 nits |
+| 2026-11-21 | R-6 | spec | `945c51a` | claude-opus-5-5 | procedural | 2 blocking, 6 should-fix, 2 nits |
 
 ### R-1
 
@@ -1529,6 +1530,78 @@ SEVERITY: nit
 WHERE: Design > Deployment and exposure (deploy steps 2 to 4, lines 606-617; compose "on the image tag being deployed", lines 595-596); Design > Restart, upgrade and rollback ("When the previous image is not loaded", line 467)
 EVIDENCE: Step 2 pulls `ghcr.io/vhco-pro/3d-assets-gen@<digest>`, and an image pulled by digest has no tag. Step 3 saves and loads it, but Compose (`pull_policy: never`), the record of the previous tag and rollback's "not loaded" check all use a tag. No step creates it.
 PROPOSAL: Say that deploy.sh tags the verified image `ghcr.io/vhco-pro/3d-assets-gen:<version>` before `docker save`, so the loaded image carries that tag.
+
+### R-6
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Export (lines 581-584, "tied to the session that created it"); Design > Access token (lines 496-499, cookie value); Design > HTTP API (`GET /api/exports/<export id>` row, line 529); AC-08; Test Plan row AC-08 ("a link used from another session refused")
+EVIDENCE: The session cookie's value is "HMAC-SHA256 keyed with the token over the string `asset-studio-session-v1`" (lines 497-499). Every sign-in under the same token therefore gets a byte-identical cookie, and the app stores no session record, so nothing identifies "the session that created" an export. Two Playwright contexts that each sign in send the same cookie, so the AC-08 case "a link used from another session refused" cannot be built or passed by an implementation that follows the cookie design. A bearer-token client (as `verify:live` is) has no session at all, so it is also undefined what an export it creates is tied to.
+PROPOSAL: Either drop the session binding and rely on the random one-time, five-minute export ID, removing the "another session" case from the AC-08 row, or give each sign-in its own random session ID (signed with the token key) and say what a bearer-token export is tied to.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan row AC-17 ("`bun test .github` parses `ci.yml` ..."); Design > Verification commands (line 734, "unit tests" in `bun run verify`); Frontmatter `covers` (`.github/`)
+EVIDENCE: With Bun 1.4.3 on fedora-43, in a scratch directory holding only `.github/tests/ci.test.ts`, `bun test .github` printed "The following filters did not match any test files ... .github" and exited 1, and a bare `bun test` printed "error: 0 test files matching **{.test,.spec,_test_,_spec_}.{js,ts,jsx,tsx}" and exited 1. `bun test ./.github` ran the test and passed. Bun's discovery skips dot-directories, so the proof command as written fails a correct implementation. A `bun run verify` that runs `bun test` without that explicit path also never runs these checks, so CI does not enforce them.
+PROPOSAL: Write the command as `bun test ./.github`, or put the workflow tests under a non-hidden path such as `app/ci/`, and say that `bun run verify` runs them by that explicit path.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy.sh step 1, lines 631-635; step 4, lines 645-649; logon task paragraph, lines 656-662); Design > Restart, upgrade and rollback (rollback.sh first step, lines 478-479); AC-15; Test Plan row AC-15
+EVIDENCE: Step 1 registers `AssetStudio-Docker` and runs it when Docker Desktop is not running. The task runs `start-asset-studio.ps1` (line 656), but deploy.sh copies that script only in step 4 (line 646). On a first install against a stopped Docker Desktop, which Background records as the state when first checked (line 117), the task has no script to run, Docker Desktop never starts and step 1 fails after three minutes. On later deploys and on rollback, running the task also starts the script's own `docker compose up` on the tag in `current.json`, the version being replaced. That runs at the same time as deploy step 4's `compose up` on the new tag, or as rollback's stop and `restore-backup`. The newer app can then start on the restored database and migrate it again before rollback brings up the previous image, which then refuses the newer schema. The behaviour when `current.json` does not exist yet is also undefined. The task's Compose step was added by the previous revision.
+PROPOSAL: Copy `start-asset-studio.ps1` before step 1 registers or runs the task. Give the script a mode, or have step 1 use a separate start action, that only starts Docker Desktop when deploy.sh or rollback.sh call it. Say that the script does nothing beyond starting Docker Desktop when `current.json` is missing.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (rollback.sh, lines 478-485); Design > Deployment and exposure (compose.yaml "on the image tag being deployed", line 617; `current.json` written in step 4, lines 646-649; logon script reads `current.json`, lines 656-660); AC-15
+EVIDENCE: deploy.sh writes `current.json` with the version, tag and digest, and the logon script brings the app up from it. rollback.sh brings the project up on the previous tag but never updates `current.json` or the previous-tag record. After a rollback, the next reboot or sign-in therefore brings back the newer version on the restored older-schema database, so it migrates again and the rollback is silently undone. The document also does not say how a committed, static `compose.yaml` gets the tag to run (for example an interpolated variable in a `.env` file that deploy.sh writes), so deploy, rollback and the logon script could each set it differently.
+PROPOSAL: State that rollback.sh rewrites `current.json` with the previous version's tag and digest from its Release record, and say how the tag reaches Compose (one file that deploy.sh, rollback.sh and the logon script all read). Add to the AC-15 procedure a check that `current.json` names the first version after the rollback.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (logon script "pulls ... in the owner's session, where registry pulls work", lines 657-659); Context > Background (lines 137-139); Context > Owner summary (lines 88-89, "reloading its image if it is missing")
+EVIDENCE: Background only records that a registry pull over SSH failed with `error getting credentials ... A specified logon session does not exist`, and that `docker load` worked. No observation shows a pull succeeding from a scheduled task in the owner's session, yet Design states as fact that pulls work there. Design must cite its claims, and the logon recovery in the summary depends on this one. If the credential helper also fails in the task's context, the app does not come back after a reboot until someone redeploys.
+PROPOSAL: Cite a measured pull of a public image from a temporary interactive-principal task, or mark the claim as unverified until the AC-15 logon step runs and name the fallback, for example the task loading a saved image tar that deploy.sh leaves on `win-main`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (tracker step 6, lines 398-399); Design > Cancel, retry and delete (cancel answer handling, lines 434-437); AC-06
+EVIDENCE: Step 6 calls the per-job cancel for a job running more than 15 minutes "and marks it `failed` with a timeout message". It does not say what happens when the cancel answers `{"cancelled": false}`. On win-main, `_cancel_job_by_id` in server.py returns False for an ID that has already finished. In that case a prompt that completed in the gap is marked `failed` and its outputs are never collected. The user-cancel path handles this case (lines 436-437); the timeout path does not, and it also does not say what happens when the cancel call gets an unreachable or server-error answer.
+PROPOSAL: Say that the timeout path follows the same rule as a user cancel: on `{"cancelled": false}` it reads the history again and collects a success or records the error, and on an unreachable answer the job stays `submitted` until a later tick.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan row AC-11 ("then lists ComfyUI's `output/asset-studio/` and `input/asset-studio/` over SSH and finds no entry for either job"); Design > Submission, concurrency and idempotency (collection, lines 409-410); AC-11
+EVIDENCE: The tracker runs the `done` update first and deletes the job's ComfyUI files afterwards (lines 409-410). A failed delete is left for the sweep, which runs every ten minutes (lines 412, 418-419). `verify:live` waits for `done` and then lists the folders straight away, so a correct implementation can still have the files present when the listing runs, or until the next sweep after a transient delete failure. The proof can therefore fail a correct implementation intermittently.
+PROPOSAL: Have the proof poll the two folders until no entry for either job remains, with a stated bound (for example two minutes), or until after the next sweep, and fail only when that bound passes.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy.sh step 2, `cosign verify` "with the certificate identity of this repository's `ci.yml` workflow", lines 637-639); Design > Versioning and release path (`ci.yml` triggered by pushes to any branch, lines 667-668; prerelease images from the feature branch, lines 691-694); Test Plan row AC-17 (`check-image.sh` "runs the same `cosign verify`")
+EVIDENCE: The release action signs with `cosign sign --yes` inside the `release` job of `ci.yml` (docker-release-action action.yaml at c499e52, step "Sign image with cosign (keyless)"). A keyless certificate's identity includes the workflow ref, which here is `refs/heads/<feature branch>` for a prerelease and `refs/heads/main` for a release. The document gives no exact identity or pattern. An implementer who pins `.../ci.yml@refs/heads/main` rejects every prerelease, which must be deployed before the implementation review. One who uses a loose regular expression accepts other workflows or forks.
+PROPOSAL: Give the exact check, for example `--certificate-identity-regexp '^https://github.com/vhco-pro/3d-assets-gen/\.github/workflows/ci\.yml@refs/heads/.+$'` with `--certificate-oidc-issuer https://token.actions.githubusercontent.com`, and use it in both deploy.sh and check-image.sh.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy.sh step 2, "the SPDX predicate type that `actions/attest-sbom` records", lines 640-641); Design > Versioning and release path (`attest-sbom` input, line 681)
+EVIDENCE: At c499e52 the action's "Attest SBOM" step uses `actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0` with `sbom-path`, not `actions/attest-sbom`. The SPDX predicate type is the same, so nothing that gets built changes.
+PROPOSAL: Name `actions/attest` with an SPDX `sbom-path`, or give the predicate type URI directly.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 52-60 and 86-89); Design > Deployment and exposure (line 653-654, "The app keeps running only while the owner is signed in on `win-main`")
+EVIDENCE: Design states that the friend's app is available only while the owner is signed in on win-main. The summary describes the logon task but never says that the app is down whenever the owner is signed out. That is a trade-off the owner should see before accepting.
+PROPOSAL: Add one sentence to the summary saying that the app, like Comfy Desktop, runs only while the owner is signed in on `win-main`.
 
 ## Sources
 
