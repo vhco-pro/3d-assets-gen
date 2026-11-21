@@ -395,6 +395,149 @@ None.
 
 | Date | Review | Kind | Commit | Model | Isolation | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-21 | R-1 | spec | `79aed7b` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 1 nit |
+
+### R-1
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Jobs and batches (line 210); Design > ComfyUI client (lines 188-189); Design > Submission, concurrency and idempotency (tracker step 4 line 239 and the client_id adoption paragraph lines 249-252); Design > Cancel, retry and delete (lines 265-266); AC-05; AC-06; Test Plan rows AC-05 and AC-06
+EVIDENCE: Every `/prompt` call sends `client_id` = `asset-studio:<job id>`, which stays the same for the whole life of the job. Before it submits any `pending` job, the tracker looks for that client_id in `/queue` and history entries and adopts any prompt it finds. Retry (line 265) puts a `failed` or `cancelled` job back to `pending` under the same job ID. ComfyUI keeps the failed, interrupted or timed-out prompt in its history (server.py `get_history` on win-main, ComfyUI 0.46.2), so the next tick adopts that old prompt, step 3 sees its error status, and the job goes straight back to `failed` without anything new being submitted. The rule at line 239 has the same problem: it returns a job whose output files are gone to `pending`, adoption finds the old successful history entry, collection fails again, and after two rounds the job fails without ever being resubmitted. The AC-05 retry proof only checks "retry keeps preset values and seed", so a fake that does not keep history would let this bug pass. The ComfyUI on win-main also accepts a client-supplied `prompt_id` UUID on POST /prompt (the `client_prompt_id = json_data.get("prompt_id")` branch in post_prompt, route at server.py:1164), which allows a simpler and exact design.
+PROPOSAL: Give each submission attempt its own identity. The best option is a fresh UUID `prompt_id` that the app stores on the row before it calls POST /prompt and then looks up by ID. The alternative is a client_id carrying an attempt number. Add retry-after-failure and retry-after-interrupt cases to the AC-05 and AC-06 proofs, with the fake keeping the earlier prompt in its history and receiving a new `/prompt` call.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (tracker step 1, line 228 onward); Design > ComfyUI client (line 188); AC-03; Test Plan row AC-03
+EVIDENCE: Step 1 only says what happens when ComfyUI is unreachable. On win-main, POST /prompt returns HTTP 400 with `error` and `node_errors` when the graph fails validation, for example a missing model or node (post_prompt in server.py). The document only says "a non-2xx answer ... becomes a typed error" and never gives the job's resulting state. Two implementers could leave the job `pending` and resubmit it every 2 seconds forever, or stop the whole submission loop at that job, or fail it. An upload failure on an image job is just as undefined. AC-03 covers only errors that come back through history.
+PROPOSAL: State that a 4xx rejection from /prompt or /upload/image marks the job `failed` with ComfyUI's error text and the tracker moves on to the next job, while timeouts and 5xx keep the job `pending`. Add a fake rejection case to the AC-03 tracker test.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Cancel, retry and delete (lines 260-263); Design > ComfyUI client (`/interrupt`); tracker step 5 (line 240); AC-05; Test Plan row AC-05
+EVIDENCE: The design reads `/queue`, checks that the running prompt is the job's own, and only then calls `/interrupt`. A prompt that finishes between those two calls lets the next prompt start, which may belong to the owner's Comfy Desktop, and a bare `/interrupt` is global ("Global interrupt (no prompt_id specified)", post_interrupt in server.py on win-main). The installed ComfyUI 0.46.2 offers `/interrupt` with a `prompt_id` body and also `POST /api/jobs/{job_id}/cancel`, whose `interrupt_if_running` is documented in the code as "Atomic: only interrupts if the job is still the one running". The ComfyUI client's endpoint list includes neither form. A fake that answers `/queue` and `/interrupt` in strict sequence cannot expose this race, so the AC-05 proof passes on the racy implementation.
+PROPOSAL: Specify a targeted cancel, either `POST /api/jobs/<prompt id>/cancel` or `/interrupt` with `{"prompt_id": ...}`, for both user cancel and the 15-minute timeout. Make the AC-05 proof assert that the fake receives the prompt ID in the interrupt request.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Access token (line 289, "10 per minute per client address"); AC-12; Test Plan row AC-12
+EVIDENCE: The server listens on 127.0.0.1 behind `tailscale serve`, so every request the deployed app receives comes from the loopback address. Tailscale 1.104.4 (the version on win-main) carries the real source in a header: `ipn/ipnlocal/serve.go:1150` `r.Out.Header.Set("X-Forwarded-For", c.SrcAddr.Addr().String())`. The document never says which address is the client address. Keyed on the socket address, one wrong-token loop would lock out the owner and the friend together. The AC-12 test runs without the proxy, so it passes either way.
+PROPOSAL: Say that the limiter keys on `X-Forwarded-For` only when the socket peer is loopback, and on the socket address otherwise. Add an AC-12 test showing that two different forwarded addresses get separate budgets.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > HTTP API (line 309, 20 MB per image); Design > Jobs and batches (25 jobs per batch, line 193 onward); Design > Runtime and layout (`Bun.serve`); AC-02; Test Plan row AC-02
+EVIDENCE: With 25 images of up to 20 MB each, one valid multipart batch can be 500 MB. Bun's default `maxRequestBodySize` is 128 MB (`packages/bun-types/serve.d.ts:844` "@default 1024 * 1024 * 128 // 128MB"). Bun refuses a larger body before the handler runs, so a batch that satisfies every stated limit gets a bare error and no message. That conflicts with AC-02's "rejected with a message" behaviour for invalid batches and with accepting valid ones. The AC-02 proofs only use one oversized file, so they cannot catch it.
+PROPOSAL: Set a request body limit that matches the batch limits, or cap the total batch size and state that cap. Add an AC-02 case for a maximal valid image batch, and one just over the total cap that is rejected with the app's message.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (lines 215-220); Design > Jobs and batches (lines 193-196); Design > Cancel, retry and delete (line 266, "Retry counts toward the 100 unfinished jobs limit"); AC-02; Test Plan row AC-02
+EVIDENCE: The design validates the batch, including the 100-unfinished check, writes the image bytes, and only then commits. Several cases are undefined. Two concurrent batches can both pass the check across the async gap and together go over 100. Two concurrent requests with the same batch ID can both write files, and one then fails on the unique key: does it return the existing batch or a 500? A repeat with the same ID but different content is not covered. Files written by a request whose transaction fails, or by a duplicate request, are left orphaned. Line 266 does not say whether a retry that would exceed 100 is refused, or with what message. The AC-02 proof only tests a sequential repeat.
+PROPOSAL: Run the limit check and the insert in one immediate transaction. Write uploads to a staging path and move them into place only after the commit, deleting them otherwise. Define the response to a concurrent duplicate ID and to a retry that hits the limit, and add concurrent-request cases to the AC-02 tests.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (job row, line 210); tracker step 1 ("oldest first", line 228); tracker step 5 (line 240); Design > HTTP API (`GET /api/jobs`, "newest first", line 300); Design > Export (line 324, "creation time"); Design > Submission, concurrency and idempotency (line 222, "mark intent")
+EVIDENCE: The listed job row fields are batch, preset values, seed, prompt text or upload name, prompt ID, resubmission count and error message. They include no creation time and no running-since time, yet ordering, the 15-minute timeout and the manifest's creation time all depend on timestamps. Handlers "mark intent (cancel, retry, delete)", but no state or column holds a pending cancel of a `submitted` job, and nothing says which wins if the tracker finds that job finished in history before it acts on the cancel.
+PROPOSAL: Add created, submitted and started timestamps and a cancel-requested marker to the row definition. State that a cancel request loses to a completion already in history, or the reverse, and add that race to the AC-05 tests.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (collection paragraph, lines 245-247); AC-06; Test Plan row AC-06 (fault-injection sentence)
+EVIDENCE: Design downloads "each file ... to a temporary name and renamed into place", so after the first rename one file is already at its final path. The AC-06 proof "kills the server between the two file writes and asserts ... no file at the final path until the next tick completes". If "the final path" means either file, a correct per-file rename fails the proof. If it means only the second file, the proof says nothing about the first. Two implementers would read and build this differently.
+PROPOSAL: Either stage both files in a temporary directory and rename the directory once, or change the proof to assert no `done` row and no partial file at either final path, with a complete first file allowed.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (lines 158-161); AC-11; Test Plan row AC-11
+EVIDENCE: "ComfyUI loads and unloads models per node within a prompt the same way it does across prompts" has no citation, though Design must cite its claims. ComfyUI keeps a prompt's node outputs, including loaded model objects, until the prompt ends, while the script runs the image and mesh graphs as two separate prompts (scripts/generate_3d.py:226 and :236). The document names AC-11 as the check that the combined prompt fits the 16 GB card (HANDOFF.md:23, 32 GB RAM; win-main system_stats showed ram_total 34039816192). Yet the AC-11 proof runs only 5k detail and 1024 textures, while the defaults are 10k and 2048, and it never runs Hunyuan3D. The proof can pass while a default job fails with out-of-memory.
+PROPOSAL: Run the live check at the default preset (TRELLIS.2, 10k, 2048) and with one Hunyuan3D job, or cite evidence for the memory claim. Otherwise state the limitation in the criterion.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Access token (line 284, "never prints or copies it off win-main"); Context > Owner summary (line 38, "signs in once with a shared access token"); Test Plan row AC-11 ("with the token read on win-main")
+EVIDENCE: The live check runs against the deployed URL from another machine with "the token read on win-main", which means the token leaves win-main even though the design says it is never copied off. No section says how the friend receives the token, or how the owner rotates it, although changing the token is mentioned as the way to sign every browser out.
+PROPOSAL: Define how the token is handed over and rotated, for example the owner reads `config.yaml` over SSH and passes it out of band, and how `verify:live` gets the token without storing it. Make the deploy script statement agree with that.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (line 350, seed fixture); Scope (seed command bullet); Test Plan row AC-07 ("on the seeded fixture")
+EVIDENCE: conventions/frontend-testing.md lines 69-72 say default seeds "must be inert ... Inspect the workers that consume seeded rows and satisfy their lifecycle preconditions". The seed creates `submitted` jobs, but the tracker treats any `submitted` job whose prompt ID ComfyUI does not know as lost and resubmits it (tracker step 4). Against the fake, the fixture's submitted jobs change state on their own. Against a real ComfyUI, seeding queues real GPU work. The document also does not say how a rerun avoids duplicate rows (frontend-testing.md lines 61-64) or which ownership boundary a reset uses.
+PROPOSAL: Define how seeded `submitted` jobs stay stable, for example the fake preloads matching queued prompts or the seed refuses a non-fake ComfyUI URL. Give the seed stable IDs and an idempotent rerun, and add a check for both.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (line 49, "Playwright journeys in Chromium and Firefox across a viewport matrix"); Test Plan rows AC-09 (Chromium only), AC-12 (`signin.spec.ts`, no browser named), AC-02, AC-03, AC-05; Design > Page (line 315)
+EVIDENCE: The owner summary promises Chromium and Firefox across the viewport matrix, but the AC-09 row runs only Chromium. frontend-testing.md lines 103-105 require Firefox for sign-in and cookies, and react.md line 167 requires both engines for authentication, storage and file transfer, yet the AC-12 sign-in and AC-08 download journeys name no Firefox run. frontend-testing.md lines 88-89 require an unseeded or empty-state scenario next to the populated one. The seed has an empty profile, but no Test Plan row uses it.
+PROPOSAL: Make the summary match the plan. Run the sign-in, cookie and download journeys in Firefox, and add an empty-library scenario to a named spec.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria (no criterion); Design > Page; Design > Runtime and layout (`@google/model-viewer`, React, TanStack Query)
+EVIDENCE: conventions/react.md lines 96-99: "For changes to routes, shared providers, dependencies, or visible assets, include client delivery cost in the acceptance criteria ... For a new application, record the initial budget and measurement conditions instead." This is a new React application that adds a 3D viewer dependency, and no criterion or Test Plan row records an initial budget or measurement conditions.
+PROPOSAL: Add a criterion that records the initial entry budget and its measurement conditions, for example with the viewer loaded only when an asset is selected, and add a Test Plan row that measures the built output.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 342-346); Context > Owner summary (repository paragraph); Scope (CI bullet)
+EVIDENCE: The repository becomes public. conventions/repository-security.md (Public repositories) requires the dependency graph, Dependabot alerts, secret scanning, push protection, the CodeQL workflow covering TypeScript and GitHub Actions, and Scorecard with `publish_results: true`, "in the same change of visibility". conventions/delivery.md (Pinning and updates) names managed Renovate as the updater, and every dependency must be discoverable by it. The document mentions only `bun run verify` and SHA pinning, and no criterion covers repository settings.
+PROPOSAL: Add the public-repository security workflows, settings and updater to Scope and Design, together with a criterion and a proof such as a `gh api` check after the repository is created, or record which of these the owner handles.
+
+FINDING: F-15
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Context > Owner summary (authorization paragraph); Design > Build, deployment and exposure; AC-10; AC-11
+EVIDENCE: Acceptance authorizes "merging the feature PR once CI and an independent implementation review pass, and deploying to win-main". The implementation review must see AC-10 and AC-11 met, and both need the deployed app, so deployment has to happen from the feature branch before merge. The document never says this, and never says which artifact is deployed (a local build or the CI workflow artifact). conventions/delivery.md (Feature delivery, "Prove the real release path") requires naming each artifact and the path that builds and publishes it.
+PROPOSAL: State that the CI-built `asset-studio.exe` from the feature branch head is deployed before the implementation review, then redeployed from `main` after merge, or give whatever order is intended, and name that path as the release path.
+
+FINDING: F-16
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 274-279); Design > Build, deployment and exposure (deploy.sh, line 333 onward); Acceptance Criteria (no criterion)
+EVIDENCE: Several deployment behaviours have no criterion or Test Plan row: running deploy.sh again keeps the existing token and data, it stops the task before swapping the exe, it leaves `asset-studio.previous.exe` behind, and it backs up the database before migrating. The rollback procedure is prose with no script or check. It also leaves undefined what happens to asset files and ComfyUI prompts of jobs created after the backup, and whether an older executable refuses a database with a newer schema version. Running the deploy again and overwriting the token would sign the friend out without anyone noticing.
+PROPOSAL: Add a criterion that a second deploy keeps the token, data and the previous executable, with a proof such as running deploy.sh twice and comparing the config hash. Specify that the app refuses to start on a newer schema version.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: should-fix
+WHERE: Frontmatter `covers`; Design > Pipeline port and combined graphs (golden check); Test Plan row AC-01
+EVIDENCE: `bun run golden:check` loads `scripts/generate_3d.py` under `python3 -I` and fails on any difference, so a change to that script changes the AC-01 result. The convention says "`covers` lists every path whose change can affect the feature", but `covers` does not list `scripts/generate_3d.py`, so freshness and `feature_tree_clean` ignore changes to it.
+PROPOSAL: Add `scripts/generate_3d.py` to `covers`, plus any root build configuration the feature reads that lives outside `app/`, such as a Vite or bunfig file.
+
+FINDING: F-18
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Scope (README bullet, line 111); Design > Verification commands; Open Questions
+EVIDENCE: AGENTS.md:21 says "No build or test commands exist yet." frontend-testing.md lines 28-29 require that "The repository's README and agent instructions name the commands to bootstrap, seed, run, verify and clean". The document puts only the README in scope, so after the feature AGENTS.md would be out of date. A change to the repository instructions has to be an owner decision, not something assumed.
+PROPOSAL: Raise an Open Question on updating the AGENTS.md "Local commands and constraints" section with the new commands as part of this feature, and add AGENTS.md to Scope if the owner agrees.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (lines 315-316); AC-04; Test Plan row AC-04
+EVIDENCE: The queue query polls only "while any job is unfinished and stops when none are", and the document defines no separate health poll. With no unfinished jobs, the page never learns that ComfyUI went offline, and it never shows jobs that another user submitted. AC-04 requires the page to show ComfyUI offline, but `offline.spec.ts` runs with jobs pending and submitted, so it passes on that implementation.
+PROPOSAL: Specify a health query (and a slower list refresh) that keeps polling while the page is open, and add an AC-04 Playwright case with no unfinished jobs.
+
+FINDING: F-20
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (presets table, Seed row, line 172)
+EVIDENCE: "seed of the first variant; variant n uses seed + n" does not say whether n starts at 0 or 1. If the first variant is n = 1, it gets seed + 1, which contradicts "seed of the first variant".
+PROPOSAL: Say "variant k, counted from 0, uses seed + k modulo 2^32".
 
 ## Sources
 
