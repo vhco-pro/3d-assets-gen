@@ -40,9 +40,68 @@ async function checkLayout(page: Page): Promise<void> {
     return problems;
   });
   expect(report).toEqual([]);
+  await checkContrast(page);
 }
 
-async function primaryActionReachable(page: Page, name: string): Promise<void> {
+/**
+ * Design > Page contrast rules: text at least 4.5:1 (3:1 when large), control borders at least 3:1, measured
+ * against the composited background (each ancestor's background with alpha above zero, blended down to the
+ * page gradient) at both the darkest and the lightest gradient stop. Disabled controls are exempt.
+ */
+async function checkContrast(page: Page): Promise<void> {
+  const problems = await page.evaluate(() => {
+    type C = [number, number, number, number];
+    const parse = (s: string): C => {
+      const m = /rgba?\(([\d.]+), ([\d.]+), ([\d.]+)(?:, ([\d.]+))?\)/.exec(s);
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])] : [0, 0, 0, 0];
+    };
+    const over = (top: C, base: C): C => [0, 1, 2].map((i) => (top[i] ?? 0) * top[3] + (base[i] ?? 0) * (1 - top[3])).concat(1) as C;
+    const lum = (c: C): number => {
+      const f = (v: number): number => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+    };
+    const ratio = (a: C, b: C): number => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return ((x ?? 0) + 0.05) / ((y ?? 0) + 0.05); };
+    const backdrop = (el: Element | null, stop: C): C => {
+      const chain: C[] = [];
+      for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+        const bg = parse(getComputedStyle(e).backgroundColor);
+        if (bg[3] > 0) chain.push(bg);
+      }
+      return chain.reverse().reduce((acc, c) => over(c, acc), stop);
+    };
+    const visible = (el: Element): boolean => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.opacity !== "0";
+    };
+    const stops: C[] = [[2, 8, 20, 1], [11, 31, 69, 1]];
+    const out: string[] = [];
+    for (const el of document.querySelectorAll("body *")) {
+      if (el.closest("model-viewer, [disabled], [aria-disabled='true']") || !visible(el)) continue;
+      const own = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+      const s = getComputedStyle(el);
+      for (const stop of stops) {
+        if (own) {
+          const bg = backdrop(el, stop);
+          const size = parseFloat(s.fontSize);
+          const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
+          const r = ratio(over(parse(s.color), bg), bg);
+          if (r < (large ? 3 : 4.5)) out.push(`text ${r.toFixed(2)}: ${el.textContent.trim().slice(0, 30)}`);
+        }
+        if (el.matches("button, input:not([type=checkbox]):not([type=radio]):not([type=file]), select, textarea, [data-control]") && parseFloat(s.borderTopWidth) > 0) {
+          const outside = backdrop(el.parentElement, stop);
+          const border = over(parse(s.borderTopColor), outside);
+          const r = ratio(border, outside);
+          if (r < 3) out.push(`border ${r.toFixed(2)}: ${el.tagName} ${el.textContent.trim().slice(0, 30)}`);
+        }
+      }
+    }
+    return [...new Set(out)];
+  });
+  expect(problems).toEqual([]);
+}
+
+async function primaryActionReachable(page: Page, name: string | RegExp): Promise<void> {
   const action = page.getByRole("button", { name });
   await action.scrollIntoViewIfNeeded();
   const box = await action.boundingBox();
@@ -63,18 +122,19 @@ for (const [w, h] of VIEWPORTS) {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
     await checkLayout(page);
-    await primaryActionReachable(page, "Generate");
+    await primaryActionReachable(page, /^Generate/);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-main.png`), fullPage: true });
     // The submit journey: a new job in the queue and the confirmation, then the library's preview panel.
     await page.getByLabel("Prompts").fill(`layout ${String(w)}x${String(h)} ${Math.random().toString(36).slice(2, 8)}`);
-    await page.getByRole("button", { name: "Generate" }).click();
+    await page.getByRole("button", { name: /^Generate/ }).click();
     await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
     await checkLayout(page);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-submitted.png`), fullPage: true });
     await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
-    await expect(page.locator("model-viewer")).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator("dialog[open] model-viewer")).toBeVisible({ timeout: 60_000 });
     await checkLayout(page);
-    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-preview.png`), fullPage: true });
+    await dialogActionsInside(page);
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-preview.png`) });
   });
 }
 
@@ -91,7 +151,7 @@ test("sign-in and submit complete by keyboard alone", async ({ page }) => {
   await page.keyboard.type(`keyboard ${Math.random().toString(36).slice(2, 8)}`);
   for (let i = 0; i < 30; i++) {
     await page.keyboard.press("Tab");
-    if (await page.getByRole("button", { name: "Generate" }).evaluate((el) => el === document.activeElement)) break;
+    if (await page.getByRole("button", { name: /^Generate/ }).evaluate((el) => el === document.activeElement)) break;
   }
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
@@ -104,8 +164,33 @@ test("the library and viewer work with reduced motion", async ({ page }) => {
   await page.getByLabel("Access token").fill(s.token);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
-  const viewer = page.locator("model-viewer");
+  const viewer = page.locator("dialog[open] model-viewer");
   await expect(viewer).toBeVisible({ timeout: 60_000 });
   expect(await viewer.evaluate((el) => el.hasAttribute("auto-rotate"))).toBe(false);
   await expect(viewer).toHaveAttribute("interpolation-decay", "0");
+});
+
+
+/** The open preview dialog keeps Close and Download inside the viewport (Design > Page). */
+async function dialogActionsInside(page: Page): Promise<void> {
+  const vp = page.viewportSize();
+  for (const name of ["Close", /^Download/]) {
+    const b = await page.locator("dialog[open]").getByRole("button", { name }).boundingBox();
+    expect(b && vp && b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height, `${String(name)} inside ${JSON.stringify(vp)}`).toBeTruthy();
+  }
+}
+
+test("the open preview dialog survives resizes with Close and Download inside", async ({ page }) => {
+  const s = shared();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(s.url);
+  await page.getByLabel("Access token").fill(s.token);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
+  await expect(page.locator("dialog[open]")).toBeVisible();
+  for (const [w, h] of [[390, 844], [844, 390]] as const) {
+    await page.setViewportSize({ width: w, height: h });
+    await dialogActionsInside(page);
+    await checkLayout(page);
+  }
 });
