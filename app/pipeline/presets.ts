@@ -1,8 +1,15 @@
 // Preset fields the page offers and how a batch expands into jobs. Shared by the page and the server,
 // so it uses only web-standard APIs.
 
-export const DETAILS = [5000, 10000, 20000] as const;
-export const TEXTURES = [1024, 2048] as const;
+export const DETAILS = [5000, 10000, 20000, 30000] as const;
+export const TEXTURES = [1024, 2048, 4096] as const;
+/** Ultra is exactly this pair; the batch API refuses 30000 or 4096 in any other pairing. */
+export const ULTRA_FACES = 30000;
+export const ULTRA_TEX = 4096;
+export const ULTRA_MESSAGE = "Ultra uses 30k triangles with 4096 textures.";
+export const isUltra = (faces: number, tex: number | null): boolean => faces === ULTRA_FACES && tex === ULTRA_TEX;
+/** A valid Detail and Texture pairing: Ultra's pair, or neither half of it. */
+export const validPairing = (faces: number, tex: number): boolean => isUltra(faces, tex) || (faces !== ULTRA_FACES && tex !== ULTRA_TEX);
 export const MAX_VARIANTS = 4;
 export const MAX_SEED = 4294967295;
 export const IMAGE_SIZE = 1024;

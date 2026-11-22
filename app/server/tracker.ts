@@ -4,6 +4,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { combineGraph, type JobGraphInput } from "../pipeline/combine.ts";
+import { isUltra } from "../pipeline/presets.ts";
 import { ComfyError, type ComfyClient, type HistoryEntry, type QueueSnapshot } from "./comfy.ts";
 import type { Config } from "./config.ts";
 import { assetDir, completeAsset, MIME, removeComfyFiles, uploadPath } from "./files.ts";
@@ -15,6 +16,8 @@ import type { Store } from "./store.ts";
 export const MIN_COMFY_VERSION = [0, 46, 2] as const;
 export const POST_WINDOW_MS = 30_000;
 export const RUN_TIMEOUT_MS = 15 * 60_000;
+/** Ultra jobs take about 10.5 minutes on win-main, so they get twice the usual run limit. */
+export const ULTRA_RUN_TIMEOUT_MS = 30 * 60_000;
 const MAX_LOSSES = 3;
 const MAX_SERVER_ERRORS = 3;
 const TICK_MS = 2000;
@@ -338,6 +341,9 @@ export class Tracker implements TrackerView {
   private async timeouts(): Promise<void> {
     const cutoff = this.now() - RUN_TIMEOUT_MS;
     for (const job of this.jobs("state = 'submitted' AND fixture = 0 AND started_at IS NOT NULL AND started_at < ?", cutoff)) {
+      const limit = isUltra(job.faces, job.tex) ? ULTRA_RUN_TIMEOUT_MS : RUN_TIMEOUT_MS;
+      if ((job.started_at ?? 0) >= this.now() - limit) continue;
+      const message = `Stopped after running longer than ${String(limit / 60_000)} minutes.`;
       const promptId = job.prompt_id ?? "";
       let cancelled: boolean;
       try {
@@ -347,10 +353,10 @@ export class Tracker implements TrackerView {
         throw e;
       }
       if (cancelled) {
-        this.markFailed(job, "Stopped after running longer than 15 minutes.");
+        this.markFailed(job, message);
         continue;
       }
-      if (!(await this.settle(job, await this.comfy.history(promptId)))) this.markFailed(job, "Stopped after running longer than 15 minutes.");
+      if (!(await this.settle(job, await this.comfy.history(promptId)))) this.markFailed(job, message);
     }
   }
 

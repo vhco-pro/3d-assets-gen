@@ -1,6 +1,7 @@
 // Builds the single ComfyUI graph a job submits: image graph plus the TRELLIS.2 mesh graph for a prompt job,
 // or the mesh graph alone for an image job, plus a thumbnail branch. Rules are in the feature document's Design.
 import { imageGraph, STYLE_SUFFIX, trellisGraph, type Graph, type Ref } from "./graphs.ts";
+import { isUltra } from "./presets.ts";
 import { IMAGE_SIZE } from "./presets.ts";
 
 interface Common {
@@ -19,7 +20,7 @@ function isRef(v: unknown): v is Ref {
 }
 
 function meshGraph(input: JobGraphInput, image: string, prefix: string): Graph {
-  return trellisGraph({ image, seed: input.seed, prefix, faces: input.faces, tex: input.tex });
+  return trellisGraph({ image, seed: input.seed, prefix, faces: input.faces, tex: input.tex, ultra: isUltra(input.faces, input.tex) });
 }
 
 export function combineGraph(input: JobGraphInput, prefix: string): Graph {

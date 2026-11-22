@@ -43,7 +43,7 @@ function tracker(opts: { timeoutMs?: number; faults?: Faults } = {}): Tracker {
 
 let batchSeq = 0;
 /** Inserts a batch of prompt jobs (or image jobs with small PNG uploads) directly; returns job IDs in order. */
-function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "trellis" | "hunyuan"; fixture?: boolean } = {}): string[] {
+function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "trellis" | "hunyuan"; fixture?: boolean; ultra?: boolean } = {}): string[] {
   const kind = opts.kind ?? "prompt";
   const batch = crypto.randomUUID();
   const created = clock.t + batchSeq++;
@@ -59,9 +59,9 @@ function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "
     }
     store.db.run(
       `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, fixture, created_at, queued_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, 'pending', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'pending', ?, ?, ?)`,
       [id, batch, position, kind, kind === "prompt" ? item : null, kind === "image" ? item : null, kind === "image" ? "png" : null,
-        opts.engine ?? "trellis", (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created, created],
+        opts.engine ?? "trellis", opts.ultra ? 30000 : 10000, opts.ultra ? 4096 : (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created, created],
     );
   });
   return ids;
@@ -684,5 +684,49 @@ describe("AC-26 source previews", () => {
   test("an image job's upload is its preview from the start", () => {
     const [b = ""] = addBatch(["chest.png"], { kind: "image" });
     expect(tracker().sourcePreview(job(b)) ?? "").toMatch(/uploads\/.+\/0\.png$/);
+  });
+});
+
+describe("AC-29 Ultra jobs", () => {
+  const sampler = (body: { prompt: Record<string, unknown> } | undefined, id: string): unknown =>
+    (body?.prompt[id] as { inputs: Record<string, unknown> } | undefined)?.inputs;
+  test("an Ultra job posts the Ultra steps and remesh; a 10k job keeps the standard ones", async () => {
+    addBatch(["an ultra crate"], { ultra: true });
+    await tracker().tick();
+    const ultra = promptBodies().at(-1);
+    expect(["114", "119", "121", "124"].map((n) => (sampler(ultra, n) as { steps: number }).steps)).toEqual([20, 30, 20, 20]);
+    expect((sampler(ultra, "126") as { resolution: number }).resolution).toBe(1024);
+    expect((sampler(ultra, "127") as { target_face_count: number }).target_face_count).toBe(30000);
+    expect((sampler(ultra, "130") as { texture_size: number }).texture_size).toBe(4096);
+    addBatch(["a crate"]);
+    await tracker().tick();
+    const standard = promptBodies().at(-1);
+    expect(["114", "119", "121", "124"].map((n) => (sampler(standard, n) as { steps: number }).steps)).toEqual([12, 20, 12, 12]);
+    expect((sampler(standard, "126") as { resolution: number }).resolution).toBe(768);
+  });
+
+  test("a running Ultra job is left alone at 29 min 58 s and cancelled at 30 min 2 s, naming 30 minutes", async () => {
+    const [a = ""] = addBatch(["an ultra crate"], { ultra: true });
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).started_at !== null);
+    const started = job(a).started_at ?? 0;
+    clock.t = started + 29 * 60_000 + 58_000;
+    await t.tick();
+    expect(job(a).state).toBe("submitted");
+    clock.t = started + 30 * 60_000 + 2000;
+    await t.tick();
+    expect(job(a).state).toBe("failed");
+    expect(job(a).error).toBe("Stopped after running longer than 30 minutes.");
+  });
+
+  test("a 10k job is still cancelled past 15 minutes", async () => {
+    const [a = ""] = addBatch(["a crate"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).started_at !== null);
+    clock.t = (job(a).started_at ?? 0) + 15 * 60_000 + 2000;
+    await t.tick();
+    expect(job(a).error).toBe("Stopped after running longer than 15 minutes.");
   });
 });

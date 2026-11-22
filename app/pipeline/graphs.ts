@@ -47,9 +47,16 @@ export interface TrellisGraphInput {
   prefix: string;
   faces: number;
   tex: number;
+  /** Ultra: more sampler steps and a finer remesh, as trellis_graph(..., ultra=True) in the script. */
+  ultra?: boolean;
 }
 
-export function trellisGraph({ image, seed, prefix, faces, tex }: TrellisGraphInput): Graph {
+const STANDARD_STEPS = [12, 20, 12, 12] as const;
+const ULTRA_STEPS = [20, 30, 20, 20] as const;
+
+export function trellisGraph({ image, seed, prefix, faces, tex, ultra = false }: TrellisGraphInput): Graph {
+  const [s1, s2, s3, s4] = ultra ? ULTRA_STEPS : STANDARD_STEPS;
+  const remesh = ultra ? 1024 : 768;
   const ks = (model: Ref, positive: Ref, negative: Ref, latent: Ref, steps: number, cfg: number, scheduler: string): GraphNode => ({
     class_type: "KSampler",
     inputs: {
@@ -73,25 +80,25 @@ export function trellisGraph({ image, seed, prefix, faces, tex }: TrellisGraphIn
     "11": { class_type: "RescaleCFG", inputs: { model: ["10", 0], multiplier: 0.7 } },
     "12": { class_type: "ModelSamplingSD3", inputs: { model: ["11", 0], shift: 5.0 } },
     "13": { class_type: "EmptyTrellis2LatentStructure", inputs: { batch_size: 1 } },
-    "14": ks(["12", 0], ["6", 0], ["6", 1], ["13", 0], 12, 7.5, "normal"),
+    "14": ks(["12", 0], ["6", 0], ["6", 1], ["13", 0], s1, 7.5, "normal"),
     "15": { class_type: "VaeDecodeStructureTrellis2", inputs: { samples: ["14", 0], vae: ["8", 0], resolution: "32" } },
     "16": { class_type: "CFGOverride", inputs: { model: ["7", 0], cfg: 1.0, start_percent: 0.769, end_percent: 1.0 } },
     "17": { class_type: "RescaleCFG", inputs: { model: ["16", 0], multiplier: 0.5 } },
     "18": { class_type: "Trellis2ShapeStage", inputs: { positive: ["6", 0], negative: ["6", 1], voxel: ["15", 0] } },
-    "19": ks(["17", 0], ["18", 0], ["18", 1], ["18", 2], 20, 7.5, "normal"),
+    "19": ks(["17", 0], ["18", 0], ["18", 1], ["18", 2], s2, 7.5, "normal"),
     "20": {
       class_type: "Trellis2UpsampleStage",
       inputs: { positive: ["18", 0], negative: ["18", 1], shape_latent: ["19", 0], vae: ["8", 0], target_resolution: 1536 },
     },
-    "21": ks(["17", 0], ["20", 0], ["20", 1], ["20", 2], 12, 7.5, "simple"),
+    "21": ks(["17", 0], ["20", 0], ["20", 1], ["20", 2], s3, 7.5, "simple"),
     "22": { class_type: "VaeDecodeShapeTrellis", inputs: { samples: ["21", 0], vae: ["8", 0] } },
     "23": { class_type: "Trellis2TextureStage", inputs: { positive: ["20", 0], negative: ["20", 1], shape_latent: ["21", 0] } },
-    "24": ks(["7", 0], ["23", 0], ["23", 1], ["23", 2], 12, 1.0, "normal"),
+    "24": ks(["7", 0], ["23", 0], ["23", 1], ["23", 2], s4, 1.0, "normal"),
     "25": { class_type: "VaeDecodeTextureTrellis", inputs: { samples: ["24", 0], vae: ["9", 0], shape_subdivides: ["22", 1] } },
     "26": {
       class_type: "RemeshMesh",
       inputs: {
-        mesh: ["22", 0], resolution: 768, sign_mode: "solid", "sign_mode.fill": 20.0, "sign_mode.qef": false,
+        mesh: ["22", 0], resolution: remesh, sign_mode: "solid", "sign_mode.fill": 20.0, "sign_mode.qef": false,
         band: 1.0, project_back: 0.0, fix_poles: false, smooth_iters: 20,
         drop_small_components: 0.01, precluster_max_verts: 20000000,
       },

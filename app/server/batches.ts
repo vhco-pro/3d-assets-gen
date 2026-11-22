@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync, renameSync, rmSync, type WriteStream } fr
 import { basename, join } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
-import { DETAILS, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, planJobs, TEXTURES, type Presets } from "../pipeline/presets.ts";
+import { DETAILS, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, planJobs, TEXTURES, ULTRA_MESSAGE, validPairing, type Presets } from "../pipeline/presets.ts";
 import type { Config } from "./config.ts";
 import { jobView, type JobRow } from "./jobs.ts";
 import type { Store } from "./store.ts";
@@ -53,9 +53,10 @@ export function parsePresets(raw: unknown): Presets {
   // A page loaded before the upgrade may still send an engine; only TRELLIS.2 remains.
   if (raw.engine !== undefined && raw.engine !== "trellis") return fail(400, HUNYUAN_GONE);
   const faces = raw.faces;
-  if (typeof faces !== "number" || !(DETAILS as readonly number[]).includes(faces)) return fail(400, "detail must be 5000, 10000 or 20000 triangles.");
+  if (typeof faces !== "number" || !(DETAILS as readonly number[]).includes(faces)) return fail(400, "detail must be 5000, 10000, 20000 or 30000 triangles.");
   const tex = raw.tex;
-  if (typeof tex !== "number" || !(TEXTURES as readonly number[]).includes(tex)) return fail(400, "texture must be 1024 or 2048.");
+  if (typeof tex !== "number" || !(TEXTURES as readonly number[]).includes(tex)) return fail(400, "texture must be 1024, 2048 or 4096.");
+  if (!validPairing(faces, tex)) return fail(400, ULTRA_MESSAGE);
   const variants = raw.variants;
   if (typeof variants !== "number" || !Number.isInteger(variants) || variants < 1 || variants > MAX_VARIANTS) {
     return fail(400, `variants must be between 1 and ${String(MAX_VARIANTS)}.`);
