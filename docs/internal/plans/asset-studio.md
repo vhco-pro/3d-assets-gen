@@ -1391,6 +1391,7 @@ None.
 | 2026-11-22 | R-18 | spec | `8b38a87` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 6 nits |
 | 2026-11-22 | R-19 | spec | `2420d68` | claude-opus-5-5 | procedural | 0 blocking, 11 should-fix, 2 nits |
 | 2026-11-22 | R-19 | spec | `2420d68` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-20 | spec | `05f83e4` | claude-opus-5-5 | procedural | 1 blocking, 6 should-fix, 3 nits |
 
 ### R-1
 
@@ -3426,6 +3427,80 @@ SEVERITY: nit
 WHERE: Acceptance Criteria AC-28 (line 1156); Test Plan row AC-22 (line 1183); Design > HTTP API (lines 635-639)
 EVIDENCE: AC-28 says "schema version 2 adds the column with null for existing rows", but schema 2 adds two columns, `shared_style` and `queued_at` (lines 585-587). Its "last value used in that browser" reads as saved on submit, while Design saves on every change (line 738). The AC-22 row still calls `hold-accept` the fake's "new" control, though T40 added it. The HTTP API sentence lists `queuedAt` after the `sourceReady` clause ("... `sourceReady`, which is true when ... and `queuedAt`; the server decides ..."), which reads as part of the `sourceReady` definition.
 PROPOSAL: Write "adds the `shared_style` and `queued_at` columns" and "the last value entered in that browser" in AC-28, drop "new" in the AC-22 row, and move `queuedAt` next to the other times in the HTTP API sentence.
+
+### R-20
+
+TARGET: 05f83e45606b6e4fb3700652dd71ecbadb81c03b
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan row AC-15 (line 1217, last sentence); Tasks T44 (line 1360); Context > Owner summary (lines 96-99 and 122-126); Acceptance Criteria AC-15 (line 1183)
+EVIDENCE: The AC-15 row now says the owner accepted the 2026-11-22 production upgrade from `0.2.0-feat-asset-studio.1` (schema 1) to `.3` (schema 2) "in place of rerunning the manual procedure, which needs a database at the older schema". T44 replaces `check-upgrade.sh` with that record. The summary says the check "no longer runs between the two prereleases of this revision, because production already holds the newer schema". That reason is false for the procedure as the row writes it. `scripts/deploy/check-upgrade.sh` at 05f83e4 deploys FIRST, deploys SECOND, reruns SECOND, removes FIRST's image, runs rollback.sh and then runs the logon test. None of these steps needs an older schema. `scripts/deploy/remote/rollback.ps1:13-15` restores a backup only when the two images' schemas differ. Two schema-2 prereleases, for example `.3` and this revision's Ultra prerelease, pass the new step 4 guard ("proceeds when it is equal or higher") and run the whole procedure on production as it is. Rollback across the schema change is already out of scope (Scope, line 285). The substitute only shows the migration, its backup and that the data was kept. It does not show these AC-15 clauses for this revision's code: a rerun keeps the previous-version record, rollback reloads a missing image and returns the previous version serving again, and the logon task brings the app back. The only checks left for those clauses are stubbed bats tests. AC-15 is composite and "a passing subset never upgrades a composite criterion", so an implementation review cannot find AC-15 met. A past production event is also not one of the proof kinds the standard allows ("a test, a scenario with a pass condition, or a written manual procedure"). The document records no evidence for it either: no job counts, IDs or backup file name. The owner accepted the substitution on this false premise. This traces to the change this revision made.
+PROPOSAL: Run `check-upgrade.sh` between two schema-2 prereleases (for example `.3` and the Ultra prerelease) and record the result under AC-15. Keep the production 1 to 2 upgrade as extra evidence for the migration and backup, with its observed job counts and backup name. If the owner still wants to skip the procedure, raise that as an Open Question with the corrected premise and name the AC-15 clauses that would stay unproven.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-15 (line 1183, last clause); Design > Deployment and exposure (deploy.sh steps 1, 3 and 4, lines 943-963); Context > Owner summary (lines 122-123); Test Plan row AC-15 (line 1217, bats sentence); Tasks T63 and T64 (lines 1355-1356)
+EVIDENCE: AC-15 requires that `deploy.sh` refuse an older-schema image "before changing anything on `win-main`". Design puts the comparison at step 4, "before anything below changes". By then, step 1 may already have registered `AssetStudio-Docker` and started Docker Desktop, and step 3 has already run `docker load` and tagged the image on `win-main`. Asking the image for its `schema-version` also needs the image loaded there. The bats row and T63 check only that no `docker compose`, file copy or `current.json` write happens. The criterion therefore cannot be met as worded, and the proof checks something weaker than the criterion states. The summary says "before it changes anything". This traces to the change this revision made.
+PROPOSAL: Word AC-15 and the summary as Design does: before it writes any file, `current.json` or `.env`, or touches the Compose project on `win-main`. Alternatively, move the comparison before step 3 by running `schema-version` on `fedora-43` against the verified image.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (step 4, lines 960-963); Context > Owner summary (lines 122-126); Test Plan row AC-15 (bats sentence, line 1217); Tasks T63 (line 1355)
+EVIDENCE: The summary says `deploy.sh` "refuses a version that cannot read the deployed database". Step 4 compares the new image with "the currently deployed image" named by `current.json`, not with the database. The two differ in exactly the incident this revision describes. After an older prerelease was deployed over the upgraded database, `current.json` named a schema-1 image while the database was at schema 2. In that state the guard lets another schema-1 image through, and that image cannot start. Step 4 also does not define what happens when the image `current.json` names is no longer loaded on `win-main`. The AC-15 procedure itself removes images with `docker image rm`, and `rollback.sh` reloads a missing image from its Release record, but deploy has no such rule. Nor does step 4 say what happens when the `schema-version` call fails (SSH drop, Docker error): stop, or proceed as for a first deploy. The bats row covers only lower, equal, higher and nothing deployed. This traces to the change this revision made.
+PROPOSAL: Compare against the schema the database actually holds. Read `meta.schema_version` from the data volume in a throwaway container, as `rollback.ps1` already reads the backup folder with `alpine:3.22`. Otherwise, state that the guard compares images, and say what happens when the deployed image is missing or the query fails (stop with a failure is the safe choice). Add those cases to the bats row and T63.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope > Out of scope (line 283); Design > Pipeline port and combined graphs (lines 356-363, 369-371); Context > Owner summary (lines 119-120); Acceptance Criteria AC-29 (line 1197); Test Plan row AC-29 (line 1231); Tasks T65 (line 1357)
+EVIDENCE: Scope still lists "Removing or changing `scripts/generate_3d.py`; it stays as the reference, Hunyuan3D path included" as out of scope. This revision changes that file: it adds `trellis_graph(..., ultra=True)` and a `--ultra` flag (Design lines 360-361, T65). AC-29 also requires the app's graph to match "exactly as the reference script's Ultra setting does". One implementer following Scope leaves the script alone and has nothing to compare the Ultra graph with. Another follows T65. This traces to the change this revision made.
+PROPOSAL: Change the Scope line to allow the one addition: changing `scripts/generate_3d.py` beyond adding the Ultra setting and its `--ultra` flag stays out of scope, and the Hunyuan3D path is kept.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (preview dialog, lines 822-827; job row chips, lines 793-796); Design > Verification commands (fixture paragraph, lines 1155-1163); Tasks T67 (line 1359); Test Plan row AC-29 (line 1231)
+EVIDENCE: T67 changes `app/web/Viewer.tsx` for "the preview's Detail fact". Design only says the preview shows "its detail, texture, seed" and gives the `Ultra` wording to the queue chip alone. `app/web/Viewer.tsx:120` today renders `${faces / 1000}k triangles`, so one implementer shows `30k triangles` and another shows `Ultra`, and no proof checks either. T67 also adds "an Ultra fixture job", which the fixture paragraph does not list. Its state is not given either. The `queue-board.spec.ts` chip check needs a queue row (unfinished, failed or cancelled), because library cards have no chips. A new unfinished fixture job also changes the summary counts, the queue-clear estimate and which fixture prompt the fake serves as running, all of which existing specs assert on fixed values (the R-19 F-06 concern). This traces to the change this revision made.
+PROPOSAL: State what the preview shows for an Ultra job (for example `Ultra (30k triangles)`) and add it to the AC-29 row. Add the Ultra fixture job to the fixture paragraph with its state, for example a `failed` or `cancelled` job outside the four-job batch so counts that are asserted elsewhere stay put. Name it in T67.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1142-1145); Tasks T44 (line 1360)
+EVIDENCE: Design still says "Each side seeds its own data directory with its own executable's `seed` command, because head's schema 2 is newer than the base executable accepts; the base fixture lacks the new multi-job batch ... and the record names those differences." T44 says the opposite: "pairs taken from one base-seeded directory that head's executable migrates, new states after-only from head's fixture (owner answer to R-19 F-10)". The owner's answer was put into the task but never into Design, so the normative text and the task contradict each other about how the T44 record is made. This predates this revision. It is unchanged since the accepted R-19 baseline.
+PROPOSAL: Replace the Design sentence with the owner's answer: both sides serve copies of one directory seeded by the base executable, head migrates its copy, and the states this revision adds are captured after-only from head's fixture.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (no task updates `README.md`); README.md:9 at 05f83e4; Design > Deployment and exposure (step 4, lines 960-963)
+EVIDENCE: `README.md` is in `covers` and says the mesh is "decimated to 5k, 10k or 20k triangles" (README.md:9). Its `deploy.sh` row does not mention the new refusal (README.md:37). No task in T63 to T67 or T44 touches `README.md`, and every task names the files it changes. So an implementer following the tasks leaves the README contradicting the shipped Detail options and deploy behaviour. This traces to the change this revision made.
+PROPOSAL: Add `README.md` to T67 (Ultra in the presets sentence) and T64 (deploy.sh refuses an image with an older schema than the deployed one).
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Submission, concurrency and idempotency (tick step 6, lines 515-521)
+EVIDENCE: Step 6 says a timed-out job "becomes `failed` with a timeout message" and does not give the text. The current text is `Stopped after running longer than 15 minutes.` (app/server/tracker.ts:349 and 353). Unless it changes, an Ultra job stopped after 30 minutes would report 15. This traces to the change this revision made.
+PROPOSAL: Say the message names the limit that applied, 15 or 30 minutes.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 362-363); Design > Restart, upgrade and rollback (lines 592-633)
+EVIDENCE: Design says Ultra "needs no schema change" but not what a rollback to the R-19 version does with Ultra rows. That version has the same schema, so `rollback.sh` restores nothing. It shows the job as `30k` (app/web/App.tsx:412 at 05f83e4). It posts pending or retried Ultra jobs with the standard steps and remesh 768, and times them out at 15 minutes. That is harmless, but it is a recovery effect the owner may want stated. This traces to the change this revision made.
+PROPOSAL: Add one sentence: after a rollback, the older version keeps Ultra jobs, labels them 30k and runs any it submits at the standard steps.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 337-344); Context > Owner summary (lines 63-64 and 122-124)
+EVIDENCE: The Ultra measurement and the five-minute outage are stated without the command and output or log the standard asks Context and Design claims to cite ("a `file:line`, or a command and its output"). Background's earlier measurements name their commands. "The 15.3 GB VRAM peak" does not say which of the three runs it belongs to. The summary's preset list reads "1024 or 2048 textures" and leaves out 4096, although Ultra uses it. This traces to the change this revision made.
+PROPOSAL: Name how the Ultra runs were timed and sampled (for example the history timestamps and the VRAM sampler used) and which run reached 15.3 GB. Write "1024 or 2048 textures, or 4096 with Ultra" in the summary.
 
 ## Sources
 
