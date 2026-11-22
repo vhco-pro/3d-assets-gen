@@ -1323,6 +1323,7 @@ None.
 | 2026-11-22 | R-17 | spec | `557c810` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 5 nits |
 | 2026-11-22 | R-17 | spec | `557c810` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-18 | spec | `8b38a87` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 6 nits |
+| 2026-11-22 | R-19 | spec | `2420d68` | claude-opus-5-5 | procedural | 0 blocking, 11 should-fix, 2 nits |
 
 ### R-1
 
@@ -3263,6 +3264,101 @@ SEVERITY: nit
 WHERE: Design > HTTP API (source-preview row, line 651; `sourceReady`, lines 634-636)
 EVIDENCE: `sourceReady` is true once the file exists, but ComfyUI writes the PNG in place, so a fetch can catch a partly written file. The image URL never changes, so a broken image stays.
 PROPOSAL: Count the PNG ready only when its size is stable across two ticks, or add a cache-busting query with the file size.
+
+### R-19
+
+TARGET: 2420d68447d2f73e0cf0cb474aecaaa1f1706c43
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (Shared style paragraph, lines 392-399); Design > Submission, concurrency and idempotency (content hash, lines 425-427); Test Plan row AC-28 (line 1189)
+EVIDENCE: Design says a missing Shared style "is left out of the hash encoding, so a batch created before this revision still matches when its request is replayed". The previous version's batches were hashed over presets that include the engine. `git show v0.1.0:app/server/batches.ts` line 72 returns `{ engine, faces, tex, variants, style, seed }`, and line 76 hashes `JSON.stringify({ kind, presets, items })`. This revision drops `engine` from presets, and the branch already does (app/server/batches.ts:69 returns `{ faces, tex, variants, style, seed }`, commit a2c9432, which is not in v0.1.0). So a pre-upgrade request replayed with `engine: "trellis"` hashes differently and gets 409, whatever is done with Shared style. Design describes the hash only as "the kind, the preset values, then each prompt line", so it never says the engine stays in the encoding. One implementer keeps the current encoding and the replay promise fails. Another adds `engine: "trellis"` back in v0.1.0's key order. The AC-28 replay test can be written either way, for example by building the "pre-upgrade" batch with the new code, and still pass. This traces to this revision's engine removal together with the R-18 F-11 change.
+PROPOSAL: State the exact canonical encoding: presets encoded as v0.1.0 did, with `engine: "trellis"` first and the same key order, and `sharedStyle` added only when non-empty. Make the AC-28 replay case use a hash recorded from v0.1.0's encoding, not one computed by the new code.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (theme paragraph, lines 690-708; colour paragraph, lines 710-726); Acceptance Criteria AC-22 (line 1150); Test Plan row AC-22 (line 1183)
+EVIDENCE: Lines 690-691 say the VH Midnight tokens are "copied with a `vh-` prefix (`--vh-bg-0`, `--vh-card`, `--vh-ink`, `--vh-accent`, `--vh-ok` and so on) so they never collide with shadcn's names". Lines 701-705 then say the page follows guides/vh-midnight.md "with its token block copied into `app/web/styles.css` as written there: ... `--card` surfaces, `--ink` text, `--accent` for links". The colour rules at lines 712-724 and AC-22 still use the unprefixed names (`--accent`, `--ok`, `--on-ok`, `--control-bg`, `--control-bg-hover`, `--ink-dim`). The guide's block (vh-midnight.md Tokens) defines `--card` and `--accent`, the same names shadcn uses for its card surface and its hover and selected surface. If the block is copied as written, the collision the prefix was meant to remove comes back. This traces to the R-18 F-04 change, which added the prefix without updating the sentences that follow it.
+PROPOSAL: Replace "as written there" with "with every name prefixed `vh-`". Use the prefixed names throughout the colour paragraph and AC-22, or state once that the unprefixed names there mean the `--vh-` tokens.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (shadcn mapping, lines 693-701); Acceptance Criteria AC-25 (line 1153); Test Plan rows AC-22 (line 1183) and AC-25 (line 1186)
+EVIDENCE: The mapping says `--primary` is used by "the Switch's on state, checked Checkboxes, Progress indicators and the selected ToggleGroup item". shadcn's new-york-v4 sources (`gh api repos/shadcn-ui/ui/contents/apps/v4/registry/new-york-v4/ui/<name>.tsx`) show otherwise. toggle.tsx selects with `data-[state=on]:bg-accent data-[state=on]:text-accent-foreground` and hovers with `hover:bg-muted`. With the stated mapping (`--accent` to `--vh-control-bg-hover`, `--muted` to `--vh-control-bg`), a selected Detail or Texture segment looks the same as a hovered one, not like `--vh-accent`. Other mapped classes also miss Design's button rule. button.tsx's default variant is `bg-primary text-primary-foreground`, so any Button left on the default variant is solid `--vh-accent`, while Design says "every other button is translucent". The outline variant uses `dark:bg-input/30 dark:hover:bg-input/50`, and switch.tsx uses `bg-input` for the off state. So `--input` acts as a surface colour, but Design gives it only "the strong control border", which is not a token in the guide. The guide's `--control-line` "measures under 2:1" (vh-midnight.md Contrast notes), and Design requires 3:1. Design also does not say whether the `.dark` class is set, which decides whether those `dark:` classes apply. Two implementers will build differently coloured toggles and buttons, and the AC-25 row checks only six variables and `data-slot` attributes.
+PROPOSAL: State which component edits or variants carry Design's rules: ToggleGroup items selected with `bg-primary` (or `--accent` mapped so that selected and hover differ), the translucent Button variant used everywhere except Generate, a concrete value for `--input` that meets 3:1, and whether `.dark` is set. Add a style.spec assertion for the selected Detail segment's colour and a translucent non-Generate button.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (summary strip, lines 745-747; estimates, lines 766-776); Acceptance Criteria AC-26 (line 1154); Test Plan row AC-26 (line 1187)
+EVIDENCE: "The estimate is the running app job's remaining typical time ... plus the typical times of the app's jobs ahead: ... for a Waiting job, every submitted app job and the earlier Waiting jobs." A running app job is in state `submitted` (Glossary line 671: Generating is `submitted`, running), so "every submitted app job" includes the running job, which is then counted twice: its remainder plus its full typical time. The Queued case avoids this only because the API gives the running job no position (app/server/tracker.ts:80 returns `position: null` for running). The AC-26 row repeats the ambiguity ("a Waiting job's estimate over all submitted and earlier Waiting jobs"). Design never defines the `Queue clear in about <duration>` value. Only the row calls it "the queue-clear sum". Design also does not say whether a Generating job without a typical time counts as "has an estimate" for the strip's visibility rule.
+PROPOSAL: Say that a Waiting job's estimate covers the running app job's remainder plus every queued (not running) submitted app job and the earlier Waiting jobs. Define queue clear as the running app job's remainder plus the typical times of every other unfinished app job, hidden when any of those has no typical time. Add the no-double-count case to the unit tests.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (queued_at, lines 585-587); Design > Submission, concurrency and idempotency (tick step 5, lines 478-482); Design > Page (times, line 766; preview, lines 787-790); Test Plan row AC-28 (line 1189)
+EVIDENCE: `queued_at` is "the time the current attempt was queued, set at creation and again when a retry starts", and `Added <duration> ago` counts "from `queuedAt` (the current attempt)". Step 5 also starts a new attempt for a job ComfyUI lost: it clears the attempt ID and the started and finished times, returns the job to `pending` and gives it a new prompt ID (also app/server/tracker.ts:295). Design does not say whether `queued_at` resets there. If it does not, a resubmitted job's `Waited` (`startedAt - queuedAt`) and `Total` include the lost attempt, and `Added ... ago` is not counted from the current attempt as the page text claims. If it does, the definition at line 587 is wrong. Two implementers will differ, and no test row covers the lost-job case for times.
+PROPOSAL: Decide whether a lost-job resubmission resets `queued_at` and state it in step 5 and the schema 2 sentence. Add the case to the AC-06 restart tests or the AC-28 row.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1112-1125; queue project, lines 1068-1071); Test Plan row AC-26 (line 1187); Tasks T52 (line 1289)
+EVIDENCE: The fixture lists "a batch of four jobs (one done, one Generating, one Queued, one failed)", then separately "a running prompt job whose 256-pixel source thumbnail the seed writes", and then "`submitted` jobs whose prompt IDs the fake serves as queued and running prompts". The fake serves only one fixture prompt as running, the first by `created_at, position`, and none while any real prompt is running (app/fake-comfy/fake.ts:137 orders fixture IDs; lines 152-155 push the first into `queue_running` only when `running.length === 0`). The current fixture already has its own running and queued jobs (app/server/seed.ts:43-44). So Design does not say which fixture job is Generating, and when the AC-26 queue spec submits "a running fake job whose image step the fake writes early" on the same stack, the fixture's Generating row turns Queued and the fixed `Generating for` and `about ... left` assertions change. The row's partial-failure case expects `1 of 2 jobs could not be retried.`, but the four-job batch has only one failed or cancelled job. "Unfinished fixture jobs get a fixed `started_at`" also gives a Queued job a start time, although `started_at` means first seen running (lines 473-475).
+PROPOSAL: Name the one fixture job that runs (for example, the four-job batch's Generating job, which is also the one with the seeded thumbnail), give a fixed `started_at` only to that job, say how the queue spec keeps it running while it submits its own jobs (a separate stack or a fake control), and give the batch used for the partial-failure case two failed or cancelled jobs.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-27 (line 1188); Design > Verification commands (fixture paragraph, lines 1115-1117); Design > Page (times, lines 764-766)
+EVIDENCE: The AC-27 row asserts "a fixture job with null `startedAt` shows neither waited nor generation time". The fixture paragraph says "done jobs have fixed start and finish times (their generation times known)", so as Design reads, no done fixture job has a null `startedAt`. `library.spec.ts` runs on the shared seeded container (lines 1075-1077), where such a job can only come from the seed. As specified, that proof cannot be executed.
+PROPOSAL: Add one done fixture job with `started_at` null (as if it ran while the app was down) to the fixture paragraph and T52.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-22 (line 1183); Tasks T43 (line 1285) and T56 (line 1293); Acceptance Criteria AC-22 (line 1150)
+EVIDENCE: AC-22 requires that "the rendered page passed the design review Design names". The row says "The design review is recorded in T43's evidence". T43 is the ticked review of the previous VH Midnight page (its evidence names screenshots 1280x720-submitted and 320x568-preview from before shadcn). This revision adds T56, "the design review of the rebuilt page". Read literally, the proof is met by T43's old evidence, which can pass on a shadcn page that was never reviewed.
+PROPOSAL: Change the row to "recorded in T56's evidence", reviewing the rebuilt page at this revision.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T30 line 1249, T56 line 1293); Test Plan row AC-09 (line 1170)
+EVIDENCE: The AC-09 row includes "A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots". That check was done in T30 on the page before this revision. Criterion ticks and evidence reset on a normative revision, and T55 rebuilds every journey on new components. No unchecked task reruns the zoom check: T56 covers the design review and screenshots at the viewport matrix only. conventions/frontend-testing.md (Responsive visual quality) asks to "Record the actual zoom method and effective viewport" for affected flows.
+PROPOSAL: Add the 200 percent zoom manual check of the rebuilt page to T56 or a new task, recording the method and effective viewport.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1102-1105); Acceptance Criteria AC-22 (line 1150)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request): "Take both sides with the same fixture data, viewport and theme ... so the only difference is the change." Design instead has each side seed with its own executable, and the fixtures differ (a four-job batch, the running thumbnail, fixed times, and the base's Hunyuan3D-era rows), with the differences named. The same fixture data can be had: the base's `seed` writes a schema-1 directory, and head's executable migrates schema 1 to 2 on start (lines 580-587), so both sides can serve copies of one directory. The new states then get after-only captures from head's fixture. Design settles this deviation from a convention without an Open Question. This traces to the R-18 F-01 fix.
+PROPOSAL: Take the before-and-after pairs from one base-seeded directory, migrated by head for the after side, and capture the added states from head's own fixture. Otherwise, raise the deviation as an Open Question.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-11 (line 1172); Acceptance Criteria AC-11 (line 1139)
+EVIDENCE: The row asserts "that no file outside `app/server`, `app/web`, `app/e2e` and `app/memory` posts to `/api/batches`". It does not say how "posts to" is detected, and it lists no must-pass or must-fail examples, although the standard (Test plan) requires them for a proof that judges free text with a pattern. The test itself lives in `app/docs/docs.test.ts`, outside the allowed folders, and must contain the string it looks for, so a plain search for `/api/batches` fails a correct tree unless the test skips its own file. Today `git grep '/api/batches'` outside those folders finds only app/cli/verify-live.ts:46, which T50 removes. This row was added in this revision (R-18 F-19), so it has not passed review.
+PROPOSAL: Define the match (for example, a `fetch` or `curl` call whose URL contains `/api/batches`, searched in tracked source and script files, excluding app/docs), and list must-fail examples (a fetch to `${base}/api/batches`, `curl -X POST .../api/batches`) and must-pass examples (the docs test itself, a README sentence naming the route).
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 101-111 and 96-99)
+EVIDENCE: Lines 105-106 say "library cards and the preview show how long a job waited and generated". Design gives cards only `Generated in <duration>` (line 781); waited time is only in the preview (lines 787-790). The summary says schema 2 adds a column but not that a rollback to v0.1.0 now restores the pre-upgrade `schema-1` backup, so jobs created after the upgrade disappear from the app (lines 594-600). That is a recovery effect the owner accepts with "no rollback check across the revision".
+PROPOSAL: Say cards show the generation time and the preview shows all three times, and add one sentence that rolling back to v0.1.0 restores the pre-upgrade backup and drops jobs created since.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-28 (line 1156); Test Plan row AC-22 (line 1183); Design > HTTP API (lines 635-639)
+EVIDENCE: AC-28 says "schema version 2 adds the column with null for existing rows", but schema 2 adds two columns, `shared_style` and `queued_at` (lines 585-587). Its "last value used in that browser" reads as saved on submit, while Design saves on every change (line 738). The AC-22 row still calls `hold-accept` the fake's "new" control, though T40 added it. The HTTP API sentence lists `queuedAt` after the `sourceReady` clause ("... `sourceReady`, which is true when ... and `queuedAt`; the server decides ..."), which reads as part of the `sourceReady` definition.
+PROPOSAL: Write "adds the `shared_style` and `queued_at` columns" and "the last value entered in that browser" in AC-28, drop "new" in the AC-22 row, and move `queuedAt` next to the other times in the HTTP API sentence.
 
 ## Sources
 
