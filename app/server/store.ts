@@ -117,6 +117,23 @@ export function openStore(dataDir: string, opts: { migrations?: Migration[] } = 
   return store;
 }
 
+/**
+ * The schema version stored in dataDir's database, or "none" when there is no database file. Opens it
+ * read-only; SQLite may still create the -wal and -shm files of a cleanly closed WAL database, so the
+ * directory must be writable (deploy.sh mounts the volume read-write for this).
+ */
+export function databaseSchemaVersion(dataDir: string): number | "none" {
+  const file = join(dataDir, DB_FILE);
+  if (!existsSync(file)) return "none";
+  const db = new Database(file, { readonly: true });
+  try {
+    const row = db.query("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | null;
+    return row ? Number(row.value) : 0;
+  } finally {
+    db.close();
+  }
+}
+
 /** Replaces the database in dataDir with a backup copy, removing any WAL and shared-memory files. */
 export function restoreBackup(dataDir: string, backupFile: string): void {
   const db = join(dataDir, DB_FILE);

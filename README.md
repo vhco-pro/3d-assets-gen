@@ -35,7 +35,7 @@ The app runs as a container under Docker Desktop on `win-main`, next to ComfyUI,
 
 | Command | What it does |
 | --- | --- |
-| `scripts/deploy/deploy.sh <version>` | Verifies the release's signature and attestations, loads the image on `win-main`, and brings the app up; `--rotate-token` makes a new access token |
+| `scripts/deploy/deploy.sh <version>` | Verifies the release's signature and attestations, loads the image on `win-main`, refuses it before changing anything when it knows an older schema than the database there (use `rollback.sh` to go back), and brings the app up; `--rotate-token` makes a new access token |
 | `scripts/deploy/rollback.sh` | Returns to the previous version, restoring the matching database backup when the schema changed |
 | `scripts/deploy/check-image.sh <version>` | Checks a published image: anonymous pull, signature, attestations and a read-only start |
 | `scripts/deploy/check-repo.sh` | Checks the repository's security settings, workflows and Renovate |

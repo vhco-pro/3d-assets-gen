@@ -2,7 +2,8 @@
 # Deploys a released version of Asset Studio to win-main.
 #   scripts/deploy/deploy.sh <version> [--rotate-token] [--ascii]
 # Order: Docker Desktop in the owner's session, the release record and image verification, the image
-# streamed to win-main, files and config prepared, Compose up, then health and tailscale serve.
+# streamed to win-main, the schema guard, files and config prepared, Compose up, then health and
+# tailscale serve.
 set -euo pipefail
 LIB="$(cd "$(dirname "$0")" && pwd)/lib"
 VERSION=""
@@ -46,6 +47,19 @@ report_pass "signature, provenance and SBOM verified"
 report_step "Loading the image on ${WIN_HOST}"
 load_image "$DIGEST" "$TAG" || { report_fail "the image could not be loaded on ${WIN_HOST} with matching layers"; exit 1; }
 report_pass "loaded ${TAG} with matching layers"
+
+report_step "Comparing the schema v${VERSION} knows with the database on ${WIN_HOST}"
+guard=0
+schema_guard "$TAG" || guard=$?
+case "$guard" in
+  0) if [[ "$GUARD_KNOWN" == "?" ]]; then report_pass "no data volume on ${WIN_HOST} yet; nothing to compare"
+     elif [[ "$GUARD_DB" == "none" ]]; then report_pass "v${VERSION} knows schema ${GUARD_KNOWN}; no database yet"
+     else report_pass "v${VERSION} knows schema ${GUARD_KNOWN}; the database is at schema ${GUARD_DB}"; fi ;;
+  1) report_fail "v${VERSION} knows schema ${GUARD_KNOWN} but the database on ${WIN_HOST} is at schema ${GUARD_DB}; use rollback.sh to go back to an older schema"
+     exit 1 ;;
+  *) report_fail "could not read the database's schema on ${WIN_HOST}; nothing was changed"
+     exit 1 ;;
+esac
 
 report_step "Preparing %LOCALAPPDATA%\\AssetStudio"
 remote prepare -Version "$VERSION" -Tag "$TAG" -Digest "$DIGEST" "$ROTATE" > /dev/null || { report_fail "could not prepare the AssetStudio folder"; exit 1; }
