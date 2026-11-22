@@ -1406,6 +1406,7 @@ None.
 | 2026-11-22 | R-19 | spec | `2420d68` | claude-opus-5-5 | procedural | 0 blocking, 11 should-fix, 2 nits |
 | 2026-11-22 | R-19 | spec | `2420d68` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-20 | spec | `05f83e4` | claude-opus-5-5 | procedural | 1 blocking, 6 should-fix, 3 nits |
+| 2026-11-22 | R-21 | spec | `cc73fb2` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix, 3 nits |
 
 ### R-1
 
@@ -3515,6 +3516,50 @@ SEVERITY: nit
 WHERE: Design > Pipeline port and combined graphs (lines 337-344); Context > Owner summary (lines 63-64 and 122-124)
 EVIDENCE: The Ultra measurement and the five-minute outage are stated without the command and output or log the standard asks Context and Design claims to cite ("a `file:line`, or a command and its output"). Background's earlier measurements name their commands. "The 15.3 GB VRAM peak" does not say which of the three runs it belongs to. The summary's preset list reads "1024 or 2048 textures" and leaves out 4096, although Ultra uses it. This traces to the change this revision made.
 PROPOSAL: Name how the Ultra runs were timed and sampled (for example the history timestamps and the VRAM sampler used) and which run reached 15.3 GB. Write "1024 or 2048 textures, or 4096 with Ultra" in the summary.
+
+### R-21
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 969-976); Test Plan row AC-15 (line 1231, the bats sentence and the last sentence); Tasks T44 (line 1374), T63 (line 1369) and T64 (line 1370); Acceptance Criteria AC-15 (line 1197, last clause); Context > Owner summary (lines 122-128)
+EVIDENCE: Step 4 runs `database-schema-version` in "the loaded image", the image being deployed, and "When either command fails, it stops with a failure too." Only images built from this revision will have that command. `v0.2.0-feat-asset-studio.3` points at 13a725f (`git ls-remote --tags origin`), and `git diff --stat 13a725f cc73fb2` changes only the plan, so .3's executable is the current app/server/main.ts. Its switch knows `schema-version`, `restore-backup`, `serve` and `seed`, and its `default:` branch prints `unknown command` and returns 2. scripts/deploy/check-upgrade.sh starts with `deploy "$FIRST"` and exits 1 with `deploy.sh ${1} failed` when deploy.sh fails. So `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.3 <Ultra prerelease>`, which the AC-15 row and T44 now require, stops at its first step once T64 lands, and T44 runs it after the Ultra deploy, with the guard in place. The guard also refuses every pre-revision image at the same schema, not only older-schema ones, which the summary and AC-15 do not say. The T63 bats cases stub `database-schema-version` with a number or a plain failure, so they never model an older image that lacks the command. R-20 F-01 asked for exactly this run, and cc73fb2 adds it, so R-20 F-01 is still unresolved in effect. This traces to the change cc73fb2 made for R-20 F-03 and the owner's answer that the guard stops when the schema cannot be read.
+PROPOSAL: Read the database's schema with a reader that does not depend on the image being deployed, for example the newest loaded image that has the command or a pinned SQLite helper container, and compare it with the new image's `schema-version`, which every release has. Add a bats case for an image that answers `unknown command` at the same schema (it proceeds), and keep the check-upgrade run between .3 and the Ultra prerelease executable. If the owner instead accepts that pre-revision images can no longer be deployed, pick two schema-2 versions that both have the command for check-upgrade, and say so in the summary.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1173-1177); Test Plan rows AC-29 (line 1245) and AC-26 (line 1242); Tasks T67 (line 1373)
+EVIDENCE: Design puts the cancelled Ultra fixture job "in the first prompt batch, outside the four-job batch, so the asserted summary counts, estimates and running prompt stay as they are". The first prompt batch (app/server/seed.ts:47-54, headed `a wooden treasure chest`) is the batch the partial-failure test retries. It now holds failed id 5, cancelled id 6 and failed id 11, and app/e2e/queue-board.spec.ts:84-87 asserts `2 of 3 jobs could not be retried.` with the unfinished limit at 3. Another cancelled job there makes that `3 of 4`, so an asserted value does change. The AC-26 row still names `queue.spec.ts` and expects `1 of 2 jobs could not be retried.`. The AC-29 row and T67 name `queue-board.spec.ts`, which Design never mentions (Design line 1123 says "the queue scenario"). The AC-29 row also submits "an Ultra batch through the page on that spec's stack". The fake runs the fixture's Generating job only while no real prompt runs (the R-19 F-06 point), so on a stack whose summary and `Generating for` values are asserted, that submission changes them. This traces to the R-20 F-05 fix.
+PROPOSAL: Put the cancelled Ultra job in a batch that no asserted count or retry result covers, or state the new `3 of 4` value. Name `queue-board.spec.ts` in Design and in the AC-26 row with its current assertion. Say the Ultra submission runs on its own stack.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (content hash, lines 465-467; tick step 5, lines 518-520); Design > Restart, upgrade and rollback (queued_at, lines 628-629); Design > Page (token copy, lines 743-746; `--input`, lines 740-741; colour paragraph, lines 752-766; summary strip, line 792; estimates, lines 813-816); Design > Verification commands (fixture paragraph, lines 1167-1173); Acceptance Criteria AC-22 (line 1204) and AC-28 (line 1210); Test Plan rows AC-11 (line 1227), AC-22 (line 1238), AC-26 (line 1242) and AC-27 (line 1243)
+EVIDENCE: The R-19 should-fix findings were built through T57 to T62, but the normative text still says what R-19 found wrong. (1) The hash is still "the kind, the preset values, then each prompt line" with no `engine: "trellis"`, while T57 and app/server/batches.ts:78-82 keep v0.1.0's encoding (R-19 F-01). (2) The token block is still "copied into `app/web/styles.css` as written there", and the colour rules and AC-22 use unprefixed `--accent`, `--ok`, `--control-bg`. `--input` is still "the strong control border", and Design does not mention the ToggleGroup `bg-primary` edit, the translucent Button variant or `.dark` on `<html>` that T61 built (R-19 F-02, F-03). (3) A Waiting job's estimate still counts "every submitted app job", which double-counts the running job, and `Queue clear` is still undefined. The AC-26 row repeats "over all submitted" (R-19 F-04). (4) Step 5 and the schema 2 sentence still do not reset `queued_at` on a lost-job resubmission, while T58 and app/server/tracker.ts:333 do (R-19 F-05). (5) The fixture paragraph still says "unfinished fixture jobs get a fixed `started_at`" and lists the running thumbnail job apart from the four-job batch. It also gives every done job a start time, while seed.ts:49 seeds 木箱 with `startedAgo: null`, which the AC-27 row needs (R-19 F-06, F-07). (6) The AC-22 row still says "The design review is recorded in T43's evidence", the pre-shadcn review, not T56 (R-19 F-08), and still calls `hold-accept` "new". (7) The AC-11 row still says "posts to `/api/batches`" with no match rule or examples, while T62 defines both (R-19 F-11). Because no clean pass has followed that finding, the row has not passed review. (8) AC-28 still says "adds the column". This predates this revision and is unchanged since the R-19 acceptance at 2420d68. R-20 raised only the before-and-after item of this group (R-20 F-06, now fixed).
+PROPOSAL: Fold each implemented R-19 answer into the Design sentences and Test Plan rows listed above, in the wording T57 to T62 record. Point the AC-22 row at the review of the page as it stands after T67.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Scope > Out of scope (line 288); Context > Owner summary (lines 96-97 and 126-128)
+EVIDENCE: Scope excludes "any rollback check across this revision", and the summary says "no check covers that". But this revision's T44 and AC-15 row run `check-upgrade.sh`, which rolls back from the Ultra prerelease to .3. The phrase meant the Hunyuan3D and schema 2 revision, but the document now has three revisions under that name.
+PROPOSAL: Write "any rollback check across the Hunyuan3D removal and schema 2 change" in Scope and the summary.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 345-349); Context > Background (lines 192-193)
+EVIDENCE: Background writes the card as "15.99 GB", which is 16376 MiB in GiB, so "GB" there means GiB. Design calls the Ultra peak "15.3 GB VRAM peak (15272 MiB ...)". 15272 MiB is 14.9 GiB, or 16.0 decimal GB, and neither is 15.3. The claim "about 4 GB of the 32 GB system memory stayed free" cites no command or output.
+PROPOSAL: Write the peak as 14.9 GB in the document's unit (15272 MiB), and name the command that showed the free system memory.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 969-975)
+EVIDENCE: On a first deploy, `docker run` with the data volume mounted creates `asset-studio_data` before Compose does, so the volume has no Compose labels. That is a write on `win-main` before step 5, and Compose later warns that the volume "was not created by Docker Compose". Step 4 treats a first deploy only as `none`.
+PROPOSAL: Check that the volume exists with `docker volume inspect` first, and treat a missing volume as `none` without running a container.
 
 ## Sources
 
