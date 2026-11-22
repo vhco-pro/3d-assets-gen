@@ -81,6 +81,29 @@ test("the Renovate custom manager matches every pin in tools.env with its checks
     ["koalaman/shellcheck", "v0.11.0", 64],
     ["sigstore/cosign", "v3.1.4", 64],
     ["cli/cli", "v2.105.0", 64],
+    ["rhysd/actionlint", "v1.7.12", 64],
   ]);
-  expect((tools.match(/_VERSION=/g) ?? []).length).toBe(3);
+  expect((tools.match(/_VERSION=/g) ?? []).length).toBe(4);
+});
+
+describe("workflow hygiene (conventions/github-actions.md, AC-24)", () => {
+  interface Full { permissions?: unknown; defaults?: { run?: { shell?: string } }; jobs: Record<string, Job & { "timeout-minutes"?: number }> }
+  for (const file of files) {
+    const text = readFileSync(join(DIR, file), "utf8");
+    const wf = parse(text) as Full;
+    test(`${file} sets permissions: {} at the top`, () => {
+      expect(wf.permissions).toEqual({});
+    });
+    test(`${file} sets defaults.run.shell to bash`, () => {
+      expect(wf.defaults?.run?.shell).toBe("bash");
+    });
+    test(`${file} gives every job with steps a timeout`, () => {
+      for (const [name, job] of Object.entries(wf.jobs)) {
+        if (job.steps) expect(job["timeout-minutes"], `${file} ${name}`).toBeGreaterThan(0);
+      }
+    });
+    test(`${file} comments vhco-pro/.github pins with the release tag`, () => {
+      for (const line of text.split("\n").filter((l) => l.includes("uses: vhco-pro/.github/"))) expect(line).toMatch(/@[0-9a-f]{40} # v1\.2\.4$/);
+    });
+  }
 });

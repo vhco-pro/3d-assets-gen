@@ -60,6 +60,7 @@ docs_tests() {
 step "type check" bun run typecheck
 step "lint" bun run lint
 step "shellcheck" shell_checks
+step "actionlint" scripts/ci/actionlint.sh .github/workflows
 step "unit tests" bun test app --path-ignore-patterns='app/e2e/**' --path-ignore-patterns='app/image/**' --path-ignore-patterns='app/memory/**'
 step "workflow tests" workflow_tests
 step "shell tests" shell_tests

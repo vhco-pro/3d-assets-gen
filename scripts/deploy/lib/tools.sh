@@ -23,6 +23,11 @@ tool_path() {
       file="gh_${version#v}_linux_amd64.tar.gz"
       url="https://github.com/cli/cli/releases/download/${version}/${file}"
       inner="gh_${version#v}_linux_amd64/bin/gh" ;;
+    actionlint)
+      version="$ACTIONLINT_VERSION" sha="$ACTIONLINT_SHA256"
+      file="actionlint_${version#v}_linux_amd64.tar.gz"
+      url="https://github.com/rhysd/actionlint/releases/download/${version}/${file}"
+      inner="actionlint" ;;
     *)
       echo "unknown tool: $name" >&2
       return 2 ;;

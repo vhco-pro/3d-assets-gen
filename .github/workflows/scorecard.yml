@@ -8,6 +8,10 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   scorecard:
     permissions:
@@ -15,6 +19,6 @@ jobs:
       id-token: write
       contents: read
       actions: read
-    uses: vhco-pro/.github/.github/workflows/reusable-scorecard.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main
+    uses: vhco-pro/.github/.github/workflows/reusable-scorecard.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # v1.2.4
     with:
       publish_results: true

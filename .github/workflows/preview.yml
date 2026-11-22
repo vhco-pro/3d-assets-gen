@@ -8,10 +8,15 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   request:
     if: ${{ github.event.label.name == 'release:preview' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       actions: write
     steps:
