@@ -13,6 +13,8 @@ export interface JobRow {
   upload_name: string | null;
   upload_ext: string | null;
   engine: "trellis" | "hunyuan";
+  shared_style: string | null;
+  queued_at: number | null;
   faces: number;
   tex: number | null;
   style: number;
@@ -55,6 +57,8 @@ export interface JobView {
   error: string | null;
   createdAt: number;
   startedAt: number | null;
+  queuedAt: number;
+  sharedStyle: string | null;
   finishedAt: number | null;
 }
 
@@ -76,8 +80,10 @@ export function jobView(row: JobRow, queue: QueueInfo | null): JobView {
     queuePosition: queue?.position ?? null,
     error: row.error,
     createdAt: row.created_at,
+    queuedAt: row.queued_at ?? row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    sharedStyle: row.shared_style,
   };
 }
 
@@ -112,7 +118,7 @@ export function requestCancel(store: Store, id: string): ActionResult {
   return res.changes === 1 ? { ok: true } : { ok: false, status: 409, error: "Only waiting, queued or generating jobs can be cancelled." };
 }
 
-export function retryJob(store: Store, config: Config, id: string): ActionResult {
+export function retryJob(store: Store, config: Config, id: string, now: number = Date.now()): ActionResult {
   return store.db.transaction((): ActionResult => {
     const job = getJob(store, id);
     if (!job) return { ok: false, status: 404, error: "No such job." };
@@ -124,8 +130,8 @@ export function retryJob(store: Store, config: Config, id: string): ActionResult
     }
     store.db.run(
       `UPDATE jobs SET state = 'pending', prompt_id = NULL, posted_at = NULL, losses = 0, server_errors = 0, cancel_requested = 0,
-        started_at = NULL, finished_at = NULL, error = NULL, attempts = attempts + 1 WHERE id = ? AND state = ?`,
-      [id, job.state],
+        started_at = NULL, finished_at = NULL, error = NULL, attempts = attempts + 1, queued_at = ? WHERE id = ? AND state = ?`,
+      [now, id, job.state],
     );
     return { ok: true };
   }).immediate();

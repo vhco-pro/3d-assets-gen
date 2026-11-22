@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -81,6 +82,55 @@ describe("TRELLIS.2 is the only engine (AC-23)", () => {
   });
   test("a 2000-character prompt is accepted", async () => {
     expect((await postPrompts(["y".repeat(2000)])).status).toBe(201);
+  });
+});
+
+describe("Shared style (AC-28)", () => {
+  const sharedOf = (): (string | null)[] => (srv.store.db.query("SELECT shared_style FROM jobs ORDER BY position").all() as { shared_style: string | null }[]).map((r) => r.shared_style);
+  test("a prompt batch stores its trimmed Shared style on every job, and the job view returns it", async () => {
+    const res = await postPrompts(["a crate", "a lamp"], { sharedStyle: "  low-poly, flat shaded  " });
+    expect(res.status).toBe(201);
+    expect(sharedOf()).toEqual(["low-poly, flat shaded", "low-poly, flat shaded"]);
+    const body = (await res.json()) as { batch: { jobs: { sharedStyle: string | null; queuedAt: number }[] } };
+    expect(body.batch.jobs[0]?.sharedStyle).toBe("low-poly, flat shaded");
+    expect(typeof body.batch.jobs[0]?.queuedAt).toBe("number");
+  });
+  test("null, absent and empty after trimming are no Shared style, stored as null", async () => {
+    expect((await postPrompts(["a"], { sharedStyle: null })).status).toBe(201);
+    expect((await postPrompts(["b"])).status).toBe(201);
+    expect((await postPrompts(["c"], { sharedStyle: "   " })).status).toBe(201);
+    expect(sharedOf()).toEqual([null, null, null]);
+  });
+  test("301 characters are refused", async () => {
+    const res = await postPrompts(["a"], { sharedStyle: "s".repeat(301) });
+    expect(res.status).toBe(400);
+    expect(await errorOf(res)).toMatch(/300 characters/);
+  });
+  test("an image batch refuses a non-empty Shared style and accepts an empty one", async () => {
+    const form = (shared: unknown): FormData => {
+      const f = new FormData();
+      f.set("presets", JSON.stringify({ ...presets, sharedStyle: shared }));
+      f.append("images", new Blob([imageBytes("png")]), "x.png");
+      return f;
+    };
+    const send = (f: FormData): Promise<Response> => fetch(`${srv.url}/api/batches`, { method: "POST", headers: authHeaders({ "x-batch-id": crypto.randomUUID() }), body: f });
+    const refused = await send(form("hand-painted"));
+    expect(refused.status).toBe(400);
+    expect(await errorOf(refused)).toBe("Shared style applies to prompts only.");
+    expect((await send(form(""))).status).toBe(201);
+  });
+  test("a different Shared style under a reused batch ID is a conflict", async () => {
+    const id = crypto.randomUUID();
+    expect((await postPrompts(["a"], { sharedStyle: "one" }, id)).status).toBe(201);
+    expect((await postPrompts(["a"], { sharedStyle: "two" }, id)).status).toBe(409);
+    expect((await postPrompts(["a"], { sharedStyle: "one" }, id)).status).toBe(200);
+  });
+  test("a batch created before the upgrade still matches when its request is replayed", async () => {
+    // v0.1.0 hashed JSON.stringify({ kind, presets: { engine, faces, tex, variants, style, seed }, items }).
+    const id = crypto.randomUUID();
+    const v010 = createHash("sha256").update(JSON.stringify({ kind: "prompt", presets: { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null }, items: ["an old crate"] })).digest("hex");
+    srv.store.db.run("INSERT INTO batches (id, kind, presets, hash, created_at) VALUES (?, 'prompt', '{}', ?, 1)", [id, v010]);
+    expect((await postPrompts(["an old crate"], { engine: "trellis" }, id)).status).toBe(200);
   });
 });
 

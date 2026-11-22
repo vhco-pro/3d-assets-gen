@@ -141,6 +141,7 @@ function manifestEntry(job: JobRow, glb: string, source: string): Record<string,
     faces: job.faces,
     texture: job.engine === "trellis" ? job.tex : null,
     style: job.style === 1,
+    sharedStyle: job.shared_style,
     seed: job.seed,
     created: new Date(job.created_at).toISOString(),
   };

@@ -159,7 +159,7 @@ describe("zip export", () => {
     expect(manifest.assets).toHaveLength(3);
     expect(manifest.assets[2]).toEqual({
       id: made[2]?.id, glb: `a-stone-pillar-${short[2] ?? ""}.glb`, source: `a-stone-pillar-${short[2] ?? ""}.png`, prompt: "A stone pillar",
-      upload: null, engine: "hunyuan", faces: 10000, texture: null, style: true, seed: 44, created: new Date(clock.t).toISOString(),
+      upload: null, engine: "hunyuan", faces: 10000, texture: null, style: true, sharedStyle: null, seed: 44, created: new Date(clock.t).toISOString(),
     });
     expect(new TextDecoder().decode(files.get(`a-crate-${short[0] ?? ""}.glb`)?.subarray(0, 4))).toBe("glTF");
     expect((await get(url)).status).toBe(404);

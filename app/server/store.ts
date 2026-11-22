@@ -45,6 +45,12 @@ export const MIGRATIONS: Migration[] = [
     db.run("CREATE INDEX jobs_state ON jobs (state, created_at, position)");
     db.run("CREATE INDEX jobs_batch ON jobs (batch_id, position)");
   },
+  // Schema 2: the batch's Shared style on each job, and when the current attempt was queued.
+  (db) => {
+    db.run("ALTER TABLE jobs ADD COLUMN shared_style TEXT");
+    db.run("ALTER TABLE jobs ADD COLUMN queued_at INTEGER");
+    db.run("UPDATE jobs SET queued_at = created_at");
+  },
 ];
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

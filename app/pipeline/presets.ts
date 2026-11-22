@@ -15,9 +15,13 @@ export interface Presets {
   style: boolean;
   /** Seed of the first variant, or null for a random seed per prompt line or image. */
   seed: number | null;
+  /** Art-direction text joined to every prompt line; null for none. Prompt batches only. */
+  sharedStyle: string | null;
 }
 
-export const DEFAULT_PRESETS: Presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+export const DEFAULT_PRESETS: Presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null, sharedStyle: null };
+export const MAX_SHARED_STYLE_CHARS = 300;
+export const DEFAULT_SHARED_STYLE = "stylized hand-painted game art, clean readable silhouette, consistent muted color palette";
 export const MAX_PROMPT_CHARS = 2000;
 
 export function randomSeed(): number {

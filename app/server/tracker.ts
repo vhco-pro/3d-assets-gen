@@ -267,7 +267,7 @@ export class Tracker implements TrackerView {
     // Only TRELLIS.2 jobs reach this point; Hunyuan3D rows are cancelled and deleted instead (Design).
     const common = { seed: job.seed, faces: job.faces, tex: job.tex ?? 2048 };
     const input: JobGraphInput = job.kind === "prompt"
-      ? { ...common, kind: "prompt", prompt: job.prompt ?? "", style: job.style === 1 }
+      ? { ...common, kind: "prompt", prompt: job.prompt ?? "", style: job.style === 1, sharedStyle: job.shared_style }
       : { ...common, kind: "image", upload: `asset-studio/${job.id}.${job.upload_ext ?? "png"}` };
     return combineGraph(input, `asset-studio/${job.id}/${job.prompt_id ?? ""}`);
   }

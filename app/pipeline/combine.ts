@@ -9,7 +9,7 @@ interface Common {
   tex: number;
 }
 export type JobGraphInput =
-  | (Common & { kind: "prompt"; prompt: string; style: boolean })
+  | (Common & { kind: "prompt"; prompt: string; style: boolean; sharedStyle?: string | null })
   | (Common & { kind: "image"; upload: string });
 
 const OFFSET = 100;
@@ -30,7 +30,9 @@ export function combineGraph(input: JobGraphInput, prefix: string): Graph {
   const out: Graph = {};
   let source: Ref;
   if (input.kind === "prompt") {
-    const text = input.style ? input.prompt + STYLE_SUFFIX : input.prompt;
+    // The prompt, then the batch's Shared style, then the game-asset suffix.
+    const withShared = input.sharedStyle ? `${input.prompt}, ${input.sharedStyle}` : input.prompt;
+    const text = input.style ? withShared + STYLE_SUFFIX : withShared;
     Object.assign(out, imageGraph({ prompt: text, seed: input.seed, size: IMAGE_SIZE, prefix }));
     source = ["9", 0];
   } else {

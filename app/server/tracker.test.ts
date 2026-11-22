@@ -619,3 +619,35 @@ describe("AC-23 Hunyuan3D jobs are cancelled and deleted", () => {
     expect(exists(keep)).toBe(true);
   });
 });
+
+describe("AC-28 Shared style in graphs and retries", () => {
+  function sharedJob(shared: string | null, style: boolean): string {
+    const [id = ""] = addBatch(["a crate"]);
+    store.db.run("UPDATE jobs SET shared_style = ?, style = ? WHERE id = ?", [shared, style ? 1 : 0, id]);
+    return id;
+  }
+  const promptText = (): string => {
+    const body = promptBodies().at(-1);
+    const node = body?.prompt["5"] as { inputs: { text?: string } } | undefined;
+    return node?.inputs.text ?? JSON.stringify(body?.prompt ?? {});
+  };
+  test("the prompt text is the prompt, then the Shared style, then the game-asset suffix", async () => {
+    sharedJob("low-poly, flat shaded", true);
+    await tracker().tick();
+    expect(promptText()).toStartWith("a crate, low-poly, flat shaded, single object");
+  });
+  test("with the style off the suffix is left out", async () => {
+    sharedJob("low-poly", false);
+    await tracker().tick();
+    expect(promptText()).toBe("a crate, low-poly");
+  });
+  test("a retry posts the same text and resets queued_at", async () => {
+    const id = sharedJob("hand-painted", true);
+    store.db.run("UPDATE jobs SET state = 'failed', queued_at = 1 WHERE id = ?", [id]);
+    clock.t += 60_000;
+    expect(retryJob(store, dirs.config, id, clock.t)).toEqual({ ok: true });
+    expect((store.db.query("SELECT queued_at FROM jobs WHERE id = ?").get(id) as { queued_at: number }).queued_at).toBe(clock.t);
+    await tracker().tick();
+    expect(promptText()).toStartWith("a crate, hand-painted, single object");
+  });
+});

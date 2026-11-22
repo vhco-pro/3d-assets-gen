@@ -116,7 +116,7 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
         return job ? Response.json({ job: jobView(job, job.state === "submitted" ? queueInfo(job.prompt_id) : null) }) : err(404, "No such job.");
       }
       if (action && req.method === "POST") {
-        const result = action === "cancel" ? requestCancel(store, id) : retryJob(store, config, id);
+        const result = action === "cancel" ? requestCancel(store, id) : retryJob(store, config, id, now());
         return result.ok ? new Response(null, { status: 202 }) : err(result.status, result.error);
       }
     }
