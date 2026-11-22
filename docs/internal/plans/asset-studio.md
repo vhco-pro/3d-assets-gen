@@ -1003,6 +1003,7 @@ None.
 | 2026-11-21 | R-8 | spec | `b810be8` | claude-opus-5-5 | procedural | 3 blocking, 11 should-fix, 4 nits |
 | 2026-11-21 | R-9 | spec | `2768304` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 1 nit |
 | 2026-11-21 | R-9 | spec | `2768304` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-10 | spec | `c2dbee2` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 2 nits |
 
 ### R-1
 
@@ -2089,6 +2090,64 @@ SEVERITY: nit
 WHERE: Design > Deployment and exposure (lines 669-671, "the folders the running ComfyUI uses (Background)"); Context > Background
 EVIDENCE: No Background bullet states which input and output folders the running ComfyUI uses. The supporting evidence is `scripts/start_headless.ps1:20` (`--input-directory "$shared\input" --output-directory "$shared\output"`, with `$shared` the `ComfyUI-Shared` folder at line 10), and the stored R-5 record that quotes the running process's `--input-directory`.
 PROPOSAL: Cite `scripts/start_headless.ps1:10,20`, or add a Background bullet with the running process's directory arguments, path redacted.
+
+### R-10
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > HTTP API (`GET /api/session` row, line 567); Design > Access token (line 539, and the rate-limit paragraph, lines 548-553); Design > Page (line 609); AC-12 (line 898); Test Plan row AC-12 (line 924)
+EVIDENCE: This revision (c2dbee2) added `GET /api/session` "without a token and without counting as a failure". Line 539 still says "Every `/api` route except `GET /api/health` and `POST /api/session` requires either an `Authorization: Bearer <token>` header or the session cookie". That makes `GET /api/session` a protected route, and the AC-12 proof's "every protected route returns 401 without credentials" would then cover it. The row also says the route checks whether "the request's cookie or bearer token is valid" without counting failures. Lines 548-553 count every "wrong bearer token" on a protected route toward the limit of 10, so this route is an unthrottled way to test tokens, which undoes the purpose the limit is given there ("keeps a misbehaving client from flooding the logs"). The implementation does this: app/server/http.ts:84-87 returns `Response.json({ signedIn: authorised(req) })` before any limiter call. The document never gives the route's response (status and body), and no Test Plan row checks that it never fails, never counts, or that the page "never makes a failing call".
+PROPOSAL: Add `GET /api/session` to the exceptions at line 539. Define its answer, for example 200 with `{"signedIn": bool}`. Have it look only at the cookie, or count a wrong bearer token it receives as a failure. Add AC-12 auth tests for its answer with and without a valid cookie and for its effect on the limiter.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 855-857); Context > Background (Firefox WebGL bullet, lines 177-179); AC-07 (line 893); Test Plan row AC-07 (line 919); Context > Owner summary (lines 73-80)
+EVIDENCE: AC-07 requires the viewer to render "in Chromium and Firefox". The AC-07 row asserts the `load` event and non-background canvas pixels in both. This revision adds "where a browser still has no WebGL, the viewer render check skips with that reason rather than pass or fail" (lines 856-857), and app/e2e/library.spec.ts:34 calls `test.skip(!webgl, ...)`. Firefox has rendered in no environment observed so far. On fedora-43 the check skipped (T17 evidence), and so did CI run 44961046719 (checks job log: "1 skipped", "33 passed"). The claim that headed Firefox under Xvfb "can use Mesa for WebGL" has no citation or observed run, and .github/workflows/ci.yml at c2dbee2 runs `bun run verify` with no Xvfb. As written, CI goes green with the Firefox half of AC-07 never executed. Under the standard's composite rule, an implementation review can then only return untested or not verified for AC-07. The Owner summary does not mention this gap.
+PROPOSAL: Name in the AC-07 row the environment that supplies the Firefox render, for example the headed Xvfb project in CI, and make a skip there a failure. Otherwise add a written manual Firefox procedure as a fallback, and cite or observe the Xvfb claim.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T19, line 973; no unchecked task after T26); Design > Container image (lines 666-673); Design > Verification commands (lines 855-856)
+EVIDENCE: This revision changes the runtime to `gcr.io/distroless/base-nossl-debian13:nonroot` and adds headed Firefox under Xvfb in CI. At c2dbee2, Dockerfile line 19 is still `FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2`, and ci.yml has no Xvfb step. T19 is ticked with evidence for the cc runtime, and the only unchecked tasks are T25 (verify-live) and T26 (deploy and live procedures). conventions/feature-documents.md (Tasks): "Re-planning keeps checked tasks and changes only the unchecked tail; new requirements get new task IDs." Nothing in the task list builds the two new requirements, so an implementer who follows the tasks deploys the image the release scan rejects.
+PROPOSAL: Add new unchecked tasks, for example T27 `Dockerfile` (base-nossl at the recorded digest, with the image start check and a passing Trivy scan as done conditions) and T28 `.github/workflows/ci.yml`, `playwright.config.ts` (headed Firefox under Xvfb, with the render check passing in CI), both before T26.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 46-47 and 73-80)
+EVIDENCE: The summary says "Planned proof, none of it run yet". Background (lines 171-179) and the ticked task evidence record observed runs: `bun run verify` end to end (T21), the image start check on base-nossl (4 pass), the memory check, the release Trivy failure, and the Firefox render skip in CI (confirmed in run 44961046719). conventions/feature-documents.md (Owner summary): the summary "must ... distinguish planned checks from observed proof" and should "Explain material changes since the last accepted scope". The summary names the OpenSSL-free container but never says what changed since the R-9 acceptance: the runtime switch and its cause, the Firefox WebGL skip, the new unauthenticated `GET /api/session`, the `tools.env` exception to the YAML rule, the pinned shellcheck, the manifest `style` field, and file names in the batch hash.
+PROPOSAL: Replace "none of it run yet" with what was observed during implementation and what is still planned, and add a short paragraph listing the material changes since the accepted R-9 scope.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (lines 705-710); Open Questions ("None.")
+EVIDENCE: This revision (c2dbee2, answering R-9 F-04) adds "`tools.env` is an exception to the YAML rule for settings files: the shell scripts source it directly". conventions/coding.md (Configuration format): "Configuration a person writes or reviews is YAML ... Settings files we define use the `.yaml` suffix and load strictly." conventions/feature-documents.md (Open questions): "Every trade-off the document settles is an open question". The document settles a deviation from a repository-routed convention without asking the owner. No Open Question or owner decision records it, and a sourced shell file is executed rather than loaded strictly.
+PROPOSAL: Raise the exception as an Open Question, for example A. keep the sourced `tools.env` or B. `tools.yaml` read with a strict parser, and fold in the owner's answer.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Versioning and release path (lines 765-781 and the delivery steps, lines 787-792)
+EVIDENCE: The `version` job pushes the tag before `release` runs, and `release` "runs only when `version` pushed a tag". The pinned version.yml (46a1ac9) describes `tagged` as "Whether this run pushed a new exact tag", so a later run at an already tagged commit does not release it. That partial failure has happened: `git ls-remote --tags origin` shows `v0.1.0-feat-asset-studio.1` at ba04bda, `gh release list` shows no Release, and run 44961046719 failed in the release action's Trivy step. The document does not say how a failed release is retried: rerun the failed job in the same run, or push a new commit for the next version. It also does not say what happens after merge when the `main` release fails, when step 2 ("the release image from `main` is deployed") cannot run.
+PROPOSAL: State the retry path, for example: rerun the failed `release` job for a transient failure, or land a fix commit that gets the next version for a scan failure; an orphan tag without a Release stays undeployable.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Background (line 187)
+EVIDENCE: "`AGENTS.md:21` states that no build or test commands exist yet." At c2dbee2, AGENTS.md:21 is `## Local commands and constraints`, and lines 23-30 list the commands, as AC-21 requires.
+PROPOSAL: Mark the statement as the state before implementation, or cite the earlier commit.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: nit
+WHERE: Sources; Design > Container image (lines 670-671); Design > Deployment and exposure (lines 709-710); Design > Runtime and layout (lines 250-253)
+EVIDENCE: This revision adds claims that rest on external pages: base-nossl is "glibc without OpenSSL", the Renovate `github-release-attachments` datasource updates a version and its SHA-256 together, and `eslint-plugin-react-hooks` 7.1 recommends the named rules. Sources lists none of the pages read for these. conventions/feature-documents.md: "Sources lists every external page read, each with the claim it supports."
+PROPOSAL: Add the distroless, Renovate datasource and eslint-plugin-react-hooks pages to Sources, each with the claim it supports.
 
 ## Sources
 
