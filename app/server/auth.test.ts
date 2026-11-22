@@ -95,3 +95,23 @@ test("the client address comes from X-Forwarded-For only for trusted peers that 
   expect(clientAddress("192.168.1.5", "100.64.0.9", trusted)).toBe("192.168.1.5");
   expect(clientAddress("::ffff:127.0.0.1", "100.64.0.3", trusted)).toBe("100.64.0.3");
 });
+
+test("GET /api/session judges the cookie alone and never counts toward the failure limit", async () => {
+  const xff = { "x-forwarded-for": "100.64.2.1" };
+  const status = async (headers: Record<string, string>): Promise<unknown> => {
+    const res = await call("GET", "/api/session", { ...xff, ...headers });
+    expect(res.status).toBe(200);
+    return res.json();
+  };
+  const signedIn = await signIn(TEST_TOKEN, "100.64.2.9");
+  const cookie = /session=([^;]+)/.exec(signedIn.headers.get("set-cookie") ?? "")?.[1] ?? "";
+  expect(await status({})).toEqual({ signedIn: false });
+  expect(await status({ cookie: "session=1.forged" })).toEqual({ signedIn: false });
+  expect(await status({ authorization: `Bearer ${TEST_TOKEN}` })).toEqual({ signedIn: false });
+  expect(await status({ cookie: `session=${cookie}` })).toEqual({ signedIn: true });
+  for (let i = 0; i < 12; i++) await status({ authorization: "Bearer wrong" });
+  for (let i = 0; i < 12; i++) await status({ cookie: "session=1.forged" });
+  now += 31 * 24 * 3600 * 1000;
+  for (let i = 0; i < 12; i++) await status({ cookie: `session=${cookie}` });
+  expect((await signIn("wrong", "100.64.2.1")).status).toBe(401);
+});

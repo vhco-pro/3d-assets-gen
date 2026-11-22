@@ -82,8 +82,10 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
       return Response.json({ version: APP_VERSION, commit: APP_COMMIT, comfyui: h.comfyui, comfyuiVersion: h.version });
     }
     if (path === "/api/session" && req.method === "GET") {
-      // Lets the page learn whether its cookie is valid without a failing call; not counted as a failure.
-      return Response.json({ signedIn: authorised(req) });
+      // Lets the page learn whether its cookie is valid without a failing call. It looks at the cookie
+      // alone (a bearer token here could be used to test tokens) and never counts as a failure.
+      const cookie = readCookie(req, SESSION_COOKIE);
+      return Response.json({ signedIn: cookie !== null && verifyCookieValue(config.token, cookie, now()) });
     }
     if (path === "/api/session" && req.method === "POST") {
       let token: unknown;
