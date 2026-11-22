@@ -15,8 +15,8 @@ test.beforeEach(async ({ page }) => {
 test("three prompt lines with two variants add six jobs", async ({ page }) => {
   const base = uniquePrompt("submit");
   await page.getByLabel("Prompts").fill([`${base} crate`, `${base} sword`, `${base} lamp`].join("\n"));
-  await page.getByLabel("Variants").fill("2");
-  await page.getByRole("button", { name: "Generate" }).click();
+  await page.getByLabel("Variants", { exact: true }).fill("2");
+  await page.getByRole("button", { name: /^Generate/ }).click();
   await expect(page.getByRole("status").filter({ hasText: "6 jobs added" })).toBeVisible();
   await expect(page.getByTestId("asset").filter({ hasText: base })).toHaveCount(6, { timeout: 60_000 });
 });
@@ -26,24 +26,41 @@ test("an image batch adds one job per image @firefox", async ({ page }) => {
     { name: `${uniquePrompt("img")}.png`, mimeType: "image/png", buffer: png(2048, 1) },
     { name: `${uniquePrompt("img")}.png`, mimeType: "image/png", buffer: png(2048, 2) },
   ]);
-  await page.getByRole("button", { name: "Generate" }).click();
+  await page.getByRole("button", { name: /^Generate/ }).click();
   await expect(page.getByRole("status").filter({ hasText: "2 jobs added" })).toBeVisible();
+});
+
+test("an empty form keeps Generate disabled, reading Generate", async ({ page }) => {
+  await page.getByLabel("Prompts").fill("   \n  ");
+  const generate = page.getByRole("button", { name: /^Generate/ });
+  await expect(generate).toHaveText("Generate");
+  await expect(generate).toBeDisabled();
+});
+
+test("with prompts and images both present, images win and the composer says so", async ({ page }) => {
+  await page.getByLabel("Prompts").fill("ignored prompt one\nignored prompt two");
+  await page.getByLabel("Images").setInputFiles([
+    { name: `${uniquePrompt("both")}.png`, mimeType: "image/png", buffer: png(2048, 3) },
+  ]);
+  await expect(page.getByText("Images are added; the prompts above are ignored.")).toBeVisible();
+  const generate = page.getByRole("button", { name: /^Generate/ });
+  await expect(generate).toHaveText("Generate 1 job");
+  await generate.click();
+  await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
 });
 
 test("invalid batches show the problem and add nothing", async ({ page }) => {
   const alert = page.getByRole("alert");
-  const generate = page.getByRole("button", { name: "Generate" });
-  await page.getByLabel("Prompts").fill("   \n  ");
+  const generate = page.getByRole("button", { name: /^Generate/ });
+  // 2000 UTF-16 code units are allowed; one more is refused, counted the way the server counts.
+  await page.getByLabel("Prompts").fill("x".repeat(2001));
   await generate.click();
-  await expect(alert).toContainText("Add at least one prompt or image");
-  await page.getByLabel("Prompts").fill("x".repeat(501));
-  await generate.click();
-  await expect(alert).toContainText("500 characters");
+  await expect(alert).toContainText("2000 characters");
   await page.getByLabel("Prompts").fill(Array.from({ length: 13 }, (_, i) => `p${String(i)}`).join("\n"));
-  await page.getByLabel("Variants").fill("2");
+  await page.getByLabel("Variants", { exact: true }).fill("2");
   await generate.click();
   await expect(alert).toContainText("25 jobs");
-  await page.getByLabel("Variants").fill("1");
+  await page.getByLabel("Variants", { exact: true }).fill("1");
   await page.getByLabel("Prompts").fill("");
   await page.getByLabel("Images").setInputFiles([{ name: "anim.gif", mimeType: "image/gif", buffer: Buffer.from("GIF89a-not-allowed") }]);
   await generate.click();
