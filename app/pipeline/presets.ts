@@ -1,26 +1,24 @@
 // Preset fields the page offers and how a batch expands into jobs. Shared by the page and the server,
 // so it uses only web-standard APIs.
 
-export type Engine = "trellis" | "hunyuan";
-export const ENGINES: readonly Engine[] = ["trellis", "hunyuan"];
 export const DETAILS = [5000, 10000, 20000] as const;
 export const TEXTURES = [1024, 2048] as const;
 export const MAX_VARIANTS = 4;
 export const MAX_SEED = 4294967295;
 export const IMAGE_SIZE = 1024;
 
+/** Every job's mesh comes from TRELLIS.2; the batch API keeps no engine field (Design, Jobs and batches). */
 export interface Presets {
-  engine: Engine;
   faces: (typeof DETAILS)[number];
-  /** Texture size for TRELLIS.2; null for Hunyuan3D, which has none. */
-  tex: (typeof TEXTURES)[number] | null;
+  tex: (typeof TEXTURES)[number];
   variants: number;
   style: boolean;
   /** Seed of the first variant, or null for a random seed per prompt line or image. */
   seed: number | null;
 }
 
-export const DEFAULT_PRESETS: Presets = { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+export const DEFAULT_PRESETS: Presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+export const MAX_PROMPT_CHARS = 2000;
 
 export function randomSeed(): number {
   const buf = new Uint32Array(1);

@@ -80,9 +80,8 @@ export async function signIn(token: string): Promise<void> {
 }
 
 export interface PresetsInput {
-  engine: string;
   faces: number;
-  tex: number | null;
+  tex: number;
   variants: number;
   style: boolean;
   seed: number | null;

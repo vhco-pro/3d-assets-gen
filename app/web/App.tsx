@@ -132,7 +132,6 @@ function SubmitForm(): ReactNode {
   const qc = useQueryClient();
   const [prompts, setPrompts] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [engine, setEngine] = useState("trellis");
   const [faces, setFaces] = useState(10000);
   const [tex, setTex] = useState(2048);
   const [variants, setVariants] = useState("1");
@@ -146,7 +145,7 @@ function SubmitForm(): ReactNode {
       if (!Number.isInteger(v) || v < 1 || v > MAX_VARIANTS) throw new ApiError(400, `Variants must be between 1 and ${String(MAX_VARIANTS)}.`);
       const s = seed.trim() === "" ? null : Number(seed);
       if (s !== null && (!Number.isInteger(s) || s < 0 || s > MAX_SEED)) throw new ApiError(400, `Seed must be empty or a whole number from 0 to ${String(MAX_SEED)}.`);
-      const presets: PresetsInput = { engine, faces, tex: engine === "trellis" ? tex : null, variants: v, style, seed: s };
+      const presets: PresetsInput = { faces, tex, variants: v, style, seed: s };
       if (files.length > 0) {
         const total = files.reduce((n, f) => n + f.size, 0);
         if (total > IMAGE_CAP) throw new ApiError(413, "The images in a batch can add up to at most 200 MiB.");
@@ -181,11 +180,6 @@ function SubmitForm(): ReactNode {
         <label htmlFor="images">Images</label>
         <input id="images" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(e) => { setFiles(e.target.files ? [...e.target.files] : []); }} />
         <div className="grid">
-          <label htmlFor="engine">Engine</label>
-          <select id="engine" value={engine} onChange={(e) => { setEngine(e.target.value); }}>
-            <option value="trellis">TRELLIS.2</option>
-            <option value="hunyuan">Hunyuan3D 2.1</option>
-          </select>
           <label htmlFor="detail">Detail</label>
           <select id="detail" value={faces} onChange={(e) => { setFaces(Number(e.target.value)); }}>
             {DETAILS.map((d) => (
@@ -193,7 +187,7 @@ function SubmitForm(): ReactNode {
             ))}
           </select>
           <label htmlFor="texture">Texture</label>
-          <select id="texture" value={tex} disabled={engine !== "trellis"} onChange={(e) => { setTex(Number(e.target.value)); }}>
+          <select id="texture" value={tex} onChange={(e) => { setTex(Number(e.target.value)); }}>
             <option value={1024}>1024</option>
             <option value={2048}>2048</option>
           </select>

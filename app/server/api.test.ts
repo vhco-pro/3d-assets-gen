@@ -16,9 +16,9 @@ afterEach(async () => {
   dirs.cleanup();
 });
 
-const presets = { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+const presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
 
-async function postPrompts(prompts: string[], extra: Partial<typeof presets> = {}, id: string = crypto.randomUUID()): Promise<Response> {
+async function postPrompts(prompts: string[], extra: Record<string, unknown> = {}, id: string = crypto.randomUUID()): Promise<Response> {
   return fetch(`${srv.url}/api/batches`, {
     method: "POST",
     headers: authHeaders({ "content-type": "application/json", "x-batch-id": id }),
@@ -72,10 +72,25 @@ describe("creating batches", () => {
   });
 });
 
+describe("TRELLIS.2 is the only engine (AC-23)", () => {
+  test("a batch without an engine field, or with engine trellis, is accepted as TRELLIS.2", async () => {
+    expect((await postPrompts(["a crate"])).status).toBe(201);
+    expect((await postPrompts(["a lamp"], { engine: "trellis" })).status).toBe(201);
+    const engines = srv.store.db.query("SELECT DISTINCT engine FROM jobs").all() as { engine: string }[];
+    expect(engines).toEqual([{ engine: "trellis" }]);
+  });
+  test("a 2000-character prompt is accepted", async () => {
+    expect((await postPrompts(["y".repeat(2000)])).status).toBe(201);
+  });
+});
+
 describe("rejections create nothing and name the problem", () => {
   const cases: [string, () => Promise<Response>, number, RegExp][] = [
     ["empty batch", () => postPrompts(["", " "]), 400, /prompt/i],
-    ["over-long prompt", () => postPrompts(["x".repeat(501)]), 400, /500 characters/],
+    ["over-long prompt", () => postPrompts(["x".repeat(2001)]), 400, /2000 characters/],
+    ["a Hunyuan3D engine", () => postPrompts(["a"], { engine: "hunyuan" }), 400, /^Hunyuan3D is no longer available; use TRELLIS\.2\.$/],
+    ["an unknown engine", () => postPrompts(["a"], { engine: "x" }), 400, /Hunyuan3D is no longer available/],
+    ["a missing texture", () => postPrompts(["a"], { tex: null }), 400, /texture/],
     ["more than 25 jobs", () => postPrompts(Array.from({ length: 13 }, (_, i) => `p${i}`), { variants: 2 }), 400, /25 jobs/],
     ["bad variants", () => postPrompts(["a"], { variants: 5 }), 400, /variants/i],
     ["wrong file type", () => postImages([{ name: "x.gif", bytes: imageBytes("gif") }]), 400, /PNG, JPEG or WebP/],
