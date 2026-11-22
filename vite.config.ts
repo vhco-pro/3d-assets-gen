@@ -1,4 +1,6 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 // The page is built from app/web into dist/web. The 3D viewer is its own entry so the page can import it
@@ -6,7 +8,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: "app/web",
   base: "/",
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  // shadcn/ui components import from "@/", which is app/web.
+  resolve: { alias: { "@": fileURLToPath(new URL("./app/web", import.meta.url)) } },
   build: {
     outDir: "../../dist/web",
     emptyOutDir: true,
