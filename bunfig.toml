@@ -1,0 +1,5 @@
+[test]
+# Playwright specs run under Playwright, never under bun test. The image and memory tests need a built
+# image; scripts/verify.sh runs them by path after building it and excludes them from the unit step.
+pathIgnorePatterns = ["app/e2e/**", "node_modules/**"]
+preload = ["./app/test-setup.ts"]

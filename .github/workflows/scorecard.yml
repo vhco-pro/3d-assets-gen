@@ -1,0 +1,20 @@
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '41 5 * * 1'
+
+permissions: {}
+
+jobs:
+  scorecard:
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    uses: vhco-pro/.github/.github/workflows/reusable-scorecard.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main
+    with:
+      publish_results: true

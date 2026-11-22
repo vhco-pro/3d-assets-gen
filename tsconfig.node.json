@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/node.tsbuildinfo",
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "bun"
+    ]
+  },
+  "include": [
+    "app/test-setup.ts",
+    "app/image",
+    "app/server",
+    "app/pipeline",
+    "app/fake-comfy",
+    "app/cli",
+    "app/memory",
+    "app/docs",
+    ".github/tests",
+    "vite.config.ts"
+  ]
+}

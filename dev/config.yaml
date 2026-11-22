@@ -1,0 +1,9 @@
+# Development stack for `bun run dev`. The token is a fixed non-production value that the server only
+# accepts against the fake ComfyUI (it checks GET /asset-studio-fake at start). Paths are relative to the
+# repository root.
+listen: 127.0.0.1:8790
+comfyui_url: http://127.0.0.1:8189
+data_dir: .dev-data/data
+comfy_input_dir: .dev-data/comfy/input/asset-studio
+comfy_output_dir: .dev-data/comfy/output/asset-studio
+token: ZGV2LXRva2VuLW5vdC1mb3ItcHJvZHVjdGlvbi0wMDA
