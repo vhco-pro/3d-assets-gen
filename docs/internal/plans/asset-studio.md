@@ -1,8 +1,8 @@
 ---
 status: in-progress
-status_description: "Released as v0.2.0 and Renovate active; waiting for the final implementation review."
+status_description: "All 29 criteria met in the final review R-25 and released as v0.2.0; the complete gate stays blocked because vh-adlc 0.34.0 counts criterion ticks as a baseline change (R-25 F-02)."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
-branch: feat/asset-studio
+branch: main
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
   - app/
@@ -1220,14 +1220,14 @@ deletes only flagged fixture rows and their files.
       Evidence: R-24 met at a77bdf7: from fedora-43, `curl https://win-main.tail6948f.ts.net/api/health` answered version 0.2.0-feat-asset-studio.4, commit b4c366e7503a5bb16250d59aaf52c62d11e77d63, ComfyUI reachable 0.46.2; `curl --connect-timeout 5` to 100.123.74.118 on 8790 and 8188 both exit 28; /api/jobs without credentials 401; the release deploy from main after merge (T45) is still to come
 - [x] AC-11: No script, command or check in the repository submits generations to a deployed app; generation is verified only against the fake ComfyUI, and the README, `AGENTS.md` and `package.json` name no live generation check.
       Evidence: R-24 met at a77bdf7: app/docs/docs.test.ts in the unit run passed; `git grep api/batches a77bdf7` outside app/server, app/web, app/e2e, app/memory, app/docs and docs finds nothing; `verify:live` occurs 0 times in package.json, README.md and AGENTS.md, a77bdf7, none
-- [ ] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
-      Residual: R-24 not verified; the deployed two-device rate-limit step ran on 2026-11-22 against 0.2.0-feat-asset-studio.4 (T44) but the read-only review did not rerun it.
+- [x] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
+      Evidence: R-25 met at 4a20cf3: app/server/auth.test.ts in the unit run and local Playwright signin.spec.ts in signin-chromium and signin-firefox (sign-in, reload, wrong token, token rotation stops polling) passed at 4a20cf3; against production 0.2.0 at cd1fd8a: eleven wrong-token `POST /api/session` calls from fedora-43 answered 401 ten times then 429, the next wrong one from arch-1 answered 401, `/api/jobs` without credentials 401 and `GET /api/session` `{"signedIn":false}`, none
 - [x] AC-13: The production page's initial JavaScript stays within 150 KiB after gzip at level 9, and the 3D viewer loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
       Evidence: R-24 met at a77bdf7: `bunx vite build --outDir <scratch>` then app/cli/size.ts checkSize on it, a77bdf7, `{"ok":true,"initial":120210,"viewer":287283,"problems":[]}` (117.4 KiB and 280.5 KiB); size fixture tests in the unit run passed, none
 - [x] AC-14: The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows calling the organisation's reusable workflows with a completed run of each on the default branch, a Renovate configuration, and the dependency graph, Dependabot alerts, secret scanning, push protection and automatic branch deletion turned on.
       Evidence: `bash scripts/deploy/check-repo.sh` on 2026-11-22 after renovate-runner run 45062861357: 14 passed, 0 failed, exit 0, including `Renovate is active` (Dependency Dashboard #8, Renovate PRs #6 and #7); the earlier checks (licence, settings, CodeQL and Scorecard runs and analyses on main, renovate.json) passed in R-24.
-- [ ] AC-15: Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
-      Residual: R-24 not verified; `check-upgrade.sh 0.2.0-feat-asset-studio.3 0.2.0-feat-asset-studio.4` passed on win-main (T44, .artifacts/check-upgrade.log) but the read-only review did not observe it.
+- [x] AC-15: Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
+      Evidence: R-25 met at 4a20cf3: I ran `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.4 0.2.0` (log kept outside the repository) from 20:06 to 21:45 UTC: config.yaml SHA-256 9AA20BA8... unchanged by the second deploy and the rerun, previous recorded as .4 and kept by the rerun, job digest `6:9C7B1523734A7AA6` equal after the first and second deploys, rollback printed `Reloading ...:0.2.0-feat-asset-studio.4` after the image was removed, current.json, .env and health named .4 at b4c366e7503a, then after compose down and removing 0.2.0 (`image absent`) the logon task brought 0.2.0 back in 9 s; the script exited 1 on one line, `job rows intact after the rollback`, because a user submitted a 20-job batch between the second deploy and the rerun (digest `26:C81E2FF085EB16B2` at the rerun and the same after the rollback, so the rollback kept every row present before it; the final job list holds the same 26 IDs); `bunx bats scripts/deploy/tests` 38 ok (schema guard, rollback without backup or record) and the store tests (WAL backup restore, newer-schema refusal, backup only on migration) passed at 4a20cf3; health afterwards reports 0.2.0 at cd1fd8a; limitations: both versions are schema 2, so rollback.ps1's cross-schema restore was not exercised (out of scope by the owner's choice), and see F-03
 - [x] AC-16: The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
       Evidence: R-24 met at a77bdf7: seed and config tests in the unit run passed at a77bdf7; CI run 45047746705 checks job log at 357b527 (code identical) shows `Passed: ready at http://127.0.0.1:8790` and `Passed: dev readiness`, readiness observed through the CI log
 - [x] AC-17: The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
@@ -1471,6 +1471,7 @@ None.
 | 2026-11-22 | R-22 | spec | `d8ba062` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-23 | implementation | `357b527` | claude-opus-5-5 | procedural | 24 met, 2 not met (AC-14 after merge, AC-22 PR record), 2 not verified (AC-12, AC-15: deployed procedures not rerun by the read-only review); 1 blocking, 1 nit |
 | 2026-11-22 | R-24 | implementation | `a77bdf7` | claude-opus-5-5 | procedural | 26 met, 1 not met (AC-14, after merge), 2 not verified (AC-12, AC-15: deployed procedures not rerun by the read-only review); 0 blocking, 2 nits |
+| 2026-11-22 | R-25 | implementation | `4a20cf3` | claude-opus-5-5 | procedural | 29 met; 0 blocking, 3 should-fix, 2 nits |
 
 ### R-1
 
@@ -3966,6 +3967,161 @@ SEVERITY: nit
 WHERE: Acceptance Criteria (the Evidence lines under AC-12, AC-14, AC-15 and AC-22)
 EVIDENCE: Commits after 357b527 added `Evidence: R-23: ...` lines under four unticked criteria. The standard has evidence beneath a ticked criterion and a residual beneath an unticked one. The AC-22 line still says "R-23: not met (F-01 ...)" although T70 has since added the missing captures. `vh-adlc lint` passes, so the binary does not object.
 PROPOSAL: When the criteria are ticked from this review, replace these R-23 status lines with real evidence or a residual, so AC-22 does not keep a stale not-met note.
+
+### R-25
+
+TARGET: 4a20cf3711ecf94b78858c086356dccfb2045908
+
+CRITERION: AC-01 For every input in the golden set, the TypeScript image and TRELLIS.2 graph builders return the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering, rewiring, prefix and thumbnail rules in Design.
+VERDICT: met
+EVIDENCE: `bun test app/server app/pipeline app/web app/docs app/cli app/fake-comfy ./.github` in a scratch clone at 4a20cf3 and `bun run golden:check`, 4a20cf3, 186 pass 0 fail including app/pipeline/graphs.test.ts golden and combiner cases, golden check printed `golden graphs match scripts/generate_3d.py`, none
+
+CRITERION: AC-02 Submitting a batch through the page creates one pending job per prompt line and variant, or per image; a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, more than 200 MiB of images, a malformed batch ID, or would exceed 100 unfinished jobs is rejected with a message that names the problem and creates no job and leaves no file; concurrent batches never take the unfinished count above 100; and a repeated batch ID, sequential or concurrent and with any multipart boundary, returns the existing batch, or a conflict when its content differs, without creating anything and without touching the first batch's uploads.
+VERDICT: met
+EVIDENCE: the unit run above (app/server/api.test.ts rejection, limit, concurrency and duplicate batch cases) and `E2E_TARGET=source npx playwright test --project=chromium --project=firefox --project=signin-chromium --project=signin-firefox` after a fresh `bun run build:web` in that clone, 4a20cf3, 53 passed 1 skipped exit 0 including submit.spec.ts in Chromium and Firefox; CI run 45050240346 at cd1fd8a (no non-document change to 4a20cf3), checks job log shows 54 passed, none
+
+CRITERION: AC-03 Each job is submitted to ComfyUI as one prompt with its own attempt ID and output prefix, jobs run in submission order, and each ends `done` with its GLB, source image and thumbnail stored, or `failed` with ComfyUI's error message, including when ComfyUI rejects the prompt or the upload, or answers one job with three server errors in a row while later jobs still run.
+VERDICT: met
+EVIDENCE: the unit run above (tracker tests against the fake: one prompt per attempt, order, rejections, three server errors) and local Playwright queue.spec.ts, 4a20cf3, all pass, none
+
+CRITERION: AC-04 While ComfyUI is unreachable the page shows it offline, and while it reports a version older than 0.46.2 or none the page shows it incompatible and the app neither submits, reconciles, cancels nor times out anything, whether or not jobs are unfinished; every job keeps its state, and jobs continue once a compatible ComfyUI answers again.
+VERDICT: met
+EVIDENCE: the unit run above (offline and incompatible-version tracker tests) and local Playwright offline.spec.ts, 4a20cf3, all pass, none
+
+CRITERION: AC-05 A pending job can be cancelled, and ComfyUI receives a per-job cancel only when the job has an attempt ID; a submitted job is cancelled through ComfyUI's per-job cancel for its own prompt ID, unless it already finished, in which case it ends `done`; a failed or cancelled job can be retried and runs again as a new ComfyUI prompt with the same settings and seed; and a retry over the unfinished-job limit is refused with a message.
+VERDICT: met
+EVIDENCE: the unit run above (cancel, cancel race, retry and retry limit tracker tests) and local Playwright queue.spec.ts cancel and retry, 4a20cf3, all pass, none
+
+CRITERION: AC-06 After an app restart, a timeout or a ComfyUI restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted as a new prompt with a new output prefix up to twice and fails on the third loss; a prompt ComfyUI accepted before the app recorded it, or after the app's request timed out, is adopted rather than submitted twice; no asset directory is left half written; and the sweep removes orphaned uploads and the app's leftover files in ComfyUI's `asset-studio` folders.
+VERDICT: met
+EVIDENCE: the unit run above (restart, fault-injection, timeout, lost-job and sweep tests in app/server/tracker.test.ts), 4a20cf3, all pass, none
+
+CRITERION: AC-07 The library lists done assets with thumbnails, shows an empty state when there are none, renders the selected GLB in a 3D viewer in Chromium and Firefox, and recovers from a failed viewer load through its retry button.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts at 4a20cf3 passed in Chromium and Firefox except the Firefox render case, which skipped without local WebGL (the run's one skip); CI run 45050240346 at cd1fd8a (no non-document change to 4a20cf3), checks job log shows `E2E_REQUIRE_WEBGL: 1` and `[firefox] library.spec.ts:28 thumbnails load and the selected GLB renders in the viewer` passed, Firefox render observed through the CI log only
+
+CRITERION: AC-08 In Chromium and Firefox, a single asset downloads as a GLB, a selection of up to 100 assets and 2 GiB downloads as one zip holding each GLB, its source image and a `manifest.json` describing them, and a larger selection is refused with a message.
+VERDICT: met
+EVIDENCE: local Playwright export.spec.ts in Chromium and Firefox and the app/server export tests in the unit run, 4a20cf3, all pass, none
+
+CRITERION: AC-09 The page's sign-in, submit, queue and library journeys meet the layout and contrast rules in Design at every size in the project viewport matrix and at 200 percent zoom, including the open preview dialog with Close and Download visible and through a resize while it is open, are usable by keyboard with labelled controls, and the library and viewer journey works with reduced motion.
+VERDICT: met
+EVIDENCE: local Playwright layout.spec.ts (viewport matrix, 640x450 reflow, dialog resize, keyboard, reduced motion) passed at 4a20cf3; I also drove headless Chromium at a 640x360 CSS viewport with device scale 2 against the dev stack serving the commit's fresh build: sign-in, the main view, a submit (`1 job added`, Generate 574 x 40 at x 33) and the open preview dialog each had 0 px horizontal overflow and no button or label with scrollWidth above clientWidth, Close and Download GLB inside the viewport, no console errors, screenshots reviewed; limitation: device-scale emulation stands in for browser zoom, the same method T70 records
+
+CRITERION: AC-10 The deployed app answers over HTTPS at `win-main`'s tailnet name from another device in the owner's tailnet with the deployed version and commit, while port 8790 and ComfyUI's port 8188 are not reachable on `win-main`'s tailnet address.
+VERDICT: met
+EVIDENCE: after the v0.2.0 deploy and again after the AC-15 procedure ended, `curl https://win-main.tail6948f.ts.net/api/health` from fedora-43 and from arch-1 answered version 0.2.0, commit cd1fd8a43b062edca5064e8a6bb4c6cadde7117e, ComfyUI reachable 0.46.2; `curl --connect-timeout 5` to 100.123.74.118 (win-main in `tailscale status`) on 8790 and 8188 exited 28 from both devices, none
+
+CRITERION: AC-11 No script, command or check in the repository submits generations to a deployed app; generation is verified only against the fake ComfyUI, and the README, `AGENTS.md` and `package.json` name no live generation check.
+VERDICT: met
+EVIDENCE: app/docs/docs.test.ts in the unit run passed; `git grep api/batches 4a20cf3` outside app/server, app/web, app/e2e, app/memory, app/docs and docs finds nothing; `verify:live` occurs 0 times in package.json, README.md and AGENTS.md at 4a20cf3, none
+
+CRITERION: AC-12 Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
+VERDICT: met
+EVIDENCE: app/server/auth.test.ts in the unit run and local Playwright signin.spec.ts in signin-chromium and signin-firefox (sign-in, reload, wrong token, token rotation stops polling) passed at 4a20cf3; against production 0.2.0 at cd1fd8a: eleven wrong-token `POST /api/session` calls from fedora-43 answered 401 ten times then 429, the next wrong one from arch-1 answered 401, `/api/jobs` without credentials 401 and `GET /api/session` `{"signedIn":false}`, none
+
+CRITERION: AC-13 The production page's initial JavaScript stays within 150 KiB after gzip at level 9, and the 3D viewer loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
+VERDICT: met
+EVIDENCE: `bun run build:web` then `bun run size` in the clone at 4a20cf3: `initial 117.4 KiB, viewer 280.5 KiB (gzip level 9)`, `bundle budgets met`; size fixture tests in the unit run passed, none
+
+CRITERION: AC-14 The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows calling the organisation's reusable workflows with a completed run of each on the default branch, a Renovate configuration, and the dependency graph, Dependabot alerts, secret scanning, push protection and automatic branch deletion turned on.
+VERDICT: met
+EVIDENCE: `bash scripts/deploy/check-repo.sh` from the clone at 4a20cf3: 14 passed, exit 0, including both analyses on main, renovate.json on main and `Renovate is active`; renovate-runner run 45062658972 (workflow_dispatch on main at 8792f53, log shows `mode: full` and `repositories: vhco-pro/3d-assets-gen`) succeeded; Dependency Dashboard #8 and PRs #6 and #7 are authored by app/vhco-renovate; CodeQL 45050240379 and Scorecard 45050240303 succeeded on main at cd1fd8a, none
+
+CRITERION: AC-15 Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
+VERDICT: met
+EVIDENCE: I ran `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.4 0.2.0` (log kept outside the repository) from 20:06 to 21:45 UTC: config.yaml SHA-256 9AA20BA8... unchanged by the second deploy and the rerun, previous recorded as .4 and kept by the rerun, job digest `6:9C7B1523734A7AA6` equal after the first and second deploys, rollback printed `Reloading ...:0.2.0-feat-asset-studio.4` after the image was removed, current.json, .env and health named .4 at b4c366e7503a, then after compose down and removing 0.2.0 (`image absent`) the logon task brought 0.2.0 back in 9 s; the script exited 1 on one line, `job rows intact after the rollback`, because a user submitted a 20-job batch between the second deploy and the rerun (digest `26:C81E2FF085EB16B2` at the rerun and the same after the rollback, so the rollback kept every row present before it; the final job list holds the same 26 IDs); `bunx bats scripts/deploy/tests` 38 ok (schema guard, rollback without backup or record) and the store tests (WAL backup restore, newer-schema refusal, backup only on migration) passed at 4a20cf3; health afterwards reports 0.2.0 at cd1fd8a; limitations: both versions are schema 2, so rollback.ps1's cross-schema restore was not exercised (out of scope by the owner's choice), and see F-03
+
+CRITERION: AC-16 The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
+VERDICT: met
+EVIDENCE: seed and config tests in the unit run passed at 4a20cf3; I started `bun run dev` in the clone and it printed `Passed: ready at http://127.0.0.1:8790`, and `bun run seed` printed `seeded 14 fixture jobs`; CI run 45050240346 at cd1fd8a (no non-document change to 4a20cf3), checks job log shows `Passed: dev readiness`, none
+
+CRITERION: AC-17 The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
+VERDICT: met
+EVIDENCE: `bash scripts/deploy/check-image.sh 0.2.0` from the clone (Bun on PATH): release record sha256:c97939a4b01734b632ca7205668c6f4fba7d7e4099b97eda03fa449fd68fb2ac with commit cd1fd8a, anonymous pull, signature, provenance and SBOM verified, start check 4 pass (UID 65532, read-only root, fresh volume, version 0.2.0 and commit), exit 0; the v0.2.0 Release came from run 45050240346 whose release job succeeded; `bun test ./.github` in the unit run passed the Release ordering tests, none
+
+CRITERION: AC-18 The page labels job states, the preset fields (Detail, Texture, Variants, Game-asset style, Seed, Shared style), the two banners and the library heading with exactly the terms in the Glossary.
+VERDICT: met
+EVIDENCE: local Playwright glossary.spec.ts, 4a20cf3, pass, none
+
+CRITERION: AC-19 The command-line tools print labelled status lines, add no colour or cursor control when `NO_COLOR` is nonempty or the stream is not a terminal, offer an ASCII mode, and exit non-zero whenever a step failed.
+VERDICT: met
+EVIDENCE: app/cli tests in the unit run and `bunx bats scripts/deploy/tests` (1..38, 38 ok), 4a20cf3, all pass, none
+
+CRITERION: AC-20 A 25-image batch at the 200 MiB cap, two such batches at once, and an export of 100 assets each complete without the container being killed for memory under its 1 GiB limit, and the server's anonymous memory stays below 512 MiB.
+VERDICT: met
+EVIDENCE: `IMAGE=ghcr.io/vhco-pro/3d-assets-gen@sha256:c97939a4... bun test ./app/memory` (the released 0.2.0 image built from cd1fd8a), 1 pass, peak anonymous memory 47.5 MiB, no OOM kill; CI run 45050240346 log also shows `Passed: memory check`, none
+
+CRITERION: AC-21 The README names `bun run bootstrap`, `bun run dev`, `bun run seed`, `bun run verify`, `scripts/deploy/deploy.sh`, `scripts/deploy/rollback.sh` and `bun run clean`, how readiness is detected, the dependencies, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
+VERDICT: met
+EVIDENCE: app/docs/docs.test.ts in the unit run passed, and AGENTS.md at 4a20cf3 lists the seven commands and the terminal-output route, none
+
+CRITERION: AC-22 The page uses the VH Midnight tokens and recipes Design names: the gradient body background, `color-scheme: dark`, solid `--ok` only on Generate, the two-column composer layout from 1024 pixels and one column below it, the exact badge colours, semantic colours on nothing but job states, banners, error messages, Generate and the Delete hover, long prompts clipped to two lines with their full text reachable (in the dialog for a library asset, through `More` in the queue), and a preview in a modal dialog (role dialog, aria-modal) that shows the full prompt and that Escape closes with focus returned to its opener in Chromium and Firefox; the rendered page passed the design review Design names; and the pull request carries the before-and-after record Design lists.
+VERDICT: met
+EVIDENCE: local Playwright style.spec.ts passed in Chromium and Firefox at 4a20cf3; the T67 design review is recorded; PR #5 is merged as cd1fd8a and its comments 7080862670, 7082597436 and 7082743665 each link `refs/pr-visuals/5`, which `git ls-remote` shows at 7fef04c; fetched into the scratch clone it holds pr-5-rework (14 before-and-after pairs plus 8 after-only new states), pr-5-ultra (8) and pr-5-long (7), covering every state Design lists; I viewed the clipped long-prompt card after capture, limitation: the long-prompt pairs come from a base-seeded directory with rows added at schema 1, as T70 states
+
+CRITERION: AC-23 The app offers no engine choice and submits only TRELLIS.2 graphs; a batch that sends an engine other than `trellis` is refused with the Hunyuan3D message; the tracker cancels every unfinished Hunyuan3D job through the cancel path and deletes every finished one through the delete path, with its batch when no job is left and its files, never submits or retries a Hunyuan3D job, and leaves TRELLIS.2 rows and their files untouched; and the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+VERDICT: met
+EVIDENCE: the unit run above (API engine refusal, retry refusal, tracker Hunyuan3D removal tests, docs README test) and local Playwright glossary.spec.ts (no Engine field), 4a20cf3, all pass, none
+
+CRITERION: AC-24 Every workflow sets `permissions: {}` at the top, a bash default shell and a timeout on every job that runs steps, and passes the pinned `actionlint` in `bun run verify`; `check-repo.sh` reports a failed API call as a failed check with its error; and the README records the security analysis coverage per language.
+VERDICT: met
+EVIDENCE: `bun test ./.github` and app/docs tests in the unit run and `bunx bats scripts/deploy/tests` (check-repo error cases 5 and 6, verify actionlint cases), 4a20cf3, all pass; CI run 45050240346 at cd1fd8a (no non-document change to 4a20cf3), checks job log shows `Passed: actionlint`, none
+
+CRITERION: AC-25 The page's controls are shadcn/ui components from `app/web/components/ui/` on Tailwind CSS v4, with shadcn's theme variables mapped to the VH Midnight tokens, and the bundle budgets of AC-13 still hold.
+VERDICT: met
+EVIDENCE: app/web/ui.test.ts in the unit run, local Playwright style.spec.ts data-slot assertions and `bun run size` (117.4 KiB and 280.5 KiB), 4a20cf3, all pass, none
+
+CRITERION: AC-26 The queue shows the summary strip with counts and the queue-clear estimate, groups jobs by batch with progress and working Cancel all and Retry failed, and shows per job the source image once it exists, the settings chips, queued and generating times, a progress bar and the start and remaining estimates computed from the typical duration as Design defines it.
+VERDICT: met
+EVIDENCE: app/web queue estimate tests and app/server source-preview tests in the unit run and local Playwright queue-board.spec.ts, 4a20cf3, all pass, none
+
+CRITERION: AC-27 Library cards show the generation time, and the preview shows the time waited, the generation time and the total time.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts timing cases, 4a20cf3, pass, none
+
+CRITERION: AC-28 A prompt batch's Shared style is stored on each job, joined into the graph's prompt text before the game-asset suffix, counted in the batch hash, kept by a retry, returned by the API and written to the manifest; an image batch with a Shared style is refused; the composer prefills the default or the last value used in that browser and resets to the default; and schema version 2 adds the `shared_style` column with null for existing rows.
+VERDICT: met
+EVIDENCE: app/server API, store migration and v0.1.0 replay-hash tests in the unit run and local Playwright submit.spec.ts Shared style cases, 4a20cf3, all pass, none
+
+CRITERION: AC-29 Detail offers Ultra, which locks Texture to 4096 and shows its time note; an Ultra job's graph uses steps 20, 30, 20 and 20 and remesh 1024 exactly as the reference script's Ultra setting does, every other preset's graph is unchanged, the batch API refuses 30000 triangles without 4096 textures and 4096 textures without 30000 triangles, an Ultra job is timed out only after 30 minutes of running, and its chip reads `Ultra`.
+VERDICT: met
+EVIDENCE: `bun run golden:check` passed and the unit run (Ultra golden case, API pairing refusals, Ultra timeout cases) passed; local Playwright submit.spec.ts and queue-board.spec.ts Ultra cases passed, 4a20cf3, none
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: frontmatter (`branch`)
+EVIDENCE: The frontmatter still says `branch: feat/asset-studio`. PR #5 merged as cd1fd8a, `git ls-remote origin 'refs/heads/*'` no longer lists that branch (delete_branch_on_merge), and 4a20cf3 is on main. `vh-adlc gate complete` fails `on_feature_branch_if_set` ("the document belongs to branch feat/asset-studio, but the current branch is \"main\""). For that reason alone, `vh-adlc next` answers `owner decision` (rule 2), ahead of every later rule.
+PROPOSAL: When the status moves on from in-progress after merge, drop or update `branch` so the gate and `next` evaluate the document on main.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Review Log (R-22 acceptance row); Acceptance Criteria (ticks and Evidence lines)
+EVIDENCE: `vh-adlc fresh` at 4a20cf3 reports R-22 stale (`baseline-changed`, `covered-drift` on README.md, app/, scripts/deploy/ and scripts/generate_3d.py) and R-24 stale (`baseline-changed`). `gate complete` also fails `accepted` ("the normative baseline changed since the accepted commit d8ba062"). With every tick reset and every Evidence or Residual line removed, Scope, Design, the criterion texts, Test Plan and `covers` are byte-identical across d8ba062, a77bdf7 and 4a20cf3. In a scratch clone, I made a commit that only restored the d8ba062 Acceptance Criteria section (unticked, no evidence). `fresh` then reported R-24 fresh and dropped R-22's `baseline-changed`. So vh-adlc 0.34.0 treats ticks and evidence as a normative change. The pinned page resets ticks and evidence on a normative revision, which implies they are not part of it. Ticking criteria from this review will make this review stale the same way, so `gate complete` cannot pass as things stand.
+PROPOSAL: Raise it as an owner decision. One option is to report the binary behaviour against the pinned page and wait for a fix. The other is to plan a fresh spec review, acceptance and implementation review after the final ticks, knowing the next tick repeats the problem.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T35 `scripts/deploy/check-upgrade.sh`); Test Plan AC-15
+EVIDENCE: check-upgrade.sh:65 compares the job digest after the rollback with `s1`, the state after the first deploy, not the state just before the rollback. In my run a user submitted a 20-job batch between the second deploy (21:00:28, `6:9C7B1523734A7AA6`) and the rerun (21:17:40, `26:C81E2FF085EB16B2`). The digest after the rollback was the same `26:C81E2FF085EB16B2`, so no row was lost. Even so, the script reported `job rows intact after the rollback` as failed and exited 1. Each deploy streamed the 162 MB image over a relayed tailnet link, so the procedure took 99 minutes, and normal use of the production app during that time is likely. The Test Plan row compares rows only at the second deploy and asks for no rollback row check. A correct rollback can therefore fail this proof.
+PROPOSAL: Compare the post-rollback digest with the state recorded just before the rollback (s3), or log the row count and IDs on both sides, so concurrent submissions cannot fail a correct rollback.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria (Residual lines under AC-12 and AC-15)
+EVIDENCE: Both read `Residual: R-24 not verified; ...` with no tracker. The pinned page asks for a residual that names its tracker, and `residual_line` requires a URL or `#N`. As a result `gate complete` lists both under `all_met` as "not ticked with evidence or residualised: AC-12, AC-15". `vh-adlc lint` passes.
+PROPOSAL: Replace both lines with Evidence from this review when ticking AC-12 and AC-15.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Tasks (T70 evidence); Test Plan AC-09
+EVIDENCE: Same as R-24 F-01 and still unapplied: the AC-09 row asks for a manual check at 200 percent browser zoom with screenshots, but T70 records device-scale emulation at 640x360 and does not say where the screenshots are. My own run of that emulation at 4a20cf3 found no overflow or clipping.
+PROPOSAL: In the next evidence pass, say that device-scale emulation stood in for browser zoom and where the screenshots are, or run it once with real browser zoom.
 
 ## Sources
 
