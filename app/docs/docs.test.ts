@@ -1,6 +1,7 @@
 // The README and AGENTS.md name the commands, readiness, dependencies and the owner's checklist, and every
 // command they name exists.
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -43,4 +44,32 @@ test("the README records the security analysis coverage per language (AC-24)", (
   const section = readme.slice(readme.indexOf("## Security analysis"));
   expect(section.length).toBeGreaterThan(20);
   for (const language of ["JavaScript", "TypeScript", "Python", "Actions", "Bash", "PowerShell"]) expect(section).toContain(language);
+});
+
+// AC-11: nothing in the repository submits generations to a deployed app.
+const LIVE_SUBMIT = /(?:fetch\s*\(|curl\b)[^\n]*\/api\/batches/;
+export function submitsBatches(text: string): boolean {
+  return text.split("\n").some((line) => LIVE_SUBMIT.test(line));
+}
+
+describe("no live generation check (AC-11)", () => {
+  test("the pattern catches live submissions and passes plain mentions", () => {
+    expect(submitsBatches("const res = await fetch(`${base}/api/batches`, { method: \"POST\" });")).toBe(true);
+    expect(submitsBatches("curl -X POST https://win-main.example.ts.net/api/batches -d @b.json")).toBe(true);
+    expect(submitsBatches("| `POST /api/batches` | Create a batch from prompts (JSON) or images (multipart) |")).toBe(false);
+    expect(submitsBatches("The page posts a new batch to /api/batches.")).toBe(false);
+  });
+  test("the live check, its script and its documentation are gone", () => {
+    expect(existsSync(join(ROOT, "app/cli/verify-live.ts"))).toBe(false);
+    expect(Object.keys(scripts)).not.toContain("verify:live");
+    expect(Object.values(scripts).filter((s) => s.includes("https://"))).toEqual([]);
+    expect(readme).not.toContain("verify:live");
+    expect(agents).not.toContain("verify:live");
+  });
+  test("no tracked file outside the app's own server, page and local tests submits a batch", () => {
+    const files = execFileSync("git", ["ls-files"], { cwd: ROOT }).toString().split("\n")
+      .filter((f) => /\.(ts|tsx|js|mjs|sh|ps1|py)$/.test(f))
+      .filter((f) => !/^app\/(server|web|e2e|memory|docs)\//.test(f));
+    expect(files.filter((f) => submitsBatches(read(f)))).toEqual([]);
+  });
 });

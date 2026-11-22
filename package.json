@@ -7,7 +7,6 @@
     "dev": "bun app/cli/dev.ts",
     "seed": "bun app/server/main.ts seed --config dev/config.yaml",
     "verify": "bash scripts/verify.sh",
-    "verify:live": "bun app/cli/verify-live.ts",
     "clean": "bun app/cli/clean.ts",
     "golden:check": "bun app/pipeline/golden-check.ts",
     "size": "bun app/cli/size.ts",

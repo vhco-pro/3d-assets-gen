@@ -21,7 +21,6 @@ Needs Bun 1.4, Docker and python3 (python3 only for the golden check).
 | `bun run dev` | Starts the fake ComfyUI on port 8189 and the server on http://127.0.0.1:8790 with `dev/config.yaml`; ready when it prints `✓ Passed: ready at ...` (it waits for `/api/health` to report ComfyUI reachable) |
 | `bun run seed` | Loads the fixture jobs (every state the page shows) into the dev data; `--profile empty` loads none, `--reset` removes only fixture jobs. Only runs against the fake ComfyUI |
 | `bun run verify` | Type check, lint, shellcheck, unit, workflow and shell tests, golden check, page build, bundle budgets, image build and start check, memory check, dev readiness, docs check and the Playwright journeys |
-| `bun run verify:live` | Two real generations against a deployed app; never runs in CI |
 | `bun run clean` | Deletes `.dev-data/` and the `.artifacts/` test output, nothing else |
 
 Sign in to the dev stack with the token in `dev/config.yaml`. The server refuses that token unless
