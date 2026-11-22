@@ -1195,6 +1195,7 @@ None.
 | 2026-11-22 | R-13 | implementation | `b54bca4` | claude-opus-5-5 | procedural | 20 met, 1 not met (AC-14, after merge); 0 blocking, 1 should-fix, 2 nits |
 | 2026-11-22 | R-14 | spec | `adeab21` | claude-opus-5-5 | procedural | 0 blocking, 15 should-fix, 5 nits |
 | 2026-11-22 | R-15 | spec | `e0f334f` | claude-opus-5-5 | procedural | 1 blocking, 7 should-fix, 4 nits |
+| 2026-11-22 | R-16 | spec | `c9f3009` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 1 nit |
 
 ### R-1
 
@@ -2843,6 +2844,59 @@ SEVERITY: nit
 WHERE: Design > Restart, upgrade and rollback (lines 548-549); Design > Export (line 763); Tasks T39 (line 1161)
 EVIDENCE: "Until the purge completes, the tracker submits nothing for Hunyuan3D rows and the job list hides them." T39 touches only `app/server/tracker.ts`, `app/server/main.ts` and `app/server/tracker.test.ts`. The job list is served elsewhere (`app/server/jobs.ts`, `app/server/http.ts`). While ComfyUI stays offline the purge waits, so hidden Hunyuan3D `done` jobs can still be fetched or exported by ID. Their manifest entry would then say `engine` "trellis", which Export calls always true.
 PROPOSAL: Add the file that hides Hunyuan3D rows to T39. Say whether `GET /api/jobs/<id>`, assets and exports also refuse Hunyuan3D rows before the purge completes.
+
+### R-16
+
+TARGET: c9f3009dff45af43b0da1513dcd6b85e689f9385
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 84-86); Design > Restart, upgrade and rollback (lines 541-552); Acceptance Criteria AC-23 (line 1055); Test Plan row AC-23 (line 1084); Tasks T39 (line 1163)
+EVIDENCE: The Owner summary says "at every start the server cancels unfinished Hunyuan3D jobs the way the Cancel button does and then deletes every Hunyuan3D job with its files". Design now says "On every tick with a compatible ComfyUI, before submitting anything, the tracker sets the cancel-requested flag ... In the same tick it deletes ...", and that the removal waits while ComfyUI is offline or incompatible ("Ticks repeat, so a crash or a failed cancel only delays the removal"). T39 says "the Hunyuan3D removal on each tick". The summary still describes the start-time purge that the previous revision replaced when it applied R-15 F-02 and F-03. It also leaves out that Hunyuan3D jobs stay visible and downloadable until they are removed, and that retrying one answers 400.
+PROPOSAL: Change the summary to say that on every tick with a compatible ComfyUI the tracker cancels unfinished Hunyuan3D jobs through the cancel path and deletes finished ones through the delete path, and that they stay visible until then.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 548-550); Design > Export (lines 759-765); Tasks T38 (line 1162)
+EVIDENCE: Design says a Hunyuan3D job stays visible until deleted, "`done` ones stay downloadable, and an export manifest names their engine `hunyuan`". Export says "`engine` is always `trellis` and `texture` always a number", and T38 builds "manifest `engine` always `trellis`". Hunyuan3D rows have no texture size: app/server/seed.ts:63 writes `tex` as null for them, and app/server/export.ts:142 writes `texture: job.engine === "trellis" ? job.tex : null`. So an export of a Hunyuan3D `done` job, possible while ComfyUI is offline or incompatible and no tick runs, holds `engine` `hunyuan` and `texture` null, which breaks both Export rules. One implementer follows T38 and hard-codes `trellis`. Another keeps the row's engine. This traces to how the previous revision applied R-15 F-12, which made the rows visible and exportable without changing Export or T38.
+PROPOSAL: Choose one rule. Either Export says `engine` is the row's engine and `texture` is null for Hunyuan3D rows until they are removed, and T38 says the same. Or exports and asset routes refuse Hunyuan3D rows. Then align line 550, Export and T38.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 541-552); Design > Submission, concurrency and idempotency (tick steps, lines 429-465); Test Plan row AC-23 (line 1084)
+EVIDENCE: Design places the flagging "before submitting anything" and the deletion "in the same tick". It does not say whether the flags are set before step 1 (cancel handling), or whether the deletion runs before or after step 1. In the tree, step 1 and step 2 run back to back (app/server/tracker.ts:124-125, `handleCancels` then `submitPending`), so flags set between them still count as "before submitting anything". The AC-23 row expects that "after the first tick ... the `submitted` one received the per-job cancel" (flags set before step 1). It also expects that the recent `pending` one "is cancelled and deleted on the following tick" (deletion after step 1 in the same tick). An implementation that sets flags after step 1, or deletes before it, follows Design and fails the row. The row also never states that the `submitted` job and the `pending` job without an attempt ID are deleted after their cancel. It only refers to "the ticks that remove every Hunyuan3D job", so a test could pass while cancelled rows stay.
+PROPOSAL: State the order in Design, for example: set the flags, run step 1, delete finished Hunyuan3D jobs, then run step 2. In the AC-23 row, assert that every Hunyuan3D row, including the `submitted` one and the `pending` one without an attempt ID, is gone after a stated number of ticks.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-22 (line 1083); Tasks T40 (line 1164); Design > Page (queue paragraph lines 692-696, library lines 698-703); Design > Verification commands (fixture, lines 1025-1028)
+EVIDENCE: The AC-22 row runs three checks "on the long fixture prompt": "the card clips to two lines with the full text as `title`, the dialog shows it in full without overflow, and the queue row's `More` expands it and `Less` collapses it". A card and the dialog exist only for `done` jobs (the library "lists done assets"). The queue lists only "unfinished, failed and cancelled jobs". So one fixture job cannot appear as both a card and a queue row. T40 asks for "TRELLIS.2-only fixtures with one long prompt". One implementer seeds one long-prompt job and cannot run half the row. Another seeds two jobs, one `done` and one `failed`, with the same text. This traces to how the previous revision applied R-15 F-04.
+PROPOSAL: Say in T40 and the fixture paragraph that the long prompt is seeded on two jobs, one `done` and one `failed` (or `cancelled`). In the AC-22 row, name which job each check uses.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 1009-1017); Acceptance Criteria AC-22 (line 1054); Tasks T44 (line 1170)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request, lines 192-198) asks for "an after image of each state the change adds or alters, such as an open dialog, a collapsed narrow layout or an error", and to "Name any changed state left uncaptured and say why". This revision adds or alters these states, none of them in the capture list: the queue row expanded through `More`; error messages now in `#ffc4c4` with an error icon (Page, lines 668-671) for a refused batch, a failed job action and the changed-selection notice after a gone export; and the clipped long-prompt card. The list names only the viewer's loading state as uncaptured. AC-22 is met when the PR "carries the before-and-after record Design lists", so it can be ticked while the convention's record is incomplete. This traces to the previous revision adding `More`/`Less` and the error styling (R-15 F-04 and F-06) without extending the record.
+PROPOSAL: Add the expanded queue row, the long-prompt card and at least one of the newly styled error messages (refused batch, failed action, export-gone notice) to the record. Otherwise name each one as uncaptured with a reason.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 912-914)
+EVIDENCE: Design says pins carry "a release-tag comment (the branch name for `vhco-pro/.github`, which has no release tags)". `gh api repos/vhco-pro/.github/tags` lists v1.0.0 to v1.2.4, and v1.2.4 is commit `e03ad61274b2bf0738b36ed67dff1c376321fb64`, the exact SHA that .github/workflows/codeql.yml:19,29 and scorecard.yml:18 pin with the comment `# main`. `gh api repos/vhco-pro/.github/compare/v1.2.4...e03ad61...` answered `identical`. The exception is false, and it tells implementers to keep a branch comment where a release tag exists. Renovate's `helpers:pinGitHubActionDigests` would then follow the branch instead of releases. This traces to how the previous revision applied R-15 F-11.
+PROPOSAL: Drop the parenthetical and change the three comments to `# v1.2.4`. The tag rule then holds for every pin.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Cancel, retry and delete (line 521); Design > Submission, concurrency and idempotency (sweep paragraph, lines 478-485); Design > Restart, upgrade and rollback (lines 545-547 and 571-573)
+EVIDENCE: Delete says "A file it fails to delete is left for the sweep", and the Hunyuan3D removal now relies on that path for "its asset directory". The sweep paragraph no longer covers `/data/assets/<job id>/` directories without a row. The previous revision removed that rule, and the code agrees: app/server/tracker.ts:404-409 removes only `.collect-*` entries under `/data/assets/`. app/server/assets.ts:47-55 also skips the remaining deletions once one throws. So an asset directory that fails to delete is never removed, and the rollback paragraph's "stay in the volume" now means for good.
+PROPOSAL: Say that a failed asset-directory deletion is not swept, or limit "left for the sweep" to ComfyUI files and uploads.
 
 ## Sources
 
