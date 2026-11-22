@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Revising: VH Midnight restyle of the page and TRELLIS.2 as the only engine; waiting for spec review."
+status: planned
+status_description: "Accepted at R-17: VH Midnight restyle, TRELLIS.2 only, docs pin edd4c09."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
@@ -1204,6 +1204,7 @@ None.
 | 2026-11-22 | R-15 | spec | `e0f334f` | claude-opus-5-5 | procedural | 1 blocking, 7 should-fix, 4 nits |
 | 2026-11-22 | R-16 | spec | `c9f3009` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 1 nit |
 | 2026-11-22 | R-17 | spec | `557c810` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 5 nits |
+| 2026-11-22 | R-17 | spec | `557c810` | n/a | n/a | accepted by owner |
 
 ### R-1
 
