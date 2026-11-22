@@ -60,7 +60,8 @@ export function Viewer({ job, name, onClose }: { job: Job; name: string; onClose
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const onLoad = (): void => { console.info("asset-studio:viewer-load"); };
+    // Tests wait for this attribute; production logs nothing to the console.
+    const onLoad = (): void => { el.dataset.loaded = "true"; };
     el.addEventListener("load", onLoad);
     return () => { el.removeEventListener("load", onLoad); };
   }, [status, job.id]);

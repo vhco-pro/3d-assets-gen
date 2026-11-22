@@ -43,9 +43,9 @@ test("thumbnails load and the selected GLB renders in the viewer @firefox", asyn
   const thumb = asset.getByRole("img");
   await expect(thumb).toHaveAttribute("src", /\/api\/assets\/[0-9a-f-]{36}\/thumb$/);
   await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
-  const loaded = page.waitForEvent("console", { predicate: (m) => m.text() === "asset-studio:viewer-load", timeout: 60_000 });
   await asset.getByRole("button", { name: /Preview/ }).click();
-  await loaded;
+  // The viewer marks its element once model-viewer fires load; production logs nothing.
+  await expect(page.locator("dialog[open] model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
   await expect.poll(() => renderedPixels(page), { timeout: 30_000 }).toBeGreaterThan(50);
   expect(consoleErrors).toEqual([]);
 });
