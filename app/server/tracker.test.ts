@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { combineGraph } from "../pipeline/combine.ts";
 import { FakeComfy } from "../fake-comfy/fake.ts";
 import { ComfyClient } from "./comfy.ts";
+import { createBatch } from "./batches.ts";
+import { solidPng } from "../fake-comfy/assets.ts";
 import { getJob, requestCancel, retryJob, type JobRow } from "./jobs.ts";
 import { openStore, type Store } from "./store.ts";
 import { testDirs, type TestDirs } from "./testkit.ts";
@@ -462,6 +464,42 @@ describe("AC-06 restarts, losses and replay", () => {
     tracker().sweep();
     expect(existsSync(join(dirs.config.comfyOutputDir, a ?? ""))).toBe(false);
     expect(existsSync(orphan)).toBe(false);
+  });
+
+  test("a batch killed between its uploads rename and its commit leaves no rows, and the start sweep removes its uploads", async () => {
+    const id = crypto.randomUUID();
+    const form = new FormData();
+    form.set("presets", JSON.stringify({ engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null }));
+    form.append("images", new Blob([solidPng(8, 8, [10, 20, 30])]), "crate.png");
+    const req = new Request("http://app/api/batches", { method: "POST", headers: { "x-batch-id": id }, body: form });
+    const kill = (): void => { throw new Error("killed"); };
+    let thrown = "";
+    try {
+      const res = await createBatch(req, { store, config: dirs.config, now: () => clock.t, faults: { afterRename: kill } });
+      thrown = `answered ${String(res.status)} ${await res.text()}`;
+    } catch (e) {
+      thrown = e instanceof Error ? e.message : String(e);
+    }
+    expect(thrown).toBe("killed");
+    expect((store.db.query("SELECT COUNT(*) AS n FROM jobs").get() as { n: number }).n).toBe(0);
+    const orphan = join(dirs.config.dataDir, "uploads", id);
+    expect(existsSync(orphan)).toBe(true);
+    const restarted = tracker();
+    restarted.start();
+    await restarted.stop();
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  test("the sweep removes a cancelled job's leftover ComfyUI output once ComfyUI no longer queues it", async () => {
+    const [a] = addBatch(["a"]);
+    store.db.run("UPDATE jobs SET state = 'cancelled', prompt_id = ? WHERE id = ?", [crypto.randomUUID(), a ?? ""]);
+    const leftover = join(dirs.config.comfyOutputDir, a ?? "");
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, "x_00001_.glb"), "x");
+    const t = tracker();
+    await t.tick();
+    t.sweep();
+    expect(existsSync(leftover)).toBe(false);
   });
 
   test("fixture jobs are never timed out", async () => {

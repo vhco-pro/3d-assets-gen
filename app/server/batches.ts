@@ -20,6 +20,8 @@ export interface BatchContext {
   store: Store;
   config: Config;
   now: () => number;
+  /** Test-only kill point, inside the transaction after the uploads rename and before the commit. */
+  faults?: { afterRename?: () => void };
 }
 
 class HttpError extends Error {
@@ -304,6 +306,7 @@ export async function createBatch(req: Request, ctx: BatchContext): Promise<Resp
         mkdirSync(join(config.dataDir, "uploads"), { recursive: true });
         renameSync(stagingDir, uploadsDir);
         stagingDir = null;
+        ctx.faults?.afterRename?.();
       }
       return json(201, { batch: { id, jobs: batchJobs(store, id) } });
     });
