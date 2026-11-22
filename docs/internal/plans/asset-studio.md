@@ -1,6 +1,6 @@
 ---
-status: planned
-status_description: "Revision accepted on 2026-11-22 at review R-11."
+status: in-progress
+status_description: "Implementing the accepted revision on feat/asset-studio (T25 to T31)."
 issue: null
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
