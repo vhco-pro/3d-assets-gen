@@ -6,7 +6,8 @@ watch the queue, preview each model in the browser, and download one GLB or a zi
 `manifest.json`.
 
 Each job is one ComfyUI prompt: Z-Image Turbo makes the source image, then TRELLIS.2 makes the textured
-mesh, decimated to 5k, 10k or 20k triangles. The graphs mirror the image and TRELLIS.2 builders in
+mesh, decimated to 5k, 10k or 20k triangles, or Ultra: 30k triangles with 4096 textures, more sampler
+steps and a finer remesh, about 10 minutes a job. The graphs mirror the image and TRELLIS.2 builders in
 `scripts/generate_3d.py`, which stays in the repository as the reference.
 
 The feature document is [docs/internal/plans/asset-studio.md](docs/internal/plans/asset-studio.md).

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Box, ChevronDown, CircleAlert, Images } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
-import { DEFAULT_SHARED_STYLE, DETAILS, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, TEXTURES } from "../pipeline/presets.ts";
+import { DEFAULT_SHARED_STYLE, DETAILS, isUltra, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, TEXTURES, ULTRA_FACES, ULTRA_TEX } from "../pipeline/presets.ts";
 import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, startExport, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
 import { Badge } from "./components/ui/badge.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -221,14 +221,18 @@ function saveShared(value: string): void {
   }
 }
 
-function Segments({ name, legend, values, value, format, onChange }: { name: string; legend: string; values: readonly number[]; value: number; format: (v: number) => string; onChange: (v: number) => void }): ReactNode {
+/** Detail's segment text: `5k`, `10k`, `20k` and `Ultra 30k`. */
+const detailLabel = (d: number): string => (d === ULTRA_FACES ? "Ultra 30k" : `${String(d / 1000)}k`);
+
+function Segments({ name, legend, values, value, format, onChange, disabled }: { name: string; legend: string; values: readonly number[]; value: number; format: (v: number) => string; onChange: (v: number) => void; disabled?: (v: number) => boolean }): ReactNode {
   const id = `${name}-label`;
   return (
-    <div className="grid gap-1.5">
+    // Full width so Detail's four items and Texture's three stay on one row each.
+    <div className="col-span-full grid gap-1.5">
       <span className="font-semibold" id={id}>{legend}</span>
-      <ToggleGroup type="single" variant="outline" aria-labelledby={id} value={String(value)} onValueChange={(v) => { if (v) onChange(Number(v)); }} className="flex-wrap">
+      <ToggleGroup type="single" variant="outline" aria-labelledby={id} value={String(value)} onValueChange={(v) => { if (v) onChange(Number(v)); }} className="w-fit flex-wrap">
         {values.map((v) => (
-          <ToggleGroupItem key={v} value={String(v)} className="min-w-12 tabular-nums">{format(v)}</ToggleGroupItem>
+          <ToggleGroupItem key={v} value={String(v)} disabled={disabled?.(v) ?? false} className="min-w-12 tabular-nums">{format(v)}</ToggleGroupItem>
         ))}
       </ToggleGroup>
     </div>
@@ -248,6 +252,13 @@ function Composer(): ReactNode {
   const [shared, setShared] = useState(readShared);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const ultra = faces === ULTRA_FACES;
+  // Ultra is one pairing: it selects and locks 4096; leaving it goes back to the 2048 default.
+  const chooseDetail = (d: number): void => {
+    setFaces(d);
+    if (d === ULTRA_FACES) setTex(ULTRA_TEX);
+    else if (tex === ULTRA_TEX) setTex(2048);
+  };
   const lines = prompts.split("\n").map((l) => l.trim()).filter(Boolean);
   const v = Number(variants);
   const perLine = Number.isInteger(v) && v >= 1 ? Math.min(v, MAX_VARIANTS) : 1;
@@ -330,8 +341,9 @@ function Composer(): ReactNode {
           )}
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-x-4 gap-y-3.5">
-          <Segments name="detail" legend="Detail" values={DETAILS} value={faces} format={(d) => `${String(d / 1000)}k`} onChange={setFaces} />
-          <Segments name="texture" legend="Texture" values={TEXTURES} value={tex} format={String} onChange={setTex} />
+          <Segments name="detail" legend="Detail" values={DETAILS} value={faces} format={detailLabel} onChange={chooseDetail} />
+          <Segments name="texture" legend="Texture" values={TEXTURES} value={tex} format={String} onChange={setTex} disabled={(t) => (ultra ? t !== ULTRA_TEX : t === ULTRA_TEX)} />
+          {ultra && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
           <div className="grid gap-1.5">
             <label className="font-semibold" htmlFor="variants">Variants</label>
             <div className="flex gap-1.5">
@@ -409,7 +421,7 @@ function JobRow({ job, est, now, onAction }: { job: Job; est: Estimates; now: nu
         <ClampedText text={label(job)} />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StateBadge job={job} />
-          <Chip>{`${String(job.faces / 1000)}k`}</Chip>
+          <Chip>{isUltra(job.faces, job.tex) ? "Ultra" : `${String(job.faces / 1000)}k`}</Chip>
           {job.tex !== null && <Chip>{String(job.tex)}</Chip>}
           <Chip><span className="mono">{`seed ${String(job.seed)}`}</span></Chip>
         </div>

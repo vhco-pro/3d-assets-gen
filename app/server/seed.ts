@@ -13,6 +13,9 @@ export const FIXTURE_BATCH_PROMPTS = id(0x100);
 export const FIXTURE_BATCH_IMAGES = id(0x101);
 /** A batch of four jobs (done, Generating, Queued, failed) for the queue's batch group. */
 export const FIXTURE_BATCH_SET = id(0x102);
+/** One cancelled Ultra job alone in its batch, so no asserted count, estimate or retry result changes. */
+export const FIXTURE_BATCH_ULTRA = id(0x103);
+const FIXTURE_BATCHES = [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES, FIXTURE_BATCH_SET, FIXTURE_BATCH_ULTRA];
 const MIN = 60_000;
 
 interface FixtureJob {
@@ -25,6 +28,8 @@ interface FixtureJob {
   promptId?: string;
   running?: boolean;
   error?: string;
+  /** Ultra: 30000 triangles with 4096 textures instead of 10000 and 2048. */
+  ultra?: boolean;
   /** Times before the seed time T, in ms: when the current attempt was queued, started and finished. */
   queuedAgo: number;
   startedAgo?: number | null;
@@ -58,16 +63,17 @@ export const FIXTURE_JOBS: FixtureJob[] = [
   { id: id(7), batch: FIXTURE_BATCH_SET, position: 1, kind: "prompt", text: "a glowing crystal", state: "submitted", promptId: id(0x201), running: true, queuedAgo: 12 * MIN, startedAgo: 3 * MIN },
   { id: id(8), batch: FIXTURE_BATCH_SET, position: 2, kind: "prompt", text: "a potion bottle", state: "submitted", promptId: id(0x202), queuedAgo: 12 * MIN },
   { id: id(13), batch: FIXTURE_BATCH_SET, position: 3, kind: "prompt", text: "an iron anvil", state: "failed", error: "CUDA out of memory (fixture)", queuedAgo: 12 * MIN, finishedAgo: 11 * MIN },
+  { id: id(14), batch: FIXTURE_BATCH_ULTRA, position: 0, kind: "prompt", text: "an ornate dragon statue", state: "cancelled", ultra: true, queuedAgo: 60 * MIN, finishedAgo: 59 * MIN },
 ];
 
 function clear(store: Store, config: Config): void {
   const rows = store.db.query("SELECT id, batch_id FROM jobs WHERE fixture = 1").all() as { id: string; batch_id: string }[];
   store.db.transaction(() => {
     store.db.run("DELETE FROM jobs WHERE fixture = 1");
-    store.db.run(`DELETE FROM batches WHERE id IN (?, ?, ?) AND NOT EXISTS (SELECT 1 FROM jobs WHERE batch_id = batches.id)`, [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES, FIXTURE_BATCH_SET]);
+    store.db.run(`DELETE FROM batches WHERE id IN (?, ?, ?, ?) AND NOT EXISTS (SELECT 1 FROM jobs WHERE batch_id = batches.id)`, FIXTURE_BATCHES);
   })();
   for (const r of rows) rmSync(join(config.dataDir, "assets", r.id), { recursive: true, force: true });
-  for (const b of [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES, FIXTURE_BATCH_SET]) rmSync(join(config.dataDir, "uploads", b), { recursive: true, force: true });
+  for (const b of FIXTURE_BATCHES) rmSync(join(config.dataDir, "uploads", b), { recursive: true, force: true });
   for (const r of rows) rmSync(join(config.comfyOutputDir, r.id), { recursive: true, force: true });
 }
 
@@ -75,16 +81,16 @@ export function seedFixture(store: Store, config: Config, profile: string, now: 
   clear(store, config);
   if (profile === "empty") return 0;
   store.db.transaction(() => {
-    for (const [batch, kind, ago] of [[FIXTURE_BATCH_PROMPTS, "prompt", 120 * MIN], [FIXTURE_BATCH_IMAGES, "image", 80 * MIN], [FIXTURE_BATCH_SET, "prompt", 12 * MIN]] as const) {
+    for (const [batch, kind, ago] of [[FIXTURE_BATCH_PROMPTS, "prompt", 120 * MIN], [FIXTURE_BATCH_IMAGES, "image", 80 * MIN], [FIXTURE_BATCH_SET, "prompt", 12 * MIN], [FIXTURE_BATCH_ULTRA, "prompt", 60 * MIN]] as const) {
       store.db.run("INSERT OR IGNORE INTO batches (id, kind, presets, hash, created_at) VALUES (?, ?, '{}', ?, ?)", [batch, kind, `fixture-${batch}`, now - ago]);
     }
     for (const j of FIXTURE_JOBS) {
       store.db.run(
         `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, prompt_id,
            posted_at, fixture, error, created_at, queued_at, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         [j.id, j.batch, j.position, j.kind, j.kind === "prompt" ? j.text : null, j.kind === "image" ? j.text : null, j.kind === "image" ? "png" : null,
-          "trellis", 2048, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now - j.queuedAgo : null,
+          "trellis", j.ultra ? 30000 : 10000, j.ultra ? 4096 : 2048, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now - j.queuedAgo : null,
           j.error ?? null, now - j.queuedAgo, now - j.queuedAgo,
           j.startedAgo === undefined || j.startedAgo === null ? null : now - j.startedAgo,
           j.finishedAgo === undefined ? null : now - j.finishedAgo],

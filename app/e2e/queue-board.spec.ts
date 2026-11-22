@@ -62,6 +62,17 @@ test.describe("on the seeded fixture", () => {
     await expect(old.getByRole("button", { name: "Collapse batch" })).toBeVisible();
   });
 
+  test("the cancelled Ultra fixture job's chip reads Ultra (AC-29)", async ({ page }) => {
+    await signIn(page, stack.url, stack.token);
+    const group = batch(page, "an ornate dragon statue");
+    await group.getByRole("button", { name: "Expand batch" }).click();
+    const row = group.getByTestId("job").filter({ hasText: "an ornate dragon statue" });
+    await expect(row.getByTestId("job-state")).toHaveText("Cancelled");
+    await expect(row).toContainText("Ultra");
+    await expect(row).not.toContainText("30k");
+    await expect(row).toContainText("4096");
+  });
+
   test("Cancel all cancels every unfinished job of the batch", async ({ page }) => {
     await signIn(page, stack.url, stack.token);
     const set = batch(page, "a mossy stone well");
@@ -85,5 +96,26 @@ test.describe("at the unfinished limit", () => {
     const old = batch(page, "a wooden treasure chest");
     await old.getByRole("button", { name: "Retry failed" }).click();
     await expect(old.getByRole("alert")).toHaveText("2 of 3 jobs could not be retried.", { timeout: 30_000 });
+  });
+});
+
+test.describe("an Ultra batch on its own stack", () => {
+  let stack: Stack;
+  test.beforeAll(async () => {
+    stack = await startStack("queue-ultra", "empty");
+  });
+  test.afterAll(async () => {
+    await stack.stop();
+  });
+
+  test("finishes against the fake and its preview shows Ultra (30k triangles) (AC-29)", async ({ page }) => {
+    await signIn(page, stack.url, stack.token);
+    await page.getByLabel("Detail", { exact: true }).getByRole("radio", { name: "Ultra 30k" }).click();
+    await page.getByLabel("Prompts").fill("an ultra lantern");
+    await page.getByRole("button", { name: /^Generate/ }).click();
+    const asset = page.getByTestId("asset").filter({ hasText: "an ultra lantern" });
+    await expect(asset).toHaveCount(1, { timeout: 60_000 });
+    await asset.getByRole("button", { name: /^Preview/ }).click();
+    await expect(page.getByRole("dialog")).toContainText("Ultra (30k triangles)");
   });
 });

@@ -4,6 +4,7 @@ import type { Job } from "./api.ts";
 import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
 import { Progress } from "./components/ui/progress.tsx";
+import { isUltra } from "../pipeline/presets.ts";
 import { formatDuration } from "./queue.ts";
 
 type Status = "loading" | "ready" | "failed";
@@ -117,7 +118,7 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
           <p data-testid="full-prompt" className="max-w-[72ch] whitespace-pre-wrap [overflow-wrap:anywhere]">{name}</p>
           {job.sharedStyle && <p className="text-sm text-muted-foreground"><span className="font-semibold">Shared style</span>{` ${job.sharedStyle}`}</p>}
           <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[.95rem] text-muted-foreground">
-            <div className="flex gap-1.5"><dt className="font-semibold">Detail</dt><dd className="tabular-nums">{`${String(job.faces / 1000)}k triangles`}</dd></div>
+            <div className="flex gap-1.5"><dt className="font-semibold">Detail</dt><dd className="tabular-nums">{isUltra(job.faces, job.tex) ? "Ultra (30k triangles)" : `${String(job.faces / 1000)}k triangles`}</dd></div>
             {job.tex !== null && <div className="flex gap-1.5"><dt className="font-semibold">Texture</dt><dd className="tabular-nums">{String(job.tex)}</dd></div>}
             <div className="flex gap-1.5"><dt className="font-semibold">Seed</dt><dd className="mono">{String(job.seed)}</dd></div>
             <div className="flex gap-1.5"><dt className="font-semibold">Created</dt><dd>{dateFormat.format(job.createdAt)}</dd></div>
