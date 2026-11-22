@@ -1030,6 +1030,7 @@ None.
 | 2026-11-21 | R-9 | spec | `2768304` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-10 | spec | `c2dbee2` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 2 nits |
 | 2026-11-22 | R-11 | spec | `5400611` | claude-opus-5-5 | procedural | 0 blocking, 4 should-fix, 1 nit |
+| 2026-11-22 | R-11 | spec | `5400611` | n/a | n/a | accepted by owner |
 
 ### R-1
 
