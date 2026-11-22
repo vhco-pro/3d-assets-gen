@@ -11,6 +11,9 @@ import { createReporter } from "../cli/report.ts";
 const id = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 export const FIXTURE_BATCH_PROMPTS = id(0x100);
 export const FIXTURE_BATCH_IMAGES = id(0x101);
+/** A batch of four jobs (done, Generating, Queued, failed) for the queue's batch group. */
+export const FIXTURE_BATCH_SET = id(0x102);
+const MIN = 60_000;
 
 interface FixtureJob {
   id: string;
@@ -22,6 +25,10 @@ interface FixtureJob {
   promptId?: string;
   running?: boolean;
   error?: string;
+  /** Times before the seed time T, in ms: when the current attempt was queued, started and finished. */
+  queuedAgo: number;
+  startedAgo?: number | null;
+  finishedAgo?: number;
 }
 
 /** A prompt near the 2000-character limit with one 120-character unbroken word, for the long-content checks. */
@@ -33,46 +40,54 @@ export const LONG_PROMPT = (() => {
   return text.slice(0, 1990).trim();
 })();
 
+// Times are fixed relative to the seed time T so the page's durations and estimates are deterministic.
+// Done jobs generated in 6 min 40 s (400 s) after waiting 1 min, except 木箱, whose start the app never saw.
+const done = (queuedAgo: number): Pick<FixtureJob, "queuedAgo" | "startedAgo" | "finishedAgo"> => ({ queuedAgo, startedAgo: queuedAgo - MIN, finishedAgo: queuedAgo - MIN - 400_000 });
 export const FIXTURE_JOBS: FixtureJob[] = [
-  { id: id(1), batch: FIXTURE_BATCH_PROMPTS, position: 0, kind: "prompt", text: "a wooden treasure chest", state: "done" },
-  { id: id(2), batch: FIXTURE_BATCH_PROMPTS, position: 1, kind: "prompt", text: "a rusty sci-fi pistol", state: "done" },
-  { id: id(3), batch: FIXTURE_BATCH_PROMPTS, position: 2, kind: "prompt", text: "木箱", state: "done" },
-  { id: id(4), batch: FIXTURE_BATCH_PROMPTS, position: 3, kind: "prompt", text: "a stone pillar", state: "done" },
-  { id: id(5), batch: FIXTURE_BATCH_PROMPTS, position: 4, kind: "prompt", text: "a cursed lantern", state: "failed", error: "CUDA out of memory (fixture)" },
-  { id: id(6), batch: FIXTURE_BATCH_PROMPTS, position: 5, kind: "prompt", text: "a broken shield", state: "cancelled" },
-  { id: id(7), batch: FIXTURE_BATCH_PROMPTS, position: 6, kind: "prompt", text: "a glowing crystal", state: "submitted", promptId: id(0x201), running: true },
-  { id: id(8), batch: FIXTURE_BATCH_PROMPTS, position: 7, kind: "prompt", text: "a potion bottle", state: "submitted", promptId: id(0x202) },
-  { id: id(9), batch: FIXTURE_BATCH_IMAGES, position: 0, kind: "image", text: "old-chest.png", state: "done" },
-  { id: id(10), batch: FIXTURE_BATCH_PROMPTS, position: 8, kind: "prompt", text: LONG_PROMPT, state: "done" },
-  { id: id(11), batch: FIXTURE_BATCH_PROMPTS, position: 9, kind: "prompt", text: LONG_PROMPT, state: "failed", error: "CUDA out of memory (fixture)" },
+  { id: id(1), batch: FIXTURE_BATCH_PROMPTS, position: 0, kind: "prompt", text: "a wooden treasure chest", state: "done", ...done(120 * MIN) },
+  { id: id(2), batch: FIXTURE_BATCH_PROMPTS, position: 1, kind: "prompt", text: "a rusty sci-fi pistol", state: "done", ...done(115 * MIN) },
+  { id: id(3), batch: FIXTURE_BATCH_PROMPTS, position: 2, kind: "prompt", text: "木箱", state: "done", queuedAgo: 110 * MIN, startedAgo: null, finishedAgo: 90 * MIN },
+  { id: id(4), batch: FIXTURE_BATCH_PROMPTS, position: 3, kind: "prompt", text: "a stone pillar", state: "done", ...done(105 * MIN) },
+  { id: id(5), batch: FIXTURE_BATCH_PROMPTS, position: 4, kind: "prompt", text: "a cursed lantern", state: "failed", error: "CUDA out of memory (fixture)", queuedAgo: 100 * MIN, finishedAgo: 95 * MIN },
+  { id: id(6), batch: FIXTURE_BATCH_PROMPTS, position: 5, kind: "prompt", text: "a broken shield", state: "cancelled", queuedAgo: 100 * MIN, finishedAgo: 99 * MIN },
+  { id: id(10), batch: FIXTURE_BATCH_PROMPTS, position: 8, kind: "prompt", text: LONG_PROMPT, state: "done", ...done(95 * MIN) },
+  { id: id(11), batch: FIXTURE_BATCH_PROMPTS, position: 9, kind: "prompt", text: LONG_PROMPT, state: "failed", error: "CUDA out of memory (fixture)", queuedAgo: 90 * MIN, finishedAgo: 85 * MIN },
+  { id: id(9), batch: FIXTURE_BATCH_IMAGES, position: 0, kind: "image", text: "old-chest.png", state: "done", ...done(80 * MIN) },
+  // The four-job batch: its Generating job is the one fixture job the fake runs, with a seeded thumbnail.
+  { id: id(12), batch: FIXTURE_BATCH_SET, position: 0, kind: "prompt", text: "a mossy stone well", state: "done", ...done(30 * MIN) },
+  { id: id(7), batch: FIXTURE_BATCH_SET, position: 1, kind: "prompt", text: "a glowing crystal", state: "submitted", promptId: id(0x201), running: true, queuedAgo: 12 * MIN, startedAgo: 3 * MIN },
+  { id: id(8), batch: FIXTURE_BATCH_SET, position: 2, kind: "prompt", text: "a potion bottle", state: "submitted", promptId: id(0x202), queuedAgo: 12 * MIN },
+  { id: id(13), batch: FIXTURE_BATCH_SET, position: 3, kind: "prompt", text: "an iron anvil", state: "failed", error: "CUDA out of memory (fixture)", queuedAgo: 12 * MIN, finishedAgo: 11 * MIN },
 ];
 
 function clear(store: Store, config: Config): void {
   const rows = store.db.query("SELECT id, batch_id FROM jobs WHERE fixture = 1").all() as { id: string; batch_id: string }[];
   store.db.transaction(() => {
     store.db.run("DELETE FROM jobs WHERE fixture = 1");
-    store.db.run(`DELETE FROM batches WHERE id IN (?, ?) AND NOT EXISTS (SELECT 1 FROM jobs WHERE batch_id = batches.id)`, [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES]);
+    store.db.run(`DELETE FROM batches WHERE id IN (?, ?, ?) AND NOT EXISTS (SELECT 1 FROM jobs WHERE batch_id = batches.id)`, [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES, FIXTURE_BATCH_SET]);
   })();
   for (const r of rows) rmSync(join(config.dataDir, "assets", r.id), { recursive: true, force: true });
-  for (const b of [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES]) rmSync(join(config.dataDir, "uploads", b), { recursive: true, force: true });
+  for (const b of [FIXTURE_BATCH_PROMPTS, FIXTURE_BATCH_IMAGES, FIXTURE_BATCH_SET]) rmSync(join(config.dataDir, "uploads", b), { recursive: true, force: true });
+  for (const r of rows) rmSync(join(config.comfyOutputDir, r.id), { recursive: true, force: true });
 }
 
 export function seedFixture(store: Store, config: Config, profile: string, now: number): number {
   clear(store, config);
   if (profile === "empty") return 0;
   store.db.transaction(() => {
-    for (const [batch, kind] of [[FIXTURE_BATCH_PROMPTS, "prompt"], [FIXTURE_BATCH_IMAGES, "image"]] as const) {
-      store.db.run("INSERT OR IGNORE INTO batches (id, kind, presets, hash, created_at) VALUES (?, ?, '{}', ?, ?)", [batch, kind, `fixture-${batch}`, now - (kind === "prompt" ? 1000 : 0)]);
+    for (const [batch, kind, ago] of [[FIXTURE_BATCH_PROMPTS, "prompt", 120 * MIN], [FIXTURE_BATCH_IMAGES, "image", 80 * MIN], [FIXTURE_BATCH_SET, "prompt", 12 * MIN]] as const) {
+      store.db.run("INSERT OR IGNORE INTO batches (id, kind, presets, hash, created_at) VALUES (?, ?, '{}', ?, ?)", [batch, kind, `fixture-${batch}`, now - ago]);
     }
     for (const j of FIXTURE_JOBS) {
       store.db.run(
         `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, prompt_id,
-           posted_at, fixture, error, created_at, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+           posted_at, fixture, error, created_at, queued_at, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
         [j.id, j.batch, j.position, j.kind, j.kind === "prompt" ? j.text : null, j.kind === "image" ? j.text : null, j.kind === "image" ? "png" : null,
-          "trellis", 2048, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now : null,
-          j.error ?? null, now - (j.batch === FIXTURE_BATCH_PROMPTS ? 1000 : 0), j.running ? now : null,
-          ["done", "failed", "cancelled"].includes(j.state) ? now : null],
+          "trellis", 2048, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now - j.queuedAgo : null,
+          j.error ?? null, now - j.queuedAgo, now - j.queuedAgo,
+          j.startedAgo === undefined || j.startedAgo === null ? null : now - j.startedAgo,
+          j.finishedAgo === undefined ? null : now - j.finishedAgo],
       );
     }
   })();
@@ -89,6 +104,12 @@ export function seedFixture(store: Store, config: Config, profile: string, now: 
       writeFileSync(join(config.dataDir, "uploads", j.batch, `${String(j.position)}.png`), solidPng(256, 256, rgb));
     }
   });
+  // The running fixture job's source thumbnail, where its graph would write it in ComfyUI's output folder.
+  for (const j of FIXTURE_JOBS.filter((f) => f.running && f.promptId)) {
+    const dir = join(config.comfyOutputDir, j.id, j.promptId ?? "");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "thumb_00001_.png"), solidPng(256, 256, [120, 170, 220]));
+  }
   return FIXTURE_JOBS.length;
 }
 

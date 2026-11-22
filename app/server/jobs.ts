@@ -59,10 +59,11 @@ export interface JobView {
   startedAt: number | null;
   queuedAt: number;
   sharedStyle: string | null;
+  sourceReady: boolean;
   finishedAt: number | null;
 }
 
-export function jobView(row: JobRow, queue: QueueInfo | null): JobView {
+export function jobView(row: JobRow, queue: QueueInfo | null, sourceReady = false): JobView {
   return {
     id: row.id,
     batchId: row.batch_id,
@@ -84,12 +85,13 @@ export function jobView(row: JobRow, queue: QueueInfo | null): JobView {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     sharedStyle: row.shared_style,
+    sourceReady,
   };
 }
 
 export type QueueLookup = (promptId: string | null) => QueueInfo | null;
 
-export function listJobs(store: Store, filter: { state?: string | null; batch?: string | null }, queue: QueueLookup): JobView[] {
+export function listJobs(store: Store, filter: { state?: string | null; batch?: string | null }, queue: QueueLookup, ready: (row: JobRow) => boolean = () => false): JobView[] {
   const where: string[] = [];
   const args: string[] = [];
   if (filter.state) {
@@ -102,7 +104,7 @@ export function listJobs(store: Store, filter: { state?: string | null; batch?: 
   }
   const sql = `SELECT j.* FROM jobs j JOIN batches b ON b.id = j.batch_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY b.created_at DESC, b.id DESC, j.position ASC`;
-  return (store.db.query(sql).all(...args) as JobRow[]).map((r) => jobView(r, r.state === "submitted" ? queue(r.prompt_id) : null));
+  return (store.db.query(sql).all(...args) as JobRow[]).map((r) => jobView(r, r.state === "submitted" ? queue(r.prompt_id) : null, ready(r)));
 }
 
 export function getJob(store: Store, id: string): JobRow | null {

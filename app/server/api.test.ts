@@ -242,3 +242,29 @@ describe("concurrency and idempotency", () => {
     expect(jobCount()).toBe(1);
   });
 });
+
+describe("source-preview (AC-26)", () => {
+  test("serves the tracker's preview file for an unfinished job, and the job view says when one exists", async () => {
+    await srv.stop();
+    const img = join(dirs.root, "thumb_00001_.png");
+    await Bun.write(img, imageBytes("png"));
+    let ready = false;
+    srv = createServer(dirs.config, {
+      tracker: () => ({ health: () => ({ comfyui: "reachable", version: "0.46.2" }), queueInfo: () => null, sourcePreview: () => (ready ? img : null), stop: () => Promise.resolve() }),
+    });
+    expect((await postPrompts(["a crate"])).status).toBe(201);
+    const list = async (): Promise<{ id: string; sourceReady: boolean }[]> => ((await (await fetch(`${srv.url}/api/jobs`, { headers: authHeaders() })).json()) as { jobs: { id: string; sourceReady: boolean }[] }).jobs;
+    const [first] = await list();
+    const id = first?.id ?? "";
+    expect(first?.sourceReady).toBe(false);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() })).status).toBe(404);
+    ready = true;
+    expect((await list())[0]?.sourceReady).toBe(true);
+    const res = await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    srv.store.db.run("UPDATE jobs SET state = 'done' WHERE id = ?", [id]);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() })).status).toBe(404);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`)).status).toBe(401);
+  });
+});

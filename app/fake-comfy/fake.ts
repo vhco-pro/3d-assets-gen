@@ -180,6 +180,7 @@ export class FakeComfy {
       },
     };
     const run = async (): Promise<void> => {
+      this.writeEarlyThumbnail(next);
       await Bun.sleep(this.runMs);
       const text = JSON.stringify(next.prompt);
       const held = (): boolean => [...this.holdMatching].some((m) => text.includes(m));
@@ -193,6 +194,18 @@ export class FakeComfy {
       this.pump();
     };
     void run();
+  }
+
+  /** Like real ComfyUI, the source thumbnail lands early, while the mesh stages are still running. */
+  private writeEarlyThumbnail(item: QueueItem): void {
+    for (const node of Object.values(item.prompt)) {
+      const raw = node.inputs.filename_prefix;
+      const prefix = typeof raw === "string" ? raw : "";
+      if (node.class_type !== "SaveImage" || !prefix.endsWith("/thumb")) continue;
+      const path = join(this.opts.outputDir, dirname(prefix), "thumb_00000_.png");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, solidPng(64, 64, [90, 140, 200]));
+    }
   }
 
   private complete(item: QueueItem, error: string | null, interrupted: boolean): void {

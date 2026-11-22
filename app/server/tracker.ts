@@ -75,6 +75,42 @@ export class Tracker implements TrackerView {
     return { comfyui: this.state, version: this.version };
   }
 
+  /**
+   * A small source image for an unfinished job: an image job's upload, or the 256-pixel thumbnail a prompt
+   * job's graph writes, counted ready once its size held on two consecutive ticks (never half written).
+   */
+  sourcePreview(job: JobRow): string | null {
+    if (job.state !== "pending" && job.state !== "submitted") return null;
+    if (job.kind === "image") {
+      const upload = uploadPath(this.config, job);
+      return existsSync(upload) ? upload : null;
+    }
+    const seen = this.thumbs.get(job.id);
+    return seen && seen.stable && seen.attempt === job.prompt_id ? seen.path : null;
+  }
+
+  private readonly thumbs = new Map<string, { attempt: string; path: string; size: number; stable: boolean }>();
+
+  /** Records each running prompt job's thumbnail size; called on every tick. */
+  private watchThumbnails(): void {
+    const live = new Set<string>();
+    for (const job of this.jobs("state = 'submitted' AND kind = 'prompt' AND prompt_id IS NOT NULL")) {
+      live.add(job.id);
+      const dir = join(this.config.comfyOutputDir, job.id, job.prompt_id ?? "");
+      const name = existsSync(dir) ? readdirSync(dir).filter((n) => /^thumb_\d+_\.png$/.test(n)).sort()[0] : undefined;
+      if (!name) {
+        this.thumbs.delete(job.id);
+        continue;
+      }
+      const path = join(dir, name);
+      const size = statSync(path).size;
+      const before = this.thumbs.get(job.id);
+      const stable = before?.attempt === job.prompt_id && before.path === path && before.size === size && size > 0;
+      this.thumbs.set(job.id, { attempt: job.prompt_id ?? "", path, size, stable });
+    }
+    for (const id of this.thumbs.keys()) if (!live.has(id)) this.thumbs.delete(id);
+  }
+
   queueInfo(promptId: string | null): QueueInfo | null {
     if (!promptId || !this.snapshot) return null;
     if (this.snapshot.running.includes(promptId)) return { running: true, position: null };
@@ -136,6 +172,7 @@ export class Tracker implements TrackerView {
       await this.submitPending();
       this.snapshot = await this.comfy.queue();
       await this.reconcile();
+      this.watchThumbnails();
       await this.timeouts();
     } catch (e) {
       if (e instanceof ComfyError && e.kind === "unreachable") {

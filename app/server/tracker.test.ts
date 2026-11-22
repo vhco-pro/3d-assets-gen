@@ -666,3 +666,23 @@ describe("AC-28 Shared style in graphs and retries", () => {
     expect(promptText()).toStartWith("a crate, hand-painted, single object");
   });
 });
+
+describe("AC-26 source previews", () => {
+  test("a running prompt job's thumbnail is ready only after its size held for two ticks", async () => {
+    const [a = ""] = addBatch(["a crate"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).state === "submitted" && existsSync(join(dirs.config.comfyOutputDir, a, job(a).prompt_id ?? "")));
+    expect(t.sourcePreview(job(a))).toBeNull();
+    await t.tick();
+    await t.tick();
+    expect(t.sourcePreview(job(a)) ?? "").toMatch(/thumb_\d+_\.png$/);
+    fake.release();
+    await runUntil(t, () => job(a).state === "done");
+    expect(t.sourcePreview(job(a))).toBeNull();
+  });
+  test("an image job's upload is its preview from the start", () => {
+    const [b = ""] = addBatch(["chest.png"], { kind: "image" });
+    expect(tracker().sourcePreview(job(b)) ?? "").toMatch(/uploads\/.+\/0\.png$/);
+  });
+});

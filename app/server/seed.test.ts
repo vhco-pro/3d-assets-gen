@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FakeComfy } from "../fake-comfy/fake.ts";
 import { ComfyClient } from "./comfy.ts";
@@ -107,5 +108,23 @@ test("the fixture is TRELLIS.2 only and holds the long prompt on a done and a fa
   expect(LONG_PROMPT.length).toBeGreaterThan(1900);
   expect(LONG_PROMPT.length).toBeLessThanOrEqual(2000);
   expect(LONG_PROMPT.split(/\s+/).some((w) => w.length >= 120)).toBe(true);
+  store.close();
+});
+
+test("the fixture's four-job batch, unseen start and running thumbnail are seeded with times relative to T (AC-26, AC-27)", () => {
+  const store = openStore(dirs.config.dataDir);
+  const t = 1_800_000_000_000;
+  seedFixture(store, dirs.config, "default", t);
+  const set = store.db.query("SELECT state, started_at, queued_at FROM jobs WHERE batch_id = '00000000-0000-4000-8000-000000000102' ORDER BY position").all() as { state: string; started_at: number | null; queued_at: number }[];
+  expect(set.map((r) => r.state)).toEqual(["done", "submitted", "submitted", "failed"]);
+  expect(set[1]?.started_at).toBe(t - 3 * 60_000);
+  expect(set[2]?.started_at).toBeNull();
+  expect(set[1]?.queued_at).toBe(t - 12 * 60_000);
+  const unseen = store.db.query("SELECT started_at, finished_at FROM jobs WHERE prompt = '木箱'").get() as { started_at: number | null; finished_at: number };
+  expect(unseen.started_at).toBeNull();
+  const doneRow = store.db.query("SELECT started_at, finished_at FROM jobs WHERE prompt = 'a wooden treasure chest'").get() as { started_at: number; finished_at: number };
+  expect(doneRow.finished_at - doneRow.started_at).toBe(400_000);
+  const thumbs = join(dirs.config.comfyOutputDir, "00000000-0000-4000-8000-000000000007", "00000000-0000-4000-8000-000000000201", "thumb_00001_.png");
+  expect(existsSync(thumbs)).toBe(true);
   store.close();
 });

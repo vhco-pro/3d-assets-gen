@@ -3,7 +3,7 @@ import type { Server } from "bun";
 import { clientAddress, defaultTrustedPeers, FailureLimiter, makeCookieValue, readCookie, sameSecret, SESSION_COOKIE, sessionCookieHeader, verifyCookieValue } from "./auth.ts";
 import { createBatch } from "./batches.ts";
 import type { Config } from "./config.ts";
-import { getJob, jobView, listJobs, requestCancel, retryJob, type QueueInfo } from "./jobs.ts";
+import { getJob, jobView, listJobs, requestCancel, retryJob, type JobRow, type QueueInfo } from "./jobs.ts";
 import { openStore, type Store } from "./store.ts";
 import { APP_COMMIT, APP_VERSION } from "./version.ts";
 
@@ -16,6 +16,8 @@ export type ComfyState = "reachable" | "offline" | "incompatible";
 export interface TrackerView {
   health(): { comfyui: ComfyState; version: string | null };
   queueInfo(promptId: string | null): QueueInfo | null;
+  /** A small source image for an unfinished job, or null when there is none yet (Design > HTTP API). */
+  sourcePreview(job: JobRow): string | null;
   stop(): Promise<void>;
 }
 
@@ -52,6 +54,7 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
   const limiter = new FailureLimiter(now);
   const tracker = opts.tracker ? opts.tracker(store) : null;
   const queueInfo = (id: string | null): QueueInfo | null => tracker?.queueInfo(id) ?? null;
+  const previewOf = (row: JobRow): string | null => (row.state === "pending" || row.state === "submitted" ? (tracker?.sourcePreview(row) ?? null) : null);
 
   function authorised(req: Request): boolean {
     const auth = req.headers.get("authorization");
@@ -104,7 +107,17 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
 
     if (path === "/api/batches" && req.method === "POST") return createBatch(req, { store, config, now });
     if (path === "/api/jobs" && req.method === "GET") {
-      return Response.json({ jobs: listJobs(store, { state: url.searchParams.get("state"), batch: url.searchParams.get("batch") }, queueInfo) });
+      return Response.json({ jobs: listJobs(store, { state: url.searchParams.get("state"), batch: url.searchParams.get("batch") }, queueInfo, (r) => previewOf(r) !== null) });
+    }
+    const previewMatch = /^\/api\/jobs\/([^/]+)\/source-preview$/.exec(path);
+    if (previewMatch && req.method === "GET") {
+      const id = previewMatch[1] ?? "";
+      const job = UUID.test(id) ? getJob(store, id) : null;
+      const file = job ? previewOf(job) : null;
+      if (!file) return err(404, "No source image yet.");
+      const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
+      const type = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
+      return new Response(Bun.file(file), { headers: { "content-type": type, "cache-control": "private, max-age=60" } });
     }
     const jobMatch = /^\/api\/jobs\/([^/]+)(?:\/(cancel|retry))?$/.exec(path);
     if (jobMatch) {
@@ -113,7 +126,7 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
       if (!UUID.test(id)) return err(404, "No such job.");
       if (!action && req.method === "GET") {
         const job = getJob(store, id);
-        return job ? Response.json({ job: jobView(job, job.state === "submitted" ? queueInfo(job.prompt_id) : null) }) : err(404, "No such job.");
+        return job ? Response.json({ job: jobView(job, job.state === "submitted" ? queueInfo(job.prompt_id) : null, previewOf(job) !== null) }) : err(404, "No such job.");
       }
       if (action && req.method === "POST") {
         const result = action === "cancel" ? requestCancel(store, id) : retryJob(store, config, id, now());
