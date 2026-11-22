@@ -1,6 +1,6 @@
 ---
 status: in-progress
-status_description: "Implementing the R-22 revision on feat/asset-studio (T63 to T69, then T44 and T45)."
+status_description: "Merged in PR #5 and deployed as v0.2.0; waiting on owner action #4 for Renovate (T45)."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
@@ -1432,6 +1432,7 @@ deletes only flagged fixture rows and their files.
 - [x] T70 `docs/internal/plans/asset-studio.md` - R-23 F-01: capture the clipped long-prompt card (before and after) and the long-prompt queue row expanded through `More` from the final page, from one base-seeded directory head migrates, push them to `refs/pr-visuals/5`, link them in a PR comment and correct T44's record note; rerun the 200 percent zoom check on the final page (R-23 F-02) (AC-22, AC-09)
       Evidence: Captured from one data directory seeded by base 25328bc's executable, with a done and a failed copy of base fixture rows carrying the 1990-character LONG_PROMPT added at schema 1, served by base and by head (which migrated its copy): the long-prompt card at 1280 and 390 (before: the whole prompt on the card; after: two lines with an ellipsis), the failed long-prompt queue row at 1280 before and after, and after only the row expanded through More with Less. Pushed to refs/pr-visuals/5 at 7fef04c and linked in PR comment 7082743665. Correction to T44's record note, kept here because checked task lines stay as written: the record of the final page is the three comments 7080862670 (13a725f), 7082597436 (b4c366e) and 7082743665 (357b527); 7080862670 alone did not hold the long-prompt states. 200 percent zoom on the final page (R-23 F-02): Chromium with a 640x360 CSS viewport at device scale factor 2 (a 1280x720 window at 200 percent), dev stack on the final build: sign-in, the main view with Ultra 30k chosen and the open preview dialog had 0 px horizontal overflow, every Detail and Texture item inside the viewport, Generate 574 x 40 px, Close and Download inside the viewport, no console errors.
 - [ ] T45 `docs/internal/plans/asset-studio.md` - after merge, deploy the release from `main` and repeat the AC-10 check; after the owner adds the repository to the `vhco-renovate` installation (#4), re-add it to `vhco-pro/renovate-runner`'s targets, run the limited `full` dry run and record its run ID, wait for Renovate's activity and rerun `check-repo.sh` (AC-10, AC-14)
+      Progress: on 2026-11-22 PR #5 merged as cd1fd8a; CI run 45050240346 on main (checks, version, release success) published v0.2.0 (sha256:c97939a4…); `scripts/deploy/deploy.sh 0.2.0` passed every step including the schema guard, with 34 jobs (13 done, 18 submitted, 2 failed, 1 cancelled) the same before and after; AC-10 repeated: health from fedora-43 and arch-1 reports 0.2.0 at cd1fd8a43b06 with ComfyUI reachable, and ports 8790 and 8188 on win-main's tailnet address time out. The Renovate steps wait on owner action #4.
 
 ## Open Questions
 
