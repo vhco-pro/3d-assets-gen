@@ -1192,6 +1192,7 @@ None.
 | 2026-11-22 | R-12 | implementation | `81b4b51` | claude-opus-5-5 | procedural | 18 met, 1 not met (AC-14, after merge), 2 not verified (AC-11, AC-15: live procedures not rerun by the read-only reviewer); 0 blocking, 3 should-fix, 3 nits |
 | 2026-11-22 | R-13 | implementation | `b54bca4` | claude-opus-5-5 | procedural | 20 met, 1 not met (AC-14, after merge); 0 blocking, 1 should-fix, 2 nits |
 | 2026-11-22 | R-14 | spec | `adeab21` | claude-opus-5-5 | procedural | 0 blocking, 15 should-fix, 5 nits |
+| 2026-11-22 | R-15 | spec | `e0f334f` | claude-opus-5-5 | procedural | 1 blocking, 7 should-fix, 4 nits |
 
 ### R-1
 
@@ -2752,6 +2753,94 @@ SEVERITY: nit
 WHERE: Design > Page (lines 666-667, 676-677, 680-681); Design > Glossary
 EVIDENCE: The restyle changes user-facing labels: `Generate` becomes `Generate 1 job` or `Generate 6 jobs`, `Close preview` (app/web/Viewer.tsx:63) becomes `Close`, and `Select all` is new. The Glossary rows and AC-18 do not cover them. The label for a form that would create no job (for example `Generate 0 jobs`, or a disabled button) is not defined.
 PROPOSAL: Add the button terms to the Glossary or state that the Glossary is limited to states, fields, banners and the heading. Define the Generate label and state when no job would be created.
+
+### R-15
+
+TARGET: e0f334fe90c0abb296b6c116778b250c0e783f28
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Repository and CI (lines 938-945); Test Plan row AC-14 (line 1073); Acceptance Criteria AC-24 (line 1054); Test Plan row AC-24 (line 1083); Tasks T45 (line 1167) and T47 (line 1169); Context > Owner summary (lines 111-121)
+EVIDENCE: Design says the installation check reads its token from `ASSET_STUDIO_INSTALLATION_TOKEN`, "a fine-grained personal access token the owner creates with read access to the organisation's GitHub Apps". The check calls `GET /user/installations/<id>/repositories` (scripts/deploy/check-repo.sh:55). GitHub's page "Endpoints available for fine-grained personal access tokens" (fetched from docs.github.com/api/article/body?pathname=/en/rest/authentication/endpoints-available-for-fine-grained-personal-access-tokens) lists, under apps, only `PUT` and `DELETE /user/installations/{installation_id}/repositories/{repository_id}`, not the `GET .../repositories` listing. Fine-grained tokens also have no "GitHub Apps" read permission to grant. So the credential the document names cannot make the check pass. The AC-14 row still requires "the repository is listed in the `vhco-renovate` installation's repositories" through check-repo.sh. The alternative proof (a renovate-runner dry run) appears only in Design, not in the row, so the AC-14 proof as written cannot be executed after #4 is resolved. The Owner summary does not mention that the owner must create a token at all. This traces to how the previous revision applied R-14 F-12.
+PROPOSAL: Name a credential that can list the installation (for example a GitHub App user access token, verified against the endpoint) or drop the listing. Put the renovate-runner dry run into the AC-14 row as the accepted proof. Mention any owner credential step in the Owner summary, and raise the choice as an Open Question if it adds owner work.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 542-556); Design > Submission, concurrency and idempotency (sweep paragraph, lines 477-486); Acceptance Criteria AC-23 (line 1053); Test Plan row AC-23 (line 1082); Tasks T39 (line 1161)
+EVIDENCE: The purge runs "on the first tick with a compatible ComfyUI", and "The sweep that follows removes those jobs' asset directories, uploads and files". The sweep runs "at start and every ten minutes" (line 477). In the tree the start sweep runs before the first tick: app/server/tracker.ts:84-85 calls `this.sweep({ atStart: true })` and only then starts the tick interval. So the sweep that follows the purge is the ten-minute one. The AC-23 row asserts that a start through `start()` "leaves no Hunyuan3D row, no batch without jobs and none of their files" without saying when. One implementer runs a sweep right after the purge commits; another leaves the files for up to ten minutes and the test advances a faked clock. The two build different things, and a test that checks soon after start fails the second.
+PROPOSAL: State whether a sweep runs right after the purge completes. In the AC-23 row, say when the file assertion is read (for example after the purge's own sweep, or after the faked clock passes the next ten-minute sweep).
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 543-549); Design > Cancel, retry and delete (lines 497-501); Context > Owner summary (lines 84-86); Acceptance Criteria AC-23 (line 1053)
+EVIDENCE: For a user cancel, a `pending` job whose post is under 30 seconds old keeps its flag until the attempt appears or 30 seconds pass (lines 497-499), because a post that timed out may still be accepted. The purge has no such wait: it cancels each known Hunyuan3D prompt ID at once, treats `{"cancelled": false}` for an unknown ID as done, and deletes the rows. A v0.1.0 post that was in flight when deploy.sh replaced the container can land in ComfyUI after that cancel. It then runs with no row, and its GPU time is lost ahead of TRELLIS.2 jobs. Line 548-549 says "no Hunyuan3D row is deleted while its prompt might still be queued", which is not true in that window. The Owner summary says the server cancels "any Hunyuan3D prompt still queued or running", while AC-23 says only "every Hunyuan3D prompt it knows".
+PROPOSAL: Apply the same 30-second rule to Hunyuan3D `pending` rows with a recent post time before cancelling and deleting them, or state the window as accepted. Align the Owner summary with AC-23's "it knows".
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 93-94); Design > HTTP API (line 632); Design > Page (queue paragraph lines 692-694, library lines 696-699, layout rules lines 728-734); Test Plan rows AC-09 (line 1068) and AC-22 (line 1081); Tasks T38 (line 1160) and T40 (line 1162)
+EVIDENCE: This revision raises prompts from 500 to 2000 characters. It says the gallery clips them to two lines with the full text as `title` and in the dialog. The queue row shows "the prompt or file name" with no rule: unclipped, a 2000-character prompt fills about 23 lines at 90 characters each; clipped, a failed or cancelled job never reaches the library, so its full prompt can be read nowhere. guides/vh-midnight.md asks to keep long content "accessible without page-wide scrolling or truncation", and conventions/frontend-testing.md asks to "Include longer text or expanded copy when content length affects sizing". The fixture holds no long prompt: app/server/seed.ts:28-38 has prompts of at most 24 characters, and T40 only makes it TRELLIS.2-only. The AC-22 assertion "a card's clipped prompt carries the full text as `title`" then has no clipped card to check, and the AC-09 layout runs never meet a long prompt.
+PROPOSAL: Define how a queue row shows a long prompt and where its full text can be read. Add a long fixture prompt (near 2000 characters, including one long unbroken word) to T40, and run the AC-09 layout rules and the AC-22 title check on it.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 1005-1015); Acceptance Criteria AC-22 (line 1052); Tasks T44 (line 1166)
+EVIDENCE: The before side is "the base commit's build seeded with that fixture through the base executable's own `seed` command fed head's fixture rows". The base executable's seed takes no fixture input. Its rows are compiled in as `FIXTURE_JOBS` (app/server/seed.ts:28-38, including the Hunyuan3D "a stone pillar" job), and its options are only `--profile default|empty` and `--reset` (app/server/main.ts:5). As written, the procedure cannot be executed without changing the base build, which would no longer be the base commit's build.
+PROPOSAL: Describe an executable route, for example seeding the data directory with head's `seed` command (the schema version is 1 on both sides) and then serving that directory with the base executable.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (lines 666-679); Acceptance Criteria AC-22 (line 1052); Test Plan row AC-22 (line 1081)
+EVIDENCE: Design says "`--ok`, `--warn` and `--danger` appear on nothing else except the Generate button, the two banners and the Delete hover state", and the AC-22 proof asserts no other element's text, border or background resolves to them. The page has other error outputs: the wrong-token error, batch rejection messages, a failed job's error text, job action errors, the viewer error state and the export-gone notice. Today they use the danger colour (app/web/styles.css:32 `.error`, :51 `.job-error`). conventions/interface-colour.md says to use colour for "whether an action succeeded or failed". The document does not say these messages turn neutral. One implementer keeps them red and fails the AC-22 proof. Another makes them neutral and departs from the colour guideline. Neither choice is raised as an Open Question.
+PROPOSAL: Name the error messages and say which colour each uses. Either add them to the allowed list in Design, AC-22 and its row, or state that they stay neutral with their text as the signal. Raise the choice as an Open Question if it departs from the colour guideline.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 982-991); Test Plan row AC-22 (line 1081); Tasks T40 (line 1162) and T41 (line 1163)
+EVIDENCE: The AC-22 row stops the fake, switches it to 0.46.1, and holds it "from accepting" so a Waiting badge can be seen. Design lists the Playwright projects that get their own container and fake: sign-in and token rotation, offline and incompatible, glossary, and empty profile. Every other journey shares one seeded container. `style.spec.ts` is not on the isolated list, so as written it stops the fake under the shared journeys. The fake's Playwright control (app/fake-comfy/fake.ts:340-366) offers `version`, `restart`, `reject-next`, `hold`, `release`, `hold-matching`, `release-matching` and `fail-matching`. `hold` holds running prompts and does not stop acceptance. No task names adding a control that keeps a post unaccepted.
+PROPOSAL: Add `style.spec.ts`, or its banner and Waiting cases, to the isolated projects. Name the fake control that holds a post unaccepted, and add it to T40 or T41.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T43-T47, lines 1165-1169)
+EVIDENCE: conventions/feature-documents.md (Tasks) asks to "Order by dependency". T46 (workflow permissions, shell, timeouts, actionlint) and T47 (fail-closed check-repo.sh, README coverage) come after T44, which deploys the prerelease and records the live checks, and after T45, which runs "after merge". Both change files that ship in the PR and that AC-24 checks before merge. Followed in order, the prerelease evidence of T44 is taken at a commit without them, and T45 runs on `main` before T46 and T47 exist.
+PROPOSAL: Move T46 and T47 before T43 (or at least before T44). Keep T44 and T45 last.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-22 (line 1052)
+EVIDENCE: AC-22 says "semantic badge colours only on job states and banners" and later "semantic colours on nothing but job states, banners, Generate and the Delete hover". Generate and the Delete hover use `--ok` and `--danger`, so read literally the first clause conflicts with the second. The previous revision added the second clause without removing the first. The AC-22 row follows the second.
+PROPOSAL: Drop "semantic badge colours only on job states and banners" from AC-22.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 89-93)
+EVIDENCE: The summary lists what #3 tracks as "tag-triggered, repeat-safe releases, 422 and RFC 3339 in the API, test waits, container labels and a PowerShell analyzer". Issue #3 also tracks `conventions/coding.md` fallbacks that announce themselves (app/server/assets.ts, app/server/auth.ts, scripts/deploy/rollback.sh), and the github-actions rule to run only the checks a change needs.
+PROPOSAL: Add the fallback rule and the check-selection rule to the summary's list, or write "among them" before the list.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Repository and CI (lines 909-911)
+EVIDENCE: Design says "Every action and reusable workflow is pinned to a full commit SHA with a release-tag comment". .github/workflows/codeql.yml (both jobs) and .github/workflows/scorecard.yml pin `vhco-pro/.github` at `e03ad61274b2bf0738b36ed67dff1c376321fb64` with the comment `# main`, which is a branch, not a release tag.
+PROPOSAL: Say that reusable workflows from a repository without release tags carry the branch name in the comment, or change the comments to name a tag where one exists.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Restart, upgrade and rollback (lines 548-549); Design > Export (line 763); Tasks T39 (line 1161)
+EVIDENCE: "Until the purge completes, the tracker submits nothing for Hunyuan3D rows and the job list hides them." T39 touches only `app/server/tracker.ts`, `app/server/main.ts` and `app/server/tracker.test.ts`. The job list is served elsewhere (`app/server/jobs.ts`, `app/server/http.ts`). While ComfyUI stays offline the purge waits, so hidden Hunyuan3D `done` jobs can still be fetched or exported by ID. Their manifest entry would then say `engine` "trellis", which Export calls always true.
+PROPOSAL: Add the file that hides Hunyuan3D rows to T39. Say whether `GET /api/jobs/<id>`, assets and exports also refuse Hunyuan3D rows before the purge completes.
 
 ## Sources
 
