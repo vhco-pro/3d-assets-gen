@@ -1,6 +1,6 @@
 // VH Midnight style checks (AC-22). This spec starts its own stack because it stops and changes the fake.
 import type { Locator, Page } from "@playwright/test";
-import { expect, signIn, test } from "./fixtures.ts";
+import { expandBatches, expect, signIn, test } from "./fixtures.ts";
 import { startStack, type Stack } from "./harness.ts";
 
 // Design > Page: badge recipes with exact values.
@@ -62,6 +62,7 @@ test("tokens, the single solid Generate button and semantic colours only where D
 
 test("each state badge uses Design's exact colours, including Waiting and Done", async ({ page }) => {
   await signIn(page, stack.url, stack.token);
+  await expandBatches(page);
   for (const term of ["Generating", "Queued", "Failed", "Cancelled"]) {
     const badge = page.getByTestId("queue").getByTestId("job-state").filter({ hasText: new RegExp(`^${term}$`) }).first();
     expect(await colours(badge)).toEqual(BADGES[term]);
@@ -116,11 +117,12 @@ test("long prompts clip to two lines with the full text in the title, the dialog
   const clipped = await cardText.evaluate((el) => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) * 2 + 2);
   expect(clipped).toBe(true);
   await longCard.getByRole("button", { name: /^Preview/ }).click();
-  const dialog = page.locator("dialog[open]");
+  const dialog = page.getByRole("dialog");
   await expect(dialog.getByTestId("full-prompt")).toHaveText(full);
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
+  await expandBatches(page);
   const row = page.getByTestId("job").filter({ hasText: "a weathered stone archway" });
   const rowText = row.getByTestId("prompt-text");
   expect(await rowText.getAttribute("title")).toBe(full);
@@ -136,10 +138,26 @@ test("the preview is a modal dialog that Escape closes, returning focus to its P
   await signIn(page, stack.url, stack.token);
   const opener = page.getByTestId("asset").first().getByRole("button", { name: /^Preview/ });
   await opener.click();
-  const dialog = page.locator("dialog");
-  await expect(dialog).toHaveJSProperty("open", true);
-  expect(await dialog.evaluate((el) => el.matches(":modal"))).toBe(true);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
   await page.keyboard.press("Escape");
-  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(opener).toBeFocused();
+});
+
+test("controls are shadcn components: data-slot attributes, a primary-coloured selected segment and translucent buttons (AC-25, AC-22)", async ({ page }) => {
+  await signIn(page, stack.url, stack.token);
+  await page.getByLabel("Prompts").fill("slot check");
+  await expect(page.getByRole("button", { name: /^Generate/ })).toHaveAttribute("data-slot", "button");
+  await expect(page.getByLabel("Detail", { exact: true })).toHaveAttribute("data-slot", "toggle-group");
+  await expect(page.getByLabel("Game-asset style", { exact: true })).toHaveAttribute("data-slot", "switch");
+  await expect(page.getByTestId("asset").first().getByRole("checkbox")).toHaveAttribute("data-slot", "checkbox");
+  const selected = page.getByLabel("Detail", { exact: true }).locator("[data-state=on]");
+  await expect(selected).toHaveText("10k");
+  expect(await selected.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(79, 140, 255)");
+  const plain = page.getByRole("button", { name: "Download selected" });
+  expect(await plain.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(255, 255, 255, 0.07)");
+  await page.getByTestId("asset").first().getByRole("button", { name: /^Preview/ }).click();
+  await expect(page.getByRole("dialog")).toHaveAttribute("data-slot", "dialog-content");
 });

@@ -70,3 +70,22 @@ test("invalid batches show the problem and add nothing", async ({ page }) => {
   await expect(alert).toContainText("20 MiB");
   await expect(page.getByRole("status").filter({ hasText: "jobs added" })).toHaveCount(0);
 });
+
+test("Shared style is prefilled, saved on change, resettable, capped at 300 and off for images (AC-28)", async ({ page }) => {
+  const field = page.getByLabel("Shared style", { exact: true });
+  await page.evaluate(() => { localStorage.removeItem("asset-studio:shared-style"); });
+  await page.reload();
+  await expect(field).toHaveValue("stylized hand-painted game art, clean readable silhouette, consistent muted color palette");
+  await field.fill("low-poly, flat shaded");
+  await page.reload();
+  await expect(page.getByLabel("Shared style", { exact: true })).toHaveValue("low-poly, flat shaded");
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(field).toHaveValue("stylized hand-painted game art, clean readable silhouette, consistent muted color palette");
+  await page.reload();
+  await expect(field).toHaveValue("stylized hand-painted game art, clean readable silhouette, consistent muted color palette");
+  await field.fill("s".repeat(320));
+  expect((await field.inputValue()).length).toBe(300);
+  await page.getByLabel("Images").setInputFiles([{ name: `${uniquePrompt("shared")}.png`, mimeType: "image/png", buffer: png(2048, 4) }]);
+  await expect(field).toBeDisabled();
+  await expect(page.getByText("Shared style applies to prompts only.")).toBeVisible();
+});

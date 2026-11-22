@@ -1,8 +1,8 @@
-import { expect, signIn, test } from "./fixtures.ts";
+import { expandBatches, expect, signIn, test } from "./fixtures.ts";
 import { startStack, type Stack } from "./harness.ts";
 
 const STATES = ["Waiting", "Queued", "Generating", "Done", "Failed", "Cancelled"];
-const FIELDS = ["Detail", "Texture", "Variants", "Game-asset style", "Seed"];
+const FIELDS = ["Detail", "Texture", "Variants", "Game-asset style", "Seed", "Shared style"];
 
 let stack: Stack;
 test.beforeAll(async () => {
@@ -14,6 +14,7 @@ test.afterAll(async () => {
 
 test("job states, preset fields, banners and the library heading use the Glossary terms", async ({ page }) => {
   await signIn(page, stack.url, stack.token);
+  await expandBatches(page);
   const states = await page.getByTestId("job-state").allTextContents();
   expect(states.length).toBeGreaterThan(0);
   for (const s of states) expect(STATES).toContain(s);

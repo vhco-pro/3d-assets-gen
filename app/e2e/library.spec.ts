@@ -47,7 +47,7 @@ test("thumbnails load and the selected GLB renders in the viewer @firefox", asyn
   await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   await asset.getByRole("button", { name: /Preview/ }).click();
   // The viewer marks its element once model-viewer fires load; production logs nothing.
-  await expect(page.locator("dialog[open] model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+  await expect(page.locator('[role="dialog"] model-viewer')).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
   await expect.poll(() => renderedPixels(page), { timeout: 30_000 }).toBeGreaterThan(50);
   expect(consoleErrors).toEqual([]);
 });
@@ -72,4 +72,23 @@ test("the empty profile shows the empty library @firefox", async ({ page }) => {
   } finally {
     await stack.stop();
   }
+});
+
+test("cards show the generation time and the preview shows waited, generated and total times (AC-27)", async ({ page }) => {
+  const s = shared();
+  await signIn(page, s.url, s.token);
+  const chest = page.getByTestId("asset").filter({ hasText: "a wooden treasure chest" });
+  await expect(chest).toContainText("Generated in 6 min 40 s");
+  await chest.getByRole("button", { name: /^Preview/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Waited1 min");
+  await expect(dialog).toContainText("Generated in6 min 40 s");
+  await expect(dialog).toContainText("Total7 min 40 s");
+  await page.keyboard.press("Escape");
+  // 木箱 ran while the app was down: no start time, so no waited or generation time.
+  const unseen = page.getByTestId("asset").filter({ hasText: "木箱" });
+  await expect(unseen).not.toContainText("Generated in");
+  await unseen.getByRole("button", { name: /^Preview/ }).click();
+  await expect(page.getByRole("dialog")).not.toContainText("Waited");
+  await expect(page.getByRole("dialog")).not.toContainText("Generated in");
 });

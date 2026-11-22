@@ -24,7 +24,11 @@ export interface Job {
   queuePosition: number | null;
   error: string | null;
   createdAt: number;
+  queuedAt: number;
   startedAt: number | null;
+  finishedAt: number | null;
+  sharedStyle: string | null;
+  sourceReady: boolean;
 }
 
 export interface Health {
@@ -83,6 +87,7 @@ export async function signIn(token: string): Promise<void> {
 export interface PresetsInput {
   faces: number;
   tex: number;
+  sharedStyle?: string | null;
   variants: number;
   style: boolean;
   seed: number | null;

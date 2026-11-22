@@ -59,7 +59,7 @@ async function waitFor(check: () => Promise<boolean>, what: string, ms = 60_000)
 
 const newToken = (): string => randomBytes(32).toString("base64url");
 
-export async function startStack(name: string, profile: Profile): Promise<Stack> {
+export async function startStack(name: string, profile: Profile, opts: { unfinishedJobs?: number } = {}): Promise<Stack> {
   const root = join(ROOT, ".artifacts", "e2e", `${name}-${randomBytes(3).toString("hex")}`);
   const dataDir = join(root, "data");
   const comfyIn = join(root, "comfy", "input", "asset-studio");
@@ -80,6 +80,7 @@ export async function startStack(name: string, profile: Profile): Promise<Stack>
     const lines = TARGET === "image"
       ? [`comfyui_url: ${comfyUrlForApp}`, `token: ${token}`]
       : [`listen: 127.0.0.1:${String(appPort)}`, `comfyui_url: ${comfyUrlForApp}`, `data_dir: ${dataDir}`, `comfy_input_dir: ${comfyIn}`, `comfy_output_dir: ${comfyOut}`, `token: ${token}`];
+    if (opts.unfinishedJobs !== undefined) lines.push("limits:", `  unfinished_jobs: ${String(opts.unfinishedJobs)}`);
     writeFileSync(configPath, lines.join("\n") + "\n");
     chmodSync(configPath, 0o644);
   };

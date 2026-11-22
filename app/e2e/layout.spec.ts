@@ -33,6 +33,8 @@ async function checkLayout(page: Page): Promise<void> {
       if (el.getBoundingClientRect().width > ninety + 2) problems.push(`prompt line wider than 90 characters: ${el.textContent.slice(0, 30)}`);
     }
     for (const el of document.querySelectorAll("button, input, select, textarea")) {
+      // Radix keeps a hidden native input beside its checkbox for forms; it is not exposed to anyone.
+      if (el.closest("[aria-hidden='true']")) continue;
       const input = el as HTMLInputElement;
       const named = input.labels?.length || el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || (el.tagName === "BUTTON" && el.textContent.trim());
       if (input.type !== "hidden" && !named) problems.push(`unnamed control: ${el.outerHTML.slice(0, 60)}`);
@@ -89,6 +91,8 @@ async function checkContrast(page: Page): Promise<void> {
           if (r < (large ? 3 : 4.5)) out.push(`text ${r.toFixed(2)}: ${el.textContent.trim().slice(0, 30)}`);
         }
         if (el.matches("button, input:not([type=checkbox]):not([type=radio]):not([type=file]), select, textarea, [data-control]") && parseFloat(s.borderTopWidth) > 0) {
+          // A fully transparent border is no boundary (shadcn's Switch keeps one); its fill is checked as text-free UI.
+          if (parse(s.borderTopColor)[3] === 0) continue;
           const outside = backdrop(el.parentElement, stop);
           const border = over(parse(s.borderTopColor), outside);
           const r = ratio(border, outside);
@@ -131,7 +135,7 @@ for (const [w, h] of VIEWPORTS) {
     await checkLayout(page);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-submitted.png`), fullPage: true });
     await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
-    await expect(page.locator("dialog[open] model-viewer")).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('[role="dialog"] model-viewer')).toBeVisible({ timeout: 60_000 });
     await checkLayout(page);
     await dialogActionsInside(page);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-preview.png`) });
@@ -164,7 +168,7 @@ test("the library and viewer work with reduced motion", async ({ page }) => {
   await page.getByLabel("Access token").fill(s.token);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
-  const viewer = page.locator("dialog[open] model-viewer");
+  const viewer = page.locator('[role="dialog"] model-viewer');
   await expect(viewer).toBeVisible({ timeout: 60_000 });
   expect(await viewer.evaluate((el) => el.hasAttribute("auto-rotate"))).toBe(false);
   await expect(viewer).toHaveAttribute("interpolation-decay", "0");
@@ -175,7 +179,7 @@ test("the library and viewer work with reduced motion", async ({ page }) => {
 async function dialogActionsInside(page: Page): Promise<void> {
   const vp = page.viewportSize();
   for (const name of ["Close", /^Download/]) {
-    const b = await page.locator("dialog[open]").getByRole("button", { name }).boundingBox();
+    const b = await page.getByRole("dialog").getByRole("button", { name }).boundingBox();
     expect(b && vp && b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height, `${String(name)} inside ${JSON.stringify(vp)}`).toBeTruthy();
   }
 }
@@ -187,7 +191,7 @@ test("the open preview dialog survives resizes with Close and Download inside", 
   await page.getByLabel("Access token").fill(s.token);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
-  await expect(page.locator("dialog[open]")).toBeVisible();
+  await expect(page.getByRole("dialog")).toBeVisible();
   for (const [w, h] of [[390, 844], [844, 390]] as const) {
     await page.setViewportSize({ width: w, height: h });
     await dialogActionsInside(page);
