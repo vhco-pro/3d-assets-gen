@@ -130,7 +130,8 @@ button[data-generate]:disabled { background: transparent; border-color: var(--co
 .workspace { display: grid; gap: 1.25rem; min-width: 0; }
 @media (min-width: 1024px) {
   .layout { grid-template-columns: minmax(18rem, 380px) minmax(0, 1fr); padding: 1.5rem; gap: 1.5rem; }
-  .composer { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain; }
+  /* The limit leaves room for the header above it before the page scrolls, so Generate is always reachable. */
+  .composer { position: sticky; top: 1rem; max-height: calc(100dvh - 6rem); overflow-y: auto; overscroll-behavior: contain; }
 }
 
 .panel { background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius-card); padding: 1rem; min-width: 0; }

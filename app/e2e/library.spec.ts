@@ -42,6 +42,8 @@ test("thumbnails load and the selected GLB renders in the viewer @firefox", asyn
   const asset = page.getByTestId("asset").filter({ hasText: "a wooden treasure chest" });
   const thumb = asset.getByRole("img");
   await expect(thumb).toHaveAttribute("src", /\/api\/assets\/[0-9a-f-]{36}\/thumb$/);
+  // Thumbnails load lazily, so bring the card into view as a person would before checking the image.
+  await thumb.scrollIntoViewIfNeeded();
   await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   await asset.getByRole("button", { name: /Preview/ }).click();
   // The viewer marks its element once model-viewer fires load; production logs nothing.
