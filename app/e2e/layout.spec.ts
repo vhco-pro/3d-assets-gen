@@ -179,8 +179,11 @@ test("the library and viewer work with reduced motion", async ({ page }) => {
 async function dialogActionsInside(page: Page): Promise<void> {
   const vp = page.viewportSize();
   for (const name of ["Close", /^Download/]) {
-    const b = await page.getByRole("dialog").getByRole("button", { name }).boundingBox();
-    expect(b && vp && b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height, `${String(name)} inside ${JSON.stringify(vp)}`).toBeTruthy();
+    // After a resize the dialog and its viewer re-lay out; wait for the settled position, not the first frame.
+    await expect.poll(async () => {
+      const b = await page.getByRole("dialog").getByRole("button", { name }).boundingBox();
+      return Boolean(b && vp && b.x >= 0 && b.y >= 0 && b.x + b.width <= vp.width && b.y + b.height <= vp.height);
+    }, { message: `${String(name)} inside ${JSON.stringify(vp)}` }).toBe(true);
   }
 }
 
