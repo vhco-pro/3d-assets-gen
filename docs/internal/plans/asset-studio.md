@@ -1156,6 +1156,7 @@ None.
 | 2026-11-22 | R-11 | spec | `5400611` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-12 | implementation | `81b4b51` | claude-opus-5-5 | procedural | 18 met, 1 not met (AC-14, after merge), 2 not verified (AC-11, AC-15: live procedures not rerun by the read-only reviewer); 0 blocking, 3 should-fix, 3 nits |
 | 2026-11-22 | R-13 | implementation | `b54bca4` | claude-opus-5-5 | procedural | 20 met, 1 not met (AC-14, after merge); 0 blocking, 1 should-fix, 2 nits |
+| 2026-11-22 | R-14 | spec | `adeab21` | claude-opus-5-5 | procedural | 0 blocking, 15 should-fix, 5 nits |
 
 ### R-1
 
@@ -2574,6 +2575,148 @@ SEVERITY: nit
 WHERE: scripts/deploy/remote/state.ps1:7-11; scripts/deploy/check-upgrade.sh ("job rows intact" checks)
 EVIDENCE: state.ps1 leaves `jobs` as an empty string when the authenticated /api/jobs call fails, so "job rows intact" compares two empty strings and passes if the API is unreachable in both states. In my run every state had `6:C898BD99DEBC6FC9`, so the check was real this time.
 PROPOSAL: Make the check fail when `jobs` is empty.
+
+### R-14
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (sweep paragraph, lines 470-477); Design > Restart, upgrade and rollback (lines 533-538 and 558-560); Tasks T39 (line 1126)
+EVIDENCE: Line 535-536 says the sweep removes the purged jobs' asset directories "because it deletes any asset directory that has no job row, as it already does for uploads without a batch". The sweep paragraph at lines 470-475 lists ComfyUI's folders, uploads without a batch row, and staging and collection directories, but no asset directories. The code agrees with the paragraph, not with line 535: app/server/tracker.ts:383-387 only removes `.collect-*` entries under `/data/assets/`. T39 adds "the sweep of asset directories without a row" as new work. Line 558-560 still says that after a rollback, asset directories of jobs created after the backup "stay in the volume". The new sweep deletes them the next time this version runs. This sentence was written before this revision added the rule.
+PROPOSAL: Add "every `/data/assets/<job id>/` directory with no job row, apart from collection directories" to the sweep paragraph. Drop "as it already does". Say whether a seed running beside a live server writes rows before files, so the new sweep cannot remove fresh fixture files. Update the rollback sentence.
+
+FINDING: F-02
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 537-538); Context > Owner summary (lines 84-85); Open Questions
+EVIDENCE: "A Hunyuan3D prompt still queued or running in ComfyUI keeps running there." Up to 100 unfinished jobs are allowed (line 349), and Background measured about 90 seconds per Hunyuan3D job. ComfyUI runs jobs first submitted, first run (line 479), so those orphaned prompts run ahead of every new TRELLIS.2 job, and their output is then thrown away. Before the purge deletes them, the rows hold each attempt's prompt ID, and the per-job cancel already exists (line 148-150, `app/server/comfy.ts`). Leaving the prompts running is a settled trade-off that is not raised as an Open Question.
+PROPOSAL: Before deleting the rows, cancel each `submitted` Hunyuan3D attempt, and each `pending` one that has an attempt ID, through the per-job cancel. For example, keep their prompt IDs and cancel them on the first compatible tick. Otherwise, raise the choice as an Open Question.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-23 (line 1047); Acceptance Criteria AC-23 (line 1018)
+EVIDENCE: The row seeds "Hunyuan3D and TRELLIS.2 jobs in every state, their asset directories, an upload batch and files in both ComfyUI `asset-studio` folders". It then requires that a start through `start()` "keeps every TRELLIS.2 row and file byte-identical". By Design (line 470-471, and app/server/tracker.ts:347-351), the start sweep deletes the ComfyUI files of every `done` job. After that, the first tick changes `submitted` and `pending` TRELLIS.2 rows that the fake does not know (lost-job handling, line 447-449). Read literally, the proof fails a correct implementation, or two implementers scope the fixture differently.
+PROPOSAL: Limit the byte-identical assertion to TRELLIS.2 rows and to files under `/data/assets/` and `/data/uploads/`, checked before the first tick. Say that ComfyUI files are seeded only for Hunyuan3D jobs, or for TRELLIS.2 jobs that the sweep keeps.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (badge paragraph lines 649-652, queue line 670-672, library lines 674-678); Design > Glossary (Done and Waiting rows); Acceptance Criteria AC-18 (line 1013) and AC-22 (line 1017); Test Plan rows AC-18 (line 1042) and AC-22 (line 1046)
+EVIDENCE: Badges define "Done `--ok`". However, the queue lists only "unfinished, failed and cancelled jobs", and a library card shows a thumbnail, a name, a checkbox and buttons, with no state badge. The Done term and badge therefore have no place on the page. AC-18 still requires job states to be labelled with the Glossary terms, and the AC-22 proof checks "each state badge's border colour". A Waiting badge cannot be observed on the seeded fixture either: app/server/seed.ts:29-37 holds no `pending` job, and the tracker submits a pending job within one tick.
+PROPOSAL: State where a Done job shows its badge, for example on its library card. Give the AC-18 and AC-22 proofs a way to observe Waiting, such as a fake held offline or a fixture pending job the tracker skips.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-22 (line 1017); Test Plan row AC-22 (line 1046); Design > Page (lines 649-656); Design > Verification commands (lines 973-976); Tasks T43 (line 1130)
+EVIDENCE: The AC-22 proof checks the gradient, the colour scheme, Generate, badge borders, side by side at 1280x720, stacked at 390x844, and the dialog. It does not check that semantic colours appear "only on job states and banners", or the banner colours (`--danger` and `--warn`). It also does not check the 1024-pixel breakpoint: a layout that switches at 1200 passes, although 1024x768 is in the matrix. "About 40 percent" for the border leaves the expected colour open. The guide (guides/vh-midnight.md, Tokens) defines a neutral badge as white at 9% with `--ink-dim` text and gives it no border, so "neutral" has no border colour to match. The row checks the design review, but no criterion text requires that review.
+PROPOSAL: Fix the badge fill, border and text alphas (including a neutral border). Add assertions at 1024x768 (two columns) and at 1023 wide (one column), and for both banner colours. Assert that no other element uses `--ok`, `--warn` or `--danger` as text, border or background. Add the design review to AC-22's text, or drop it from the row.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (preview dialog lines 680-685; layout rules lines 703-709); Acceptance Criteria AC-09 (line 1004); Test Plan rows AC-09 (line 1033) and AC-22 (line 1046)
+EVIDENCE: conventions/frontend-testing.md (Responsive visual quality) asks that "a dialog's controls must stay reachable at short heights", and to "Resize and change orientation while a scene or dialog is open". It also asks for Firefox coverage of browser APIs. This revision adds a native modal `<dialog>` holding the viewer, metadata and two buttons. The AC-09 journeys and layout rules never name the dialog, and do not check Close and Download inside the viewport at 844x390 or 320x568. They also do not check a resize while the dialog is open. Escape closing the dialog and focus returning to the opener are checked only in Chromium.
+PROPOSAL: Add the open dialog to the AC-09 journeys at every matrix size, with Close and Download inside the viewport and a resize while it is open. Run the Escape and focus-return check in Firefox as well.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (library card line 675-676; preview dialog line 680-681)
+EVIDENCE: A card shows "the prompt or file name on at most two lines". The dialog shows "the asset's name", which may be the slug. guides/vh-midnight.md (Type and layout) asks to keep long content "accessible without page-wide scrolling or truncation", and guides/use-frontend-design-skills.md says "Do not hide content to make an overflow assertion pass". Prompts may be up to 500 characters (line 616). The document does not say where the full prompt can be read once it is clamped.
+PROPOSAL: State that the dialog shows the full prompt (or the full file name), and that the clamped card text keeps the full text as its accessible name or title.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 976-980); Acceptance Criteria AC-22 (line 1017); Tasks T40 (line 1127) and T44 (line 1131)
+EVIDENCE: conventions/frontend-testing.md (Visual record) requires both sides "with the same fixture data", with the before from the base commit and the after from the head. It also requires an after image of each state the change alters, and asks the author to name any changed state left uncaptured. The base's fixture holds a Hunyuan3D done job (app/server/seed.ts:32, "a stone pillar"). T40 removes it at head, and head's start purge would delete it, so the two libraries differ. The listed captures leave out restyled states: the offline and incompatible banners, the viewer loading and error states inside the dialog, and the sign-in error.
+PROPOSAL: Name one fixture for both sides (for example head's TRELLIS.2-only fixture loaded into the base build), or name the one-asset difference. Add the banner, viewer error and sign-in error states to the record, or name them as left uncaptured with the reason.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 954-957); Test Plan row AC-07 (line 1031)
+EVIDENCE: Design says that the CI `checks` job "installs Mesa's software GL (`libgl1-mesa-dri`, `libegl1`)", and the AC-07 row credits the Firefox render to "CI, where Mesa is installed". .github/workflows/ci.yml:31-36 installs `xvfb libegl1 libgl1-mesa-dri libgles2` and runs `xvfb-run -a bun run verify`. T28's evidence (line 1105) says Mesa alone still failed the render, and that the missing xvfb-run was "recorded here for the next revision". This revision does not fold it in.
+PROPOSAL: State that the checks job installs xvfb and Mesa and runs `bun run verify` under `xvfb-run -a` with `E2E_REQUIRE_WEBGL=1`, and say the same in the AC-07 row.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope (line 222); Tasks T37-T47 (lines 1124-1134); Acceptance Criteria AC-21 and AC-23 (lines 1016, 1018)
+EVIDENCE: README.md:4 says "pick an engine and a detail level", and README.md:8-9 says "TRELLIS.2 (textured) or Hunyuan3D 2.1 makes the mesh". No task updates these lines: T47 touches README.md only for the coverage list. No proof checks the README for the engine choice. An implementer following the Tasks would ship a README that describes a removed engine.
+PROPOSAL: Add the README description to T37 or T42, and add an assertion to `bun test ./app/docs` that the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-24 (line 1019); Test Plan row AC-24 (line 1048); Design > Repository and CI (lines 913-915); Tasks T47 (line 1134)
+EVIDENCE: The row says "`bun run verify` runs `actionlint` from the pinned binary and fails on a fixture workflow with an error". `bun run verify` lints `.github/workflows/` (line 906), so it never sees a fixture workflow, and the row does not say which test feeds it one. Design and T47 also require that "API errors in the other checks are reported as errors rather than as a missing analysis". Today scripts/deploy/check-repo.sh:43 hides errors with `2>/dev/null || true`. No criterion or proof covers this part.
+PROPOSAL: Name the test that runs the verify actionlint step on a fixture directory and expects a failure (for example a bats test of that step). Add the API-error rule to AC-24, with a bats case in which a stubbed code-scanning call that fails is reported as an error.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 913-915); Test Plan row AC-14 (line 1038); Tasks T45 (line 1132)
+EVIDENCE: scripts/deploy/check-repo.sh:53-58 lists the installation's repositories with `gh api user/installations/<id>/repositories`. The comment there says this "needs a token the installation authorises (a personal access token or a GitHub App user token)". T32's evidence (line 1113) records HTTP 403 with the owner's `gh` token. Once the check fails closed, the AC-14 proof run through check-repo.sh cannot pass with that token, even after #4 is resolved. The document does not name a credential that can read the listing.
+PROPOSAL: Name the credential T45 uses for the installation listing and how it is obtained, or replace the listing with evidence that the owner's token can read, such as the renovate-runner dry run.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 107-114); Tasks T45 (line 1132)
+EVIDENCE: The permissions paragraph still says that acceptance authorises "creating that repository and turning on those settings" and "adding the repository to the `vhco-renovate` App installation". For this revision the first is done, and #4 calls the second an owner step in organisation settings. T45 has the agent "re-add it to `vhco-pro/renovate-runner`'s targets with a dry run first". That is a change to another repository, and the paragraph does not authorise it. The earlier attempt needed separate owner approval (renovate-runner PR #11, per the removed AC-14 evidence).
+PROPOSAL: Rewrite the paragraph for this revision: what acceptance authorises now (branch, PR, merge, prerelease and release deploys, the visual-record ref) and whether it covers the renovate-runner target change. Keep the installation change as the owner's step.
+
+FINDING: F-14
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 92-93); Scope > Out of scope (line 248); Tasks T44 (line 1131); Acceptance Criteria AC-15 (line 1010)
+EVIDENCE: The summary says that "the revision adds no rollback checks", and the dispatch records that the owner does not want rollback checks for this revision. AC-15 still requires a rollback that reloads a missing image and serves the previous version. T44 runs `scripts/deploy/check-upgrade.sh` between two prereleases on `win-main`, which deploys, removes images, rolls back and runs logon recovery. The summary does not tell the owner that this rollback procedure still runs.
+PROPOSAL: State in the summary that AC-15's rollback procedure still runs, between two prereleases of this revision, and that only a rollback across the revision is unchecked. If the owner meant no rollback run at all, raise residualising AC-15 as an Open Question.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 908-911); Context > Owner summary (lines 88-92)
+EVIDENCE: Design says that "no analyzer for the PowerShell scripts ... stays an accepted gap tracked in #3". Issue #3 lists "recorded security coverage for Bash and PowerShell" among the gaps this revision fixes, and does not track a PowerShell analyzer. The repository-security convention at edd4c09 says "Use an appropriate source-security analyzer for other languages and record each language's actual coverage". knowledge/shared-delivery.md lists `vhco-pro/pwsh-ci-action` (PSScriptAnalyzer) for PowerShell source.
+PROPOSAL: Add the PowerShell analyzer gap to #3, naming `vhco-pro/pwsh-ci-action`, or adopt it in this revision. Cite the tracker accurately.
+
+FINDING: F-16
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Verification commands (lines 932-941); Design > Repository and CI (lines 906-908)
+EVIDENCE: Repository and CI says that `bun run verify` runs `actionlint` "right after shellcheck". The ordered list in Verification commands does not include actionlint, and scripts/verify.sh:2 says it follows "the order the feature document's Verification commands give".
+PROPOSAL: Insert the actionlint step after shellcheck in the Verification commands list.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: nit
+WHERE: Frontmatter (`issue`, line 4)
+EVIDENCE: `issue: 2`. conventions/feature-documents.md (Frontmatter) shows the field as a full issue URL (`https://github.com/OWNER/REPO/issues/42`). The binary's lint passes with the number.
+PROPOSAL: Use `https://github.com/vhco-pro/3d-assets-gen/issues/2`.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: nit
+WHERE: Sources (lines 2578-2592); Design > Jobs and batches (line 373); Design > Repository and CI (line 906)
+EVIDENCE: Design cites `conventions/http-api.md` and `conventions/github-actions.md` for rules it adopts or defers, and the Vercel rules commit through the frontend guide. Sources does not list them, although it lists the other new convention pages. A blank line also splits Sources into two lists.
+PROPOSAL: Add the HTTP API and GitHub Actions pages at edd4c09 to Sources, each with the claim it supports, and join the two lists.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 88-90)
+EVIDENCE: "The new pin's quick workflow and check rules are met here (workflow permissions, a bash default shell, job timeouts, actionlint, a fail-closed installation check ...)". AC-24 is unticked and T46-T47 are open. ci.yml still has top-level `permissions: contents: read` and no `defaults.run.shell`. The feature-documents convention asks the summary to tell planned checks apart from observed proof.
+PROPOSAL: Write "this revision adds" instead of "are met here".
+
+FINDING: F-20
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Page (lines 666-667, 676-677, 680-681); Design > Glossary
+EVIDENCE: The restyle changes user-facing labels: `Generate` becomes `Generate 1 job` or `Generate 6 jobs`, `Close preview` (app/web/Viewer.tsx:63) becomes `Close`, and `Select all` is new. The Glossary rows and AC-18 do not cover them. The label for a form that would create no job (for example `Generate 0 jobs`, or a disabled button) is not defined.
+PROPOSAL: Add the button terms to the Glossary or state that the Glossary is limited to states, fields, banners and the heading. Define the Generate label and state when no job would be created.
 
 ## Sources
 
