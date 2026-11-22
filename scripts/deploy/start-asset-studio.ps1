@@ -1,6 +1,8 @@
 # Runs at logon (scheduled task AssetStudio-Logon): starts Docker Desktop, waits up to three minutes for
 # the engine, and brings Asset Studio back from current.json, pulling its image by digest when missing.
-$ErrorActionPreference = 'Stop'
+# Windows PowerShell turns a native command's stderr into a terminating error under 'Stop', so the
+# docker calls run under 'Continue' and are checked through $LASTEXITCODE.
+$ErrorActionPreference = 'Continue'
 $dir = Join-Path $env:LOCALAPPDATA 'AssetStudio'
 $log = Join-Path $dir 'logon.log'
 function Log($m) { "$(Get-Date -Format s) $m" | Add-Content -Path $log }

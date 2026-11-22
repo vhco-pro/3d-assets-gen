@@ -1,6 +1,8 @@
 # Registers AssetStudio-Docker (interactive principal, starts Docker Desktop) when missing, runs it when
 # Docker Desktop is not running, and waits up to three minutes for the engine. Exit 3 when it never answers.
-$ErrorActionPreference = 'Stop'
+# Windows PowerShell turns a native command's stderr into a terminating error under 'Stop', so the
+# docker calls run under 'Continue' and are checked through $LASTEXITCODE.
+$ErrorActionPreference = 'Continue'
 $name = 'AssetStudio-Docker'
 if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) {
   $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'

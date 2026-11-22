@@ -1,7 +1,9 @@
 # Rolls back to previous.json: stops the project, restores the matching backup across a schema change,
 # rewrites current.json and .env, clears the previous record and brings the project up.
 # Exit 5 without a previous version, 6 without a matching backup.
-$ErrorActionPreference = 'Stop'
+# Windows PowerShell turns a native command's stderr into a terminating error under 'Stop', so the
+# docker calls run under 'Continue' and are checked through $LASTEXITCODE.
+$ErrorActionPreference = 'Continue'
 $dir = Join-Path $env:LOCALAPPDATA 'AssetStudio'
 $previousFile = Join-Path $dir 'previous.json'
 if (-not (Test-Path $previousFile)) { exit 5 }
