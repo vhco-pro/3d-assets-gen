@@ -58,10 +58,10 @@ function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "
       writeFileSync(join(dir, `${String(position)}.png`), new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]));
     }
     store.db.run(
-      `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, fixture, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, 'pending', ?, ?)`,
+      `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, fixture, created_at, queued_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, 'pending', ?, ?, ?)`,
       [id, batch, position, kind, kind === "prompt" ? item : null, kind === "image" ? item : null, kind === "image" ? "png" : null,
-        opts.engine ?? "trellis", (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created],
+        opts.engine ?? "trellis", (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created, created],
     );
   });
   return ids;
@@ -361,6 +361,21 @@ describe("AC-06 restarts, losses and replay", () => {
     await Bun.sleep(200);
     await runUntil(tracker(), () => job(a ?? "").state === "done" && job(b ?? "").state === "done");
     expect(fake.promptCalls()).toHaveLength(2);
+  });
+
+  test("a lost job's resubmission restarts its queued time, like a retry (AC-26)", async () => {
+    const [a] = addBatch(["a"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a ?? "").state === "submitted");
+    const before = (store.db.query("SELECT queued_at FROM jobs WHERE id = ?").get(a ?? "") as { queued_at: number }).queued_at;
+    fake.restart();
+    clock.t += 60_000;
+    await t.tick();
+    const row = store.db.query("SELECT queued_at, losses FROM jobs WHERE id = ?").get(a ?? "") as { queued_at: number; losses: number };
+    expect(row.losses).toBe(1);
+    expect(row.queued_at).toBeGreaterThan(before);
+    expect(row.queued_at).toBe(clock.t);
   });
 
   test("a job ComfyUI lost is resubmitted with a new prompt and prefix, and fails on the third loss", async () => {

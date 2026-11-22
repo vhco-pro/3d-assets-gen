@@ -292,8 +292,9 @@ export class Tracker implements TrackerView {
       return;
     }
     this.update(job.id, job.state,
-      "state = 'pending', prompt_id = NULL, posted_at = NULL, started_at = NULL, finished_at = NULL, error = NULL, server_errors = 0, losses = ?",
-      [losses]);
+      // A resubmission is a new attempt, so its queued time restarts like a retry's.
+      "state = 'pending', prompt_id = NULL, posted_at = NULL, started_at = NULL, finished_at = NULL, error = NULL, server_errors = 0, losses = ?, queued_at = ?",
+      [losses, this.now()]);
   }
 
   // Step 6: timeouts.
