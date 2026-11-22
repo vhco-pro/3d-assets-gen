@@ -82,8 +82,9 @@ that met every criterion except the Renovate one, which waits for the owner to a
 Changed in this revision, at the owner's request: the page is restyled in VH Midnight with the layout
 above; TRELLIS.2 is the only engine, so the Engine field, the Hunyuan3D builder and its golden graphs
 leave the app (`scripts/generate_3d.py` keeps its Hunyuan3D path as reference); at every start the server
-cancels unfinished Hunyuan3D jobs the way the Cancel button does and then deletes every Hunyuan3D job
-with its files; the live check runs a second TRELLIS.2 job at 20k triangles and
+on every tick with a compatible ComfyUI, cancels unfinished Hunyuan3D jobs the way the Cancel button
+does and deletes finished ones with their files the way Delete does (until then they stay visible and
+downloadable, and retrying one is refused); the live check runs a second TRELLIS.2 job at 20k triangles and
 1024 textures instead of a Hunyuan3D job; the shared conventions pin moves to `edd4c09`, which brings the
 frontend design procedure, the interface colour guideline and a before-and-after screenshot record in
 pull requests that change the page. This revision adds the new pin's quick workflow and check rules
@@ -518,7 +519,8 @@ transaction as a batch insert and is refused with a message when the unfinished-
 Delete runs in the request handler, since it does not call ComfyUI's API. In one update guarded by the
 job being `done`, `failed` or `cancelled`, it removes the job's row, and then deletes its
 `/data/assets/<job id>/` directory and its files in ComfyUI's folders if any remain. It answers 204, and
-a later `GET` of the job answers 404. A file it fails to delete is left for the sweep. It removes `/data/uploads/<batch id>/` when the batch's
+a later `GET` of the job answers 404. A ComfyUI file or upload it fails to delete is left for the sweep; an asset directory it fails to
+delete stays, because the sweep does not cover `/data/assets/`. It removes `/data/uploads/<batch id>/` when the batch's
 last job is deleted. The data directory is a Linux volume, so deleting a file that a download is still
 streaming lets the download finish.
 
@@ -539,15 +541,16 @@ tracker tick reconciles them against ComfyUI as described above: finished jobs a
 ones keep waiting, and lost ones are resubmitted.
 
 The server removes Hunyuan3D jobs through the existing cancel and delete paths; the schema version
-stays 1. On every tick with a compatible ComfyUI, before submitting anything, the tracker sets the
-cancel-requested flag on every `pending` or `submitted` Hunyuan3D job, so each is cancelled exactly as a
+stays 1. On every tick with a compatible ComfyUI the tracker first sets the cancel-requested flag on
+every `pending` or `submitted` Hunyuan3D job, then handles cancels (step 1), then deletes the finished
+Hunyuan3D jobs as below, then submits pending jobs (step 2). The flag makes each Hunyuan3D job cancelled exactly as a
 user's Cancel is (see Cancel, retry and delete), including the 30-second wait for a recent post and the
-retry when the per-job cancel fails. In the same tick it deletes every Hunyuan3D job that is `done`,
+retry when the per-job cancel fails. The deletion removes every Hunyuan3D job that is `done`,
 `failed` or `cancelled` the way `DELETE /api/jobs/<id>` does, with its asset directory, its upload and
 its files in ComfyUI's `asset-studio` folders, and deletes its batch when no job is left. The tracker
 never submits a Hunyuan3D job, and retrying one answers 400 with the Hunyuan3D message. Until a Hunyuan3D
 job is deleted, it stays visible in the job list in its current state; `done` ones stay downloadable,
-and an export manifest names their engine `hunyuan`. A prompt cancelled while it was running may still
+and an export manifest gives their engine as `hunyuan` with `texture` null. A prompt cancelled while it was running may still
 write files; the sweep removes them because their job no longer exists. Ticks repeat, so a crash or a
 failed cancel only delays the removal.
 An earlier version still reads the database; Hunyuan3D jobs deleted before a rollback are not restored.
@@ -762,7 +765,8 @@ holds `a-z`, `0-9` and `-`. The zip holds, per asset, `<slug>-<short id>.glb` an
   "style": true, "seed": 0, "created": "<RFC 3339 UTC>"}]}
 ```
 
-`engine` is always `trellis` and `texture` always a number. A selection of more than 100 assets, or whose files
+`engine` is the job's engine: `trellis`, with `texture` a number, for every new job, and `hunyuan` with
+`texture` null only for a Hunyuan3D job not yet removed. A selection of more than 100 assets, or whose files
 add up to more than 2 GiB, is refused with 413 and a message to split it, and the page shows the same
 limit before sending; the zip therefore never needs ZIP64. The server writes the zip to the response as a
 stream, one file at a time, without compression of the already-compressed GLB and PNG data, so its
@@ -910,8 +914,7 @@ digest, never the action's `latest` alias.
 The repository is public `vhco-pro/3d-assets-gen` with an Apache-2.0 `LICENSE` naming VH & Co BV. The
 `checks` job runs `bun run verify` on every branch push, which a PR shows on its head commit; it builds
 the container image locally and runs the Playwright suite against it. Every action and reusable workflow is pinned to a
-full commit SHA with a release-tag comment (the branch name for `vhco-pro/.github`, which has no release
-tags), and every job has least-privilege permissions. The
+full commit SHA with a release-tag comment and every job has least-privilege permissions. The
 repository also has:
 
 - CodeQL workflows that call `reusable-codeql-js.yml` with `languages: javascript-typescript,python`
@@ -1009,7 +1012,10 @@ viewport matrix, with the result recorded in the evidence; Impeccable's launcher
 review reads its guidance directly. The pull request that delivers this revision carries the
 before-and-after record `conventions/frontend-testing.md` requires: for the sign-in screen and its wrong
 token error, the main view at 390x844 and 1280x720 with the queue open, the empty library, the open
-preview dialog, the viewer's error state, and the offline and incompatible banners. Both sides use head's
+preview dialog, the viewer's error state, the offline and incompatible banners, the clipped long-prompt
+card, the long-prompt queue row expanded through `More`, and a refused batch's error message. The failed
+job action and the changed-selection notice after a gone export use the same error style as the refused
+batch, so they are left uncaptured. Both sides use head's
 TRELLIS.2-only fixture: head's `seed` command writes a data directory (schema version 1 on both sides),
 and the before is the base commit's executable serving a copy of that directory, the after head's
 executable serving another copy, so the libraries match. The viewer's loading
@@ -1022,7 +1028,8 @@ state is left uncaptured because it lasts well under a second on the fixture. Ca
 `bun run seed` runs the executable's `seed` subcommand, which loads the development fixture into the
 configured data directory and refuses to run unless the configured ComfyUI URL answers that marker
 endpoint. Fixture jobs have fixed UUIDs and the fixture flag, and a rerun replaces those rows and
-their files and leaves every other row alone. The fixture holds done jobs with
+their files and leaves every other row alone. The fixture holds a long prompt (about 2000 characters,
+with one 120-character unbroken word) on two jobs, one `done` and one `failed`, and done jobs with
 fixture GLBs and thumbnails, a failed job, a cancelled job, and `submitted` jobs whose prompt IDs the
 fake serves as queued and running prompts that never finish. The tracker's timeout skips
 flagged jobs, so they stay stable. `bun run seed --profile empty` loads no jobs. `bun run seed --reset`
@@ -1080,8 +1087,8 @@ deletes only flagged fixture rows and their files.
 | AC-19 | `bun test app/cli` and `bats` tests in `scripts/deploy/tests/` (both run by `bun run verify`) capture each tool's output for passed, failed, skipped and partial runs: with `NO_COLOR` absent, empty, `0` and `1`, on a pseudoterminal and redirected to a file, in Unicode and `--ascii` mode; they assert the status words, no ANSI or cursor-control bytes in plain captures, and a non-zero exit whenever a step failed. |
 | AC-20 | The memory tests in `app/memory/`, run by `bun run verify` after the image build, run the built image with `docker run --memory 1g`, find the container's cgroup on the host from `docker inspect` (`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.stat` on a systemd host) and sample its `anon` value every 100 ms while it accepts a 25-image 200 MiB batch, two such batches concurrently, and streams an export of 100 fixture assets; they assert `docker inspect` reports `OOMKilled` false and every `anon` sample stays below 512 MiB. |
 | AC-21 | `bun test ./app/docs` reads `README.md` and `AGENTS.md` and asserts both name the seven commands exactly as listed in AC-21, that each `bun run` name exists in `package.json` scripts and each script path exists on disk, that the README lists the dependencies, the readiness signal and the checklist items, that `AGENTS.md` links `conventions/terminal-output.md`, and that the sentence saying no commands exist is gone. |
-| AC-22 | Playwright `style.spec.ts` on the seeded fixture: the body's computed `background-image` is a linear gradient through `rgb(2, 8, 20)`, `rgb(6, 18, 41)` and `rgb(11, 31, 69)`; the root's `color-scheme` is `dark` and the theme-color meta is `#020814`; Generate's background is `rgb(52, 211, 156)` and no other element's text, border or background resolves to `--ok`, `--warn`, `--danger` or their tints except the badges, the banners, the error messages and Delete on hover, and the wrong-token error and a failed job's error use `#ffc4c4` text with the error icon; each badge's fill, border and text colour equal Design's exact values, with Waiting observed on a job the fake holds unaccepted through its new `hold-accept` control and Done on a library card; with the fake stopped and then reporting 0.46.1, the offline banner uses `--danger` and the incompatible banner `--warn`; at 1280x720 and 1024x768 the composer and the queue sit side by side and at 1023x768 and 390x844 the composer is above the queue; on the long fixture prompt (about 2000 characters, with one 120-character unbroken word), the card clips to two lines with the full text as `title`, the dialog shows it in full without overflow, and the queue row's `More` expands it and `Less` collapses it; in Chromium and Firefox Preview opens a `dialog` element that is open and modal and shows the full prompt, Escape closes it and focus returns to that Preview button. The design review is recorded in T43's evidence, and the before-and-after record is checked by reading the PR body links at `refs/pr-visuals/<number>`. |
-| AC-23 | `bun test app/server`: a batch with `engine` `hunyuan` answers 400 with the Hunyuan3D message and creates nothing, one with `engine` `trellis` or without the field is accepted, and a 2000-character prompt is accepted while 2001 is refused; retrying a failed Hunyuan3D job answers 400 with the message. Tracker tests with Hunyuan3D jobs `pending` without an attempt ID, `pending` with an attempt ID posted 10 seconds earlier, `submitted`, `done`, `failed` and `cancelled`, TRELLIS.2 jobs in the same states, their asset directories, an upload batch and their ComfyUI files: after the first tick the `done`, `failed` and `cancelled` Hunyuan3D jobs, their files and their batch when emptied are gone, the `submitted` one received the per-job cancel, and no Hunyuan3D graph was posted; the recent `pending` one keeps its row until its post shows up or 30 seconds pass on the faked clock, then is cancelled and deleted on the following tick; a fake that answers the cancel with 500 keeps that row until a later tick succeeds; after the ticks that remove every Hunyuan3D job, every TRELLIS.2 row that was `done`, `failed` or `cancelled` and every file under `/data/assets/` and `/data/uploads/` that belongs to a TRELLIS.2 job is byte-identical, and every graph posted uses the TRELLIS.2 node types. Playwright `glossary.spec.ts` asserts the form has no Engine field. `bun test ./app/docs` asserts the README names TRELLIS.2 as the mesh model and does not mention Hunyuan3D or an engine choice. |
+| AC-22 | Playwright `style.spec.ts` on the seeded fixture: the body's computed `background-image` is a linear gradient through `rgb(2, 8, 20)`, `rgb(6, 18, 41)` and `rgb(11, 31, 69)`; the root's `color-scheme` is `dark` and the theme-color meta is `#020814`; Generate's background is `rgb(52, 211, 156)` and no other element's text, border or background resolves to `--ok`, `--warn`, `--danger` or their tints except the badges, the banners, the error messages and Delete on hover, and the wrong-token error and a failed job's error use `#ffc4c4` text with the error icon; each badge's fill, border and text colour equal Design's exact values, with Waiting observed on a job the fake holds unaccepted through its new `hold-accept` control and Done on a library card; with the fake stopped and then reporting 0.46.1, the offline banner uses `--danger` and the incompatible banner `--warn`; at 1280x720 and 1024x768 the composer and the queue sit side by side and at 1023x768 and 390x844 the composer is above the queue; on the long fixture prompt (about 2000 characters, with one 120-character unbroken word), the `done` job's card clips to two lines with the full text as `title` and its dialog shows it in full without overflow, and the `failed` job's queue row expands it through `More` and collapses it through `Less`; in Chromium and Firefox Preview opens a `dialog` element that is open and modal and shows the full prompt, Escape closes it and focus returns to that Preview button. The design review is recorded in T43's evidence, and the before-and-after record is checked by reading the PR body links at `refs/pr-visuals/<number>`. |
+| AC-23 | `bun test app/server`: a batch with `engine` `hunyuan` answers 400 with the Hunyuan3D message and creates nothing, one with `engine` `trellis` or without the field is accepted, and a 2000-character prompt is accepted while 2001 is refused; retrying a failed Hunyuan3D job answers 400 with the message. Tracker tests with Hunyuan3D jobs `pending` without an attempt ID, `pending` with an attempt ID posted 10 seconds earlier, `submitted`, `done`, `failed` and `cancelled`, TRELLIS.2 jobs in the same states, their asset directories, an upload batch and their ComfyUI files: after the first tick the `done`, `failed` and `cancelled` Hunyuan3D jobs, the `submitted` one (which received the per-job cancel) and the `pending` one without an attempt ID are all gone with their files and their batch when emptied, and no Hunyuan3D graph was posted; the recent `pending` one keeps its row until its post shows up or 30 seconds pass on the faked clock, then is cancelled and deleted on the following tick; a fake that answers the cancel with 500 keeps that row until a later tick succeeds; after the ticks that remove every Hunyuan3D job, every TRELLIS.2 row that was `done`, `failed` or `cancelled` and every file under `/data/assets/` and `/data/uploads/` that belongs to a TRELLIS.2 job is byte-identical, and every graph posted uses the TRELLIS.2 node types. Playwright `glossary.spec.ts` asserts the form has no Engine field. `bun test ./app/docs` asserts the README names TRELLIS.2 as the mesh model and does not mention Hunyuan3D or an engine choice. |
 | AC-24 | `bun test ./.github` parses every workflow and asserts top-level `permissions: {}`, `defaults.run.shell: bash` and `timeout-minutes` on each job with `steps`; `bats scripts/deploy/tests/verify.bats` runs the verify script's actionlint step with the pinned binary on a fixture directory holding a workflow with an error and asserts it fails, and on `.github/workflows/` and asserts it passes; `bats scripts/deploy/tests/check-repo.bats` asserts that a code-scanning call and a repository-settings call that exit non-zero are each reported as a failed check carrying the error (exit 1), and that the script makes no installation-listing call; `bun test ./app/docs` asserts the README's coverage list names JavaScript, TypeScript, Python, Actions, Bash and PowerShell. |
 
 ## Tasks
@@ -1159,12 +1166,12 @@ deletes only flagged fixture rows and their files.
 - [x] T31 `docs/internal/plans/asset-studio.md` - after merge, deploy the release image from `main` with `deploy.sh` and repeat the AC-10 check; the result recorded under AC-10 (AC-10)
       Evidence: 2026-11-22 after merge e1d8e1e: `scripts/deploy/deploy.sh 0.1.0` passed (release record sha256:e3560222..., signature and attestations verified, layers matched, serving through tailscale serve); from fedora-43 /api/health returned `0.1.0` at e1d8e1e4e5bb with ComfyUI reachable, and ports 8790 and 8188 on win-main's tailnet address timed out.
 - [ ] T37 `app/pipeline/graphs.ts`, `app/pipeline/combine.ts`, `app/pipeline/presets.ts`, `app/pipeline/dump_graphs.py`, `app/pipeline/golden/`, `app/pipeline/graphs.test.ts`, `README.md`, `app/docs/docs.test.ts` - remove the Hunyuan3D builder, its golden cases and the engine preset, and the README's engine wording, with the docs assertion; `bun test app/pipeline` and `bun run golden:check` pass (AC-01, AC-23)
-- [ ] T38 `app/server/batches.ts`, `app/server/jobs.ts`, `app/server/export.ts`, `app/server/api.test.ts`, `app/server/export.test.ts`, `app/web/App.tsx` - presets without an engine, the 400 for a non-`trellis` engine, prompts up to 2000 characters on server and page, manifest `engine` always `trellis`; tests written first fail, then pass (AC-23, AC-08)
+- [ ] T38 `app/server/batches.ts`, `app/server/jobs.ts`, `app/server/export.ts`, `app/server/api.test.ts`, `app/server/export.test.ts`, `app/web/App.tsx` - presets without an engine, the 400 for a non-`trellis` engine, prompts up to 2000 characters on server and page, manifest `engine` from the row, with `texture` null only for a Hunyuan3D row not yet removed; tests written first fail, then pass (AC-23, AC-08)
 - [ ] T39 `app/server/tracker.ts`, `app/server/jobs.ts`, `app/server/assets.ts`, `app/server/tracker.test.ts` - the Hunyuan3D removal on each tick (cancel flags on unfinished jobs, deletion of finished ones and emptied batches through the delete path) and the 400 on retrying one; the AC-23 removal tests fail first, then pass (AC-23, AC-05)
-- [ ] T40 `app/server/seed.ts`, `app/server/seed.test.ts`, `app/fake-comfy/`, `app/cli/verify-live.ts`, `app/memory/memory.test.ts` - TRELLIS.2-only fixtures with one long prompt (about 2000 characters, one 120-character unbroken word), the fake's `hold-accept` control, fake outputs, and the live check's second job at 20k with 1024 textures; seed and memory tests pass (AC-16, AC-11, AC-20)
+- [ ] T40 `app/server/seed.ts`, `app/server/seed.test.ts`, `app/fake-comfy/`, `app/cli/verify-live.ts`, `app/memory/memory.test.ts` - TRELLIS.2-only fixtures with one long prompt (about 2000 characters, one 120-character unbroken word) on a `done` and a `failed` job, the fake's `hold-accept` control, fake outputs, and the live check's second job at 20k with 1024 textures; seed and memory tests pass (AC-16, AC-11, AC-20)
 - [ ] T41 `app/e2e/style.spec.ts`, `app/e2e/layout.spec.ts`, `app/e2e/glossary.spec.ts`, `playwright.config.ts` - the VH Midnight style checks, the contrast measurement and the missing Engine field; they fail against the current page (AC-22, AC-09, AC-18, AC-23)
 - [ ] T42 `app/web/styles.css`, `app/web/App.tsx`, `app/web/Viewer.tsx`, `app/web/index.html`, `app/web/api.ts`, `app/e2e/` - the restyled page: tokens, header, sign-in card, composer column, queue rows, gallery, preview dialog; the Playwright suite passes in Chromium and Firefox and `bun run size` stays within budget (AC-22, AC-07, AC-09, AC-13, AC-18)
-- [ ] T46 `.github/workflows/`, `.github/tests/ci.test.ts`, `scripts/deploy/tools.env`, `scripts/deploy/lib/tools.sh`, `scripts/verify.sh`, `scripts/deploy/tests/verify.bats` - workflow permissions, bash default shell and job timeouts; pinned actionlint in verify; the workflow tests fail first, then pass (AC-24)
+- [ ] T46 `.github/workflows/`, `.github/tests/ci.test.ts`, `scripts/deploy/tools.env`, `scripts/deploy/lib/tools.sh`, `scripts/verify.sh`, `scripts/deploy/tests/verify.bats` - workflow permissions, bash default shell and job timeouts, `# v1.2.4` comments on the `vhco-pro/.github` pins; pinned actionlint in verify; the workflow tests fail first, then pass (AC-24)
 - [ ] T47 `scripts/deploy/check-repo.sh`, `scripts/deploy/tests/check-repo.bats`, `README.md`, `app/docs/docs.test.ts` - API errors reported as failed checks and the installation listing removed; the coverage list in the README; bats and docs tests fail first, then pass (AC-24, AC-14)
 - [ ] T43 `docs/internal/plans/asset-studio.md` - the design review of the rendered page with the pinned Vercel rules at the viewport matrix, screenshots reviewed, result recorded (AC-22, AC-09)
 - [ ] T44 `docs/internal/plans/asset-studio.md` - PR with the before-and-after record at `refs/pr-visuals/<number>`; prerelease deployed to `win-main` with `deploy.sh`, then the AC-10 check, `bun run verify:live`, the AC-12 deployed check and `scripts/deploy/check-upgrade.sh` between two prereleases of this revision; results recorded (AC-10, AC-11, AC-12, AC-15, AC-17, AC-22, AC-23)
