@@ -1203,6 +1203,7 @@ None.
 | 2026-11-22 | R-14 | spec | `adeab21` | claude-opus-5-5 | procedural | 0 blocking, 15 should-fix, 5 nits |
 | 2026-11-22 | R-15 | spec | `e0f334f` | claude-opus-5-5 | procedural | 1 blocking, 7 should-fix, 4 nits |
 | 2026-11-22 | R-16 | spec | `c9f3009` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 1 nit |
+| 2026-11-22 | R-17 | spec | `557c810` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 5 nits |
 
 ### R-1
 
@@ -2904,6 +2905,66 @@ SEVERITY: nit
 WHERE: Design > Cancel, retry and delete (line 521); Design > Submission, concurrency and idempotency (sweep paragraph, lines 478-485); Design > Restart, upgrade and rollback (lines 545-547 and 571-573)
 EVIDENCE: Delete says "A file it fails to delete is left for the sweep", and the Hunyuan3D removal now relies on that path for "its asset directory". The sweep paragraph no longer covers `/data/assets/<job id>/` directories without a row. The previous revision removed that rule, and the code agrees: app/server/tracker.ts:404-409 removes only `.collect-*` entries under `/data/assets/`. app/server/assets.ts:47-55 also skips the remaining deletions once one throws. So an asset directory that fails to delete is never removed, and the rollback paragraph's "stay in the volume" now means for good.
 PROPOSAL: Say that a failed asset-directory deletion is not swept, or limit "left for the sweep" to ComfyUI files and uploads.
+
+### R-17
+
+TARGET: 557c8100911b1f8acfb9f2c0e5e579697ca59dbb
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (composer paragraph, lines 686-692); Design > Jobs and batches (line 355); Test Plan row AC-02 (line 1070)
+EVIDENCE: Jobs and batches says "A batch is one submission: either prompts or images". The new composer shows the Prompts field and the image drop zone together, and "a Generate button whose label names the job count (`Generate 1 job`, `Generate 6 jobs`)". Nothing says what happens when the user has typed prompts and also dropped images. Today app/web/App.tsx:150-156 quietly sends only the images when any are chosen and drops the prompts without a word. Under the new layout, one implementer counts and sends only the images, as today. Another counts both and sends two batches. A third disables Generate or shows an error. The label count differs between them, and no row checks this case.
+PROPOSAL: State the rule for prompts and images together, for example that images take precedence and the composer says the prompts will be ignored, or that Generate is disabled with a message until one of them is cleared. Add that case to `submit.spec.ts` in the AC-02 row.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (lines 690-692); Acceptance Criteria AC-02 (line 1041); Test Plan row AC-02 (line 1070)
+EVIDENCE: This revision adds "With no prompt and no image the button reads `Generate` and is disabled; the server still refuses an empty batch as before." AC-02 says a batch that is empty "is rejected with a message that names the problem", and the AC-02 row has Playwright `submit.spec.ts` submit "each invalid case" through the page. The current spec clicks Generate on an empty form and expects "Add at least one prompt or image" (app/e2e/submit.spec.ts:33-38). With a disabled button that click never happens and no message appears, so the page half of the row cannot run its empty case against a correct implementation. Implementers will differ on whether the empty case is dropped from the page test, kept as a disabled-button assertion, or still expected to show a message.
+PROPOSAL: In the AC-02 row, say that the empty batch is checked through the API (400 with the message) and on the page as a disabled Generate button reading `Generate`, and that the other invalid cases still go through the page.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks T44 (line 1177); Test Plan row AC-23 (line 1091); Design > Restart, upgrade and rollback (lines 543-556)
+EVIDENCE: T44 lists AC-23 among its criteria, but neither T44's text nor the AC-23 row says what the deployed prerelease should show for it. The only AC-23 proof uses tracker tests against the fake. The real database on `win-main` holds Hunyuan3D rows written by v0.1.0: app/cli/verify-live.ts:57 submits a Hunyuan3D "a stone pillar" job on every run, and the script never deletes its jobs (no delete call in the file). Those rows have `tex` null and real asset directories. The first deploy of this revision deletes them irreversibly, and owner acceptance assumes that happens. As written, an implementer can tick T44 for AC-23 without looking at the real removal, while another records it.
+PROPOSAL: Either drop AC-23 from T44, or add a deployed step to T44 and the AC-23 row: before the first prerelease deploy, list the Hunyuan3D job IDs on `win-main`. After it, confirm within a few ticks that those rows, their `/data/assets/<id>/` directories and their ComfyUI `asset-studio` files are gone, and that TRELLIS.2 rows are unchanged.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 84-87)
+EVIDENCE: The sentence reads "at every start the server on every tick with a compatible ComfyUI, cancels unfinished Hunyuan3D jobs ...". When R-16 F-01 was applied, "on every tick ..." was added but "at every start the server" was left in place, so the sentence is garbled and still mentions the start-time purge that Design replaced.
+PROPOSAL: Change it to "on every tick with a compatible ComfyUI the server cancels unfinished Hunyuan3D jobs ...".
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Design > HTTP API (line 632); Context > Owner summary (line 95); Test Plan row AC-23 (line 1091); Tasks T38 (line 1169); Design > Verification commands (fixture, line 1031)
+EVIDENCE: The document gives the limit as "1 to 2000 characters after trimming" but never says what counts as a character. The server already counts UTF-16 code units (`p.length > MAX_PROMPT_CHARS`, app/server/batches.ts:257). A page that counts code points would accept an emoji-heavy prompt that the server refuses. The AC-23 row's 2000 and 2001 cases pass under either count if they use ASCII. An implementer following the tree changes only the number, so nothing different gets built.
+PROPOSAL: Say "2000 UTF-16 code units (JavaScript string length)" once in HTTP API, and have the page count the same way.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, lines 712-713); Acceptance Criteria AC-13 (line 1052)
+EVIDENCE: "Selecting an asset loads the `<model-viewer>` module on demand." The new gallery has a Select checkbox on every card for export, so "selecting" now also means ticking that box. AC-13 settles it ("loads only when an asset is opened"), so the meaning is only unclear in the wording.
+PROPOSAL: Write "Opening the preview loads the `<model-viewer>` module on demand."
+
+FINDING: F-07
+KIND: factual
+SEVERITY: nit
+WHERE: Tasks T37 (line 1168), T38 (line 1169), T42 (line 1173)
+EVIDENCE: T37 removes the engine preset from app/pipeline/presets.ts. `ENGINES` and `Engine` are used by app/server/batches.ts:8,53, app/server/tracker.ts:252 (through `JobGraphInput`), app/server/seed.ts and app/web/App.tsx. None of those files is in T37, and T37's done condition (`bun test app/pipeline`, `bun run golden:check`) does not type-check the rest of the tree, so the T37 commit leaves `bun run typecheck` failing until T38 to T40 land. T38 changes the page's presets but does not list app/web/api.ts, where `PresetsInput` declares `engine` (app/web/api.ts:17); that file appears only in T42.
+PROPOSAL: Add `bun run typecheck` to T37's done condition and list the files it needs, or keep the engine type until T38. Add app/web/api.ts to T38.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Verification commands (design review paragraph, lines 1009-1012); Tasks T43 (line 1176)
+EVIDENCE: guides/use-frontend-design-skills.md (Review the result) says: "For a remote session, give the owner a verified reachable private preview URL through the available host workflow." The design review paragraph names the Vercel rules, the viewport matrix and the Impeccable launcher being skipped. It neither includes the preview URL nor says why it is left out. Nothing a proof checks depends on it.
+PROPOSAL: Add one clause to the paragraph saying whether the restyled page is offered to the owner as a private preview URL, or why it is not.
 
 ## Sources
 
