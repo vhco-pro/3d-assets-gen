@@ -116,6 +116,15 @@ describe("AC-03 submission and completion", () => {
     expect(submitted).toEqual([...first, ...second].map((id) => job(id).prompt_id ?? ""));
   });
 
+  test("outputs reported with Windows subfolders and empty extra entries are collected", async () => {
+    fake.windowsPaths = true;
+    const [id] = addBatch(["a crate"]);
+    const t = tracker();
+    await runUntil(t, () => job(id ?? "").state === "done", 40);
+    expect(fake.promptCalls()).toHaveLength(1);
+    expect(assetFiles(id ?? "")).toEqual(["model.glb", "source.png", "thumb.png"]);
+  });
+
   test("an image job uploads its file and keeps the upload as its source", async () => {
     const [id] = addBatch(["chest.png"], { kind: "image" });
     const t = tracker();

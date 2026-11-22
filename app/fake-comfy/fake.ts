@@ -68,6 +68,8 @@ export class FakeComfy {
   holdMatching = new Set<string>();
   /** Prompts whose graph text contains one of these strings fail during execution. */
   failMatching = new Set<string>();
+  /** Report output subfolders the way ComfyUI on Windows does: backslashes, plus an empty camera_info entry. */
+  windowsPaths = false;
 
   constructor(private opts: FakeOptions) {
     this.version = opts.version ?? "0.46.2";
@@ -205,7 +207,9 @@ export class FakeComfy {
         const path = join(this.opts.outputDir, subfolder, filename);
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, ext === "glb" ? texturedGlb() : solidPng(64, 64, [90, 140, 200]));
-        outputs[nodeId] = { [ext === "glb" ? "3d" : "images"]: [{ filename, subfolder, type: "output" }] };
+        const reported = this.windowsPaths ? subfolder.replaceAll("/", "\\") : subfolder;
+        outputs[nodeId] = { [ext === "glb" ? "3d" : "images"]: [{ filename, subfolder: reported, type: "output" }] };
+        if (this.windowsPaths && ext === "glb") outputs[nodeId].camera_info = [{ filename: "", subfolder: "", type: "output" }];
       }
     }
     const messages: HistoryEntry["status"]["messages"] = [];
@@ -249,7 +253,8 @@ export class FakeComfy {
     }
     if (path === "/upload/image" && req.method === "POST") return this.upload(req);
     if (path === "/view") {
-      const file = Bun.file(join(this.opts.outputDir, url.searchParams.get("subfolder") ?? "", url.searchParams.get("filename") ?? ""));
+      const sub = (url.searchParams.get("subfolder") ?? "").replaceAll("\\", "/");
+      const file = Bun.file(join(this.opts.outputDir, sub, url.searchParams.get("filename") ?? ""));
       return (await file.exists()) ? new Response(file) : new Response("not found", { status: 404 });
     }
     if (path === "/_control" && req.method === "POST") return this.control(body);

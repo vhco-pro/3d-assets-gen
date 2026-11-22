@@ -48,8 +48,11 @@ function outputFiles(outputs: unknown): OutputFile[] {
     for (const list of Object.values(node)) {
       if (!Array.isArray(list)) continue;
       for (const f of list) {
-        if (isRecord(f) && typeof f.filename === "string") {
-          files.push({ filename: f.filename, subfolder: typeof f.subfolder === "string" ? f.subfolder : "", type: typeof f.type === "string" ? f.type : "output" });
+        // ComfyUI on Windows reports subfolders with backslashes, and some outputs (camera_info) carry an
+        // empty file name; normalise the first and skip the second.
+        if (isRecord(f) && typeof f.filename === "string" && f.filename !== "") {
+          const subfolder = typeof f.subfolder === "string" ? f.subfolder.replaceAll("\\", "/") : "";
+          files.push({ filename: f.filename, subfolder, type: typeof f.type === "string" ? f.type : "output" });
         }
       }
     }
