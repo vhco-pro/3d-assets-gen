@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Revising for the Ultra Detail option and a deploy guard against older schemas, after the owner chose setting b."
+status: planned
+status_description: "Accepted at R-22: Ultra Detail option and a deploy guard that reads the database schema."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
@@ -1426,6 +1426,7 @@ None.
 | 2026-11-22 | R-20 | spec | `05f83e4` | claude-opus-5-5 | procedural | 1 blocking, 6 should-fix, 3 nits |
 | 2026-11-22 | R-21 | spec | `cc73fb2` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix, 3 nits |
 | 2026-11-22 | R-22 | spec | `d8ba062` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 5 nits |
+| 2026-11-22 | R-22 | spec | `d8ba062` | n/a | n/a | accepted by owner |
 
 ### R-1
 
