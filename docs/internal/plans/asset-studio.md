@@ -1,6 +1,6 @@
 ---
-status: in-progress
-status_description: "Claimed on 2026-11-21; being implemented on feat/asset-studio."
+status: draft
+status_description: "Revising: the distroless cc base carries an unfixed HIGH OpenSSL CVE; moving to base-nossl and folding in R-9 items."
 issue: null
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
