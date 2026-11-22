@@ -85,6 +85,10 @@ describe("combined graphs", () => {
 });
 
 describe("TRELLIS.2 is the only mesh model (AC-23)", () => {
+  test("the Ultra graph matches the reference script's Ultra setting (AC-29)", () => {
+    expect(trellisGraph({ image: IMAGE, seed: SEED, prefix: PREFIX, faces: 30000, tex: 4096, ultra: true })).toEqual(gold("trellis/ultra"));
+  });
+
   test("the golden set holds no Hunyuan3D case", () => {
     expect(Object.keys(g.cases).filter((k) => k.startsWith("hunyuan"))).toEqual([]);
   });
