@@ -1,3 +1,5 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, shared, signIn, test } from "./fixtures.ts";
 import { startStack } from "./harness.ts";
 
@@ -26,12 +28,17 @@ async function renderedPixels(page: import("@playwright/test").Page): Promise<nu
 test("thumbnails load and the selected GLB renders in the viewer @firefox", async ({ page, consoleErrors }) => {
   const s = shared();
   await signIn(page, s.url, s.token);
-  const webgl = await page.evaluate(() => {
+  const renderer = await page.evaluate(() => {
     const c = document.createElement("canvas");
-    return c.getContext("webgl2") !== null || c.getContext("webgl") !== null;
+    const gl = c.getContext("webgl2") ?? c.getContext("webgl");
+    return gl ? String(gl.getParameter(gl.RENDERER)) : null;
   });
-  // Report a missing environment rather than pass or fail on it (conventions/frontend-testing.md).
-  test.skip(!webgl, "WebGL is not available in this headless browser; the viewer render cannot be checked here");
+  mkdirSync(join(import.meta.dirname, "..", "..", ".artifacts"), { recursive: true });
+  appendFileSync(join(import.meta.dirname, "..", "..", ".artifacts", "webgl.log"), `webgl-renderer ${test.info().project.name}: ${renderer ?? "none"}\n`);
+  // CI sets E2E_REQUIRE_WEBGL so the Firefox render evidence cannot silently skip there; elsewhere a missing
+  // environment is reported rather than passed or failed (conventions/frontend-testing.md).
+  if (process.env.E2E_REQUIRE_WEBGL === "1") expect(renderer, "WebGL is required in this environment").not.toBeNull();
+  test.skip(renderer === null, "WebGL is not available in this headless browser; the viewer render cannot be checked here");
   const asset = page.getByTestId("asset").filter({ hasText: "a wooden treasure chest" });
   const thumb = asset.getByRole("img");
   await expect(thumb).toHaveAttribute("src", /\/api\/assets\/[0-9a-f-]{36}\/thumb$/);
