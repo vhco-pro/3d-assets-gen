@@ -82,3 +82,23 @@ test("restart drops queue and history; version is settable", async () => {
   expect(stats.system.comfyui_version).toBe("0.46.1");
   expect((await fetch(`${fake.url}/asset-studio-fake`)).status).toBe(200);
 });
+
+test("hold-accept keeps /prompt unanswered and nothing queued until release-accept", async () => {
+  const f = new FakeComfy({ outputDir: join(tmpdir(), `fake-out-${crypto.randomUUID()}`), inputDir: join(tmpdir(), `fake-in-${crypto.randomUUID()}`), runMs: 10 });
+  f.start();
+  try {
+    await fetch(`${f.url}/_control`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "hold-accept" }) });
+    const id = crypto.randomUUID();
+    const seen = { answered: false };
+    const post = fetch(`${f.url}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: {}, prompt_id: id }) }).then((r) => { seen.answered = true; return r; });
+    const queued = async (): Promise<string> => JSON.stringify(await (await fetch(`${f.url}/queue`)).json());
+    // A negative check: give an unheld fake ample time to answer, then confirm it did not.
+    for (let i = 0; i < 10 && !seen.answered; i++) await Bun.sleep(20);
+    expect(seen.answered).toBe(false);
+    expect(await queued()).not.toContain(id);
+    await fetch(`${f.url}/_control`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "release-accept" }) });
+    expect((await post).ok).toBe(true);
+  } finally {
+    f.stop();
+  }
+});

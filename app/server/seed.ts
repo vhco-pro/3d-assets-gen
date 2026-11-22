@@ -19,22 +19,32 @@ interface FixtureJob {
   kind: "prompt" | "image";
   text: string;
   state: "done" | "failed" | "cancelled" | "submitted";
-  engine: "trellis" | "hunyuan";
   promptId?: string;
   running?: boolean;
   error?: string;
 }
 
+/** A prompt near the 2000-character limit with one 120-character unbroken word, for the long-content checks. */
+export const LONG_PROMPT = (() => {
+  const word = "ancient-carved-runestone-" + "x".repeat(95);
+  const base = "a weathered stone archway overgrown with moss and glowing violet crystals, carved with spiral runes, " + word + " ";
+  let text = base;
+  while (text.length < 1990) text += "standing on a cracked flagstone base beside a fallen pillar, lit by a low sun, ";
+  return text.slice(0, 1990).trim();
+})();
+
 export const FIXTURE_JOBS: FixtureJob[] = [
-  { id: id(1), batch: FIXTURE_BATCH_PROMPTS, position: 0, kind: "prompt", text: "a wooden treasure chest", state: "done", engine: "trellis" },
-  { id: id(2), batch: FIXTURE_BATCH_PROMPTS, position: 1, kind: "prompt", text: "a rusty sci-fi pistol", state: "done", engine: "trellis" },
-  { id: id(3), batch: FIXTURE_BATCH_PROMPTS, position: 2, kind: "prompt", text: "木箱", state: "done", engine: "trellis" },
-  { id: id(4), batch: FIXTURE_BATCH_PROMPTS, position: 3, kind: "prompt", text: "a stone pillar", state: "done", engine: "hunyuan" },
-  { id: id(5), batch: FIXTURE_BATCH_PROMPTS, position: 4, kind: "prompt", text: "a cursed lantern", state: "failed", engine: "trellis", error: "CUDA out of memory (fixture)" },
-  { id: id(6), batch: FIXTURE_BATCH_PROMPTS, position: 5, kind: "prompt", text: "a broken shield", state: "cancelled", engine: "trellis" },
-  { id: id(7), batch: FIXTURE_BATCH_PROMPTS, position: 6, kind: "prompt", text: "a glowing crystal", state: "submitted", engine: "trellis", promptId: id(0x201), running: true },
-  { id: id(8), batch: FIXTURE_BATCH_PROMPTS, position: 7, kind: "prompt", text: "a potion bottle", state: "submitted", engine: "trellis", promptId: id(0x202) },
-  { id: id(9), batch: FIXTURE_BATCH_IMAGES, position: 0, kind: "image", text: "old-chest.png", state: "done", engine: "trellis" },
+  { id: id(1), batch: FIXTURE_BATCH_PROMPTS, position: 0, kind: "prompt", text: "a wooden treasure chest", state: "done" },
+  { id: id(2), batch: FIXTURE_BATCH_PROMPTS, position: 1, kind: "prompt", text: "a rusty sci-fi pistol", state: "done" },
+  { id: id(3), batch: FIXTURE_BATCH_PROMPTS, position: 2, kind: "prompt", text: "木箱", state: "done" },
+  { id: id(4), batch: FIXTURE_BATCH_PROMPTS, position: 3, kind: "prompt", text: "a stone pillar", state: "done" },
+  { id: id(5), batch: FIXTURE_BATCH_PROMPTS, position: 4, kind: "prompt", text: "a cursed lantern", state: "failed", error: "CUDA out of memory (fixture)" },
+  { id: id(6), batch: FIXTURE_BATCH_PROMPTS, position: 5, kind: "prompt", text: "a broken shield", state: "cancelled" },
+  { id: id(7), batch: FIXTURE_BATCH_PROMPTS, position: 6, kind: "prompt", text: "a glowing crystal", state: "submitted", promptId: id(0x201), running: true },
+  { id: id(8), batch: FIXTURE_BATCH_PROMPTS, position: 7, kind: "prompt", text: "a potion bottle", state: "submitted", promptId: id(0x202) },
+  { id: id(9), batch: FIXTURE_BATCH_IMAGES, position: 0, kind: "image", text: "old-chest.png", state: "done" },
+  { id: id(10), batch: FIXTURE_BATCH_PROMPTS, position: 8, kind: "prompt", text: LONG_PROMPT, state: "done" },
+  { id: id(11), batch: FIXTURE_BATCH_PROMPTS, position: 9, kind: "prompt", text: LONG_PROMPT, state: "failed", error: "CUDA out of memory (fixture)" },
 ];
 
 function clear(store: Store, config: Config): void {
@@ -60,13 +70,13 @@ export function seedFixture(store: Store, config: Config, profile: string, now: 
            posted_at, fixture, error, created_at, started_at, finished_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
         [j.id, j.batch, j.position, j.kind, j.kind === "prompt" ? j.text : null, j.kind === "image" ? j.text : null, j.kind === "image" ? "png" : null,
-          j.engine, j.engine === "trellis" ? 2048 : null, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now : null,
+          "trellis", 2048, 1000 + j.position, j.state, j.promptId ?? null, j.promptId ? now : null,
           j.error ?? null, now - (j.batch === FIXTURE_BATCH_PROMPTS ? 1000 : 0), j.running ? now : null,
           ["done", "failed", "cancelled"].includes(j.state) ? now : null],
       );
     }
   })();
-  const colours: [number, number, number][] = [[180, 120, 60], [120, 130, 140], [150, 90, 40], [130, 130, 120], [200, 200, 80]];
+  const colours: [number, number, number][] = [[180, 120, 60], [120, 130, 140], [150, 90, 40], [130, 130, 120], [200, 200, 80], [90, 110, 170]];
   FIXTURE_JOBS.filter((j) => j.state === "done").forEach((j, i) => {
     const dir = join(config.dataDir, "assets", j.id);
     mkdirSync(dir, { recursive: true });

@@ -53,14 +53,14 @@ async function main(): Promise<number> {
     if (!id) throw new Error("no job id");
     return id;
   };
-  const trellis = await submit("a small wooden crate", { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null });
-  const hunyuan = await submit("a stone pillar", { engine: "hunyuan", faces: 10000, tex: null, variants: 1, style: true, seed: null });
-  report.step(`submitted ${trellis} (TRELLIS.2 10k/2048) and ${hunyuan} (Hunyuan3D 10k)`);
+  const trellis = await submit("a small wooden crate", { faces: 10000, tex: 2048, variants: 1, style: true, seed: null });
+  const pillar = await submit("a stone pillar", { faces: 20000, tex: 1024, variants: 1, style: true, seed: null });
+  report.step(`submitted ${trellis} (TRELLIS.2 10k/2048) and ${pillar} (TRELLIS.2 20k/1024)`);
 
   const deadline = Date.now() + 30 * 60_000;
   const states = new Map<string, string>();
   while (Date.now() < deadline) {
-    for (const id of [trellis, hunyuan]) {
+    for (const id of [trellis, pillar]) {
       const job = ((await (await fetch(`${base}/api/jobs/${id}`, { headers })).json()) as { job: { state: string; error: string | null } }).job;
       if (states.get(id) !== job.state) report.step(`${id.slice(0, 8)}: ${job.state}`);
       states.set(id, job.state);
@@ -69,32 +69,33 @@ async function main(): Promise<number> {
         return 1;
       }
     }
-    if ([trellis, hunyuan].every((id) => states.get(id) === "done")) break;
+    if ([trellis, pillar].every((id) => states.get(id) === "done")) break;
     await Bun.sleep(5000);
   }
-  if (![trellis, hunyuan].every((id) => states.get(id) === "done")) {
+  if (![trellis, pillar].every((id) => states.get(id) === "done")) {
     report.fail("the jobs did not finish within 30 minutes");
     return 1;
   }
-  for (const [id, textured] of [[trellis, true], [hunyuan, false]] as const) {
+  // Both jobs are TRELLIS.2, so both GLBs must carry a base colour texture.
+  for (const id of [trellis, pillar]) {
     const bytes = new Uint8Array(await (await fetch(`${base}/api/assets/${id}/model.glb`, { headers })).arrayBuffer());
     const gltf = gltfJson(bytes);
     if (gltf?.asset?.version !== "2.0") {
       report.fail(`${id}: the download is not a glTF 2.0 binary`);
       return 1;
     }
-    if (textured && !gltf.materials?.some((m) => m.pbrMetallicRoughness?.baseColorTexture)) {
+    if (!gltf.materials?.some((m) => m.pbrMetallicRoughness?.baseColorTexture)) {
       report.fail(`${id}: no material with a base colour texture`);
       return 1;
     }
-    report.pass(`${id.slice(0, 8)}: ${(bytes.length / 1024 / 1024).toFixed(1)} MiB glTF${textured ? " with a base colour texture" : ""}`);
+    report.pass(`${id.slice(0, 8)}: ${(bytes.length / 1024 / 1024).toFixed(1)} MiB glTF with a base colour texture`);
   }
   const listing = (): string =>
     ssh("dir /b /s %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\output\\asset-studio %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\input\\asset-studio 2>nul & exit 0");
   const cleanDeadline = Date.now() + 2 * 60_000;
   for (;;) {
     const left = listing();
-    if (!left.includes(trellis) && !left.includes(hunyuan)) break;
+    if (!left.includes(trellis) && !left.includes(pillar)) break;
     if (Date.now() > cleanDeadline) {
       report.fail("the app's files are still in ComfyUI's asset-studio folders after two minutes");
       return 1;

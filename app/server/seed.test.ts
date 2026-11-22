@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { FakeComfy } from "../fake-comfy/fake.ts";
 import { ComfyClient } from "./comfy.ts";
 import { loadConfig } from "./config.ts";
-import { FIXTURE_JOBS, runSeed, seedFixture } from "./seed.ts";
+import { FIXTURE_JOBS, LONG_PROMPT, runSeed, seedFixture } from "./seed.ts";
 import { DEV_TOKEN, startServer } from "./serve.ts";
 import { openStore, type Store } from "./store.ts";
 import { testDirs, type TestDirs } from "./testkit.ts";
@@ -95,4 +95,17 @@ test("the committed dev config loads and the loader refuses a short token", () =
   const c = loadConfig(join(import.meta.dir, "..", "..", "dev", "config.yaml"));
   expect(c.token).toBe(DEV_TOKEN);
   expect(() => { loadConfig(join(dirs.root, "missing.yaml")); }).toThrow();
+});
+
+test("the fixture is TRELLIS.2 only and holds the long prompt on a done and a failed job (AC-23, AC-22)", () => {
+  const store = openStore(dirs.config.dataDir);
+  seedFixture(store, dirs.config, "default", Date.now());
+  const engines = store.db.query("SELECT DISTINCT engine FROM jobs WHERE fixture = 1").all() as { engine: string }[];
+  expect(engines).toEqual([{ engine: "trellis" }]);
+  const long = store.db.query("SELECT state FROM jobs WHERE fixture = 1 AND prompt = ? ORDER BY state").all(LONG_PROMPT) as { state: string }[];
+  expect(long.map((r) => r.state)).toEqual(["done", "failed"]);
+  expect(LONG_PROMPT.length).toBeGreaterThan(1900);
+  expect(LONG_PROMPT.length).toBeLessThanOrEqual(2000);
+  expect(LONG_PROMPT.split(/\s+/).some((w) => w.length >= 120)).toBe(true);
+  store.close();
 });
