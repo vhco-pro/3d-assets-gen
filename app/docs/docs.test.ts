@@ -47,9 +47,13 @@ test("the README records the security analysis coverage per language (AC-24)", (
 });
 
 // AC-11: nothing in the repository submits generations to a deployed app.
-const LIVE_SUBMIT = /(?:fetch\s*\(|curl\b)[^\n]*\/api\/batches/;
+// A line naming /api/batches counts as a submission when an HTTP client call sits on it or within three
+// lines of it, so a URL built just before the call is caught too; plain mentions pass.
+const HTTP_CLIENT = /\bfetch\s*\(|\bcurl\b|\bwget\b|\burllib\b|\brequests\.|\bhttp\.client\b|XMLHttpRequest|Invoke-WebRequest|Invoke-RestMethod/i;
+const NEAR = 3;
 export function submitsBatches(text: string): boolean {
-  return text.split("\n").some((line) => LIVE_SUBMIT.test(line));
+  const lines = text.split("\n");
+  return lines.some((line, i) => line.includes("/api/batches") && lines.slice(Math.max(0, i - NEAR), i + NEAR + 1).some((l) => HTTP_CLIENT.test(l)));
 }
 
 describe("no live generation check (AC-11)", () => {
@@ -58,6 +62,11 @@ describe("no live generation check (AC-11)", () => {
     expect(submitsBatches("curl -X POST https://win-main.example.ts.net/api/batches -d @b.json")).toBe(true);
     expect(submitsBatches("| `POST /api/batches` | Create a batch from prompts (JSON) or images (multipart) |")).toBe(false);
     expect(submitsBatches("The page posts a new batch to /api/batches.")).toBe(false);
+    // R-22 F-05: other clients, and a URL built on the line before the call.
+    expect(submitsBatches('req = urllib.request.Request(base + "/api/batches", data=body, method="POST")')).toBe(true);
+    expect(submitsBatches("Invoke-RestMethod -Method Post -Uri https://win-main.example.ts.net/api/batches -Body $b")).toBe(true);
+    expect(submitsBatches("wget --post-file=b.json https://win-main.example.ts.net/api/batches")).toBe(true);
+    expect(submitsBatches("const url = `${base}/api/batches`;\nawait fetch(url, { method: \"POST\", body });")).toBe(true);
   });
   test("the live check, its script and its documentation are gone", () => {
     expect(existsSync(join(ROOT, "app/cli/verify-live.ts"))).toBe(false);
