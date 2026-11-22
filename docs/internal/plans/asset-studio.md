@@ -1,6 +1,6 @@
 ---
-status: in-progress
-status_description: "Implementing the R-17 revision on feat/asset-studio (T37 to T49)."
+status: draft
+status_description: "Revising: shadcn/ui page, a richer queue, timing metadata, Shared style, and no live generation check; waiting for spec review."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
