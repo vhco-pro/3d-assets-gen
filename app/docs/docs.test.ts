@@ -38,3 +38,9 @@ test("the README names TRELLIS.2 as the only mesh model and offers no engine cho
   expect(readme).not.toMatch(/hunyuan/i);
   expect(readme).not.toMatch(/pick an engine|choose an engine|engine choice/i);
 });
+
+test("the README records the security analysis coverage per language (AC-24)", () => {
+  const section = readme.slice(readme.indexOf("## Security analysis"));
+  expect(section.length).toBeGreaterThan(20);
+  for (const language of ["JavaScript", "TypeScript", "Python", "Actions", "Bash", "PowerShell"]) expect(section).toContain(language);
+});

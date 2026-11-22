@@ -49,6 +49,18 @@ The app keeps running while the owner is signed in on `win-main`; a scheduled ta
 logon. The access token lives only in `%LOCALAPPDATA%\AssetStudio\config.yaml` on `win-main`; read it
 with `ssh win-main type AppData\Local\AssetStudio\config.yaml` and pass it on yourself.
 
+## Security analysis
+
+What each language in the repository is checked with:
+
+| Language | Analysis |
+| --- | --- |
+| JavaScript and TypeScript | CodeQL (`codeql.yml`, category `/language:js-ts`) |
+| Python | CodeQL, in the same `/language:js-ts` analysis (`scripts/generate_3d.py`, the golden dump helper) |
+| GitHub Actions | CodeQL (`/language:actions`) and actionlint in `bun run verify` |
+| Bash | shellcheck in `bun run verify`; a linter, not a security analyzer |
+| PowerShell | None yet; adopting PSScriptAnalyzer through `vhco-pro/pwsh-ci-action` is tracked in [#3](https://github.com/vhco-pro/3d-assets-gen/issues/3) |
+
 ## Owner checklist
 
 These steps happen outside the repository and complete access for the friend:
