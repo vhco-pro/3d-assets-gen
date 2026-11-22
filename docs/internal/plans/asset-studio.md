@@ -1287,6 +1287,7 @@ None.
 | 2026-11-22 | R-16 | spec | `c9f3009` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 1 nit |
 | 2026-11-22 | R-17 | spec | `557c810` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 5 nits |
 | 2026-11-22 | R-17 | spec | `557c810` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-18 | spec | `8b38a87` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 6 nits |
 
 ### R-1
 
@@ -3048,6 +3049,185 @@ SEVERITY: nit
 WHERE: Design > Verification commands (design review paragraph, lines 1009-1012); Tasks T43 (line 1176)
 EVIDENCE: guides/use-frontend-design-skills.md (Review the result) says: "For a remote session, give the owner a verified reachable private preview URL through the available host workflow." The design review paragraph names the Vercel rules, the viewport matrix and the Impeccable launcher being skipped. It neither includes the preview URL nor says why it is left out. Nothing a proof checks depends on it.
 PROPOSAL: Add one clause to the paragraph saying whether the restyled page is offered to the owner as a private preview URL, or why it is not.
+
+### R-18
+
+TARGET: 8b38a87e3542272c94304073befe2d54137bbb8a
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1067-1077); Acceptance Criteria AC-22 (line 1115); Test Plan row AC-22 (line 1148); Tasks T44 (line 1259)
+EVIDENCE: Line 1073 says "head's `seed` command writes a data directory (schema version 1 on both sides), and the before is the base commit's executable serving a copy of that directory". This revision makes head's schema 2 (lines 583-584, AC-28). The base executable's store refuses a newer database: app/server/store.ts:96-98 throws `SchemaTooNewError` ("database is at schema ${current}, but this executable only knows schema ${target}") when the stored version is above `MIGRATIONS.length`, which is 1 on the base. So the "before" side cannot start on head's fixture, and the record AC-22 requires cannot be produced as written. This traces to this revision's schema 2 change; the paragraph was not updated.
+PROPOSAL: Say how the before side gets a schema-1 fixture (for example the base commit's own `seed` writing the before directory and head's `seed` the after one, with the fixture differences named), and drop "schema version 1 on both sides".
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 563-564 and 583-585)
+EVIDENCE: Line 563-564: "The server removes Hunyuan3D jobs through the existing cancel and delete paths; the schema version stays 1." Lines 583-584, added by this revision, say "Schema version 2 adds the nullable `shared_style` column to `jobs`". The same section now states both. An implementer reading the first sentence could skip the migration and its backup.
+PROPOSAL: Change the first sentence to say the Hunyuan3D removal needs no schema change, and keep schema 2 as the one migration of this revision.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (line 321); Design > Access token (lines 605-606); Design > Versioning and release path (lines 953-955)
+EVIDENCE: AC-11 is rewritten to "No script, command or check in the repository submits generations to a deployed app", and Scope now excludes "Any check that submits real generations to the deployed app" (line 270). Three Design lines still describe the removed check: line 321 "AC-11 runs 10k with 2048 textures and 20k with 1024 textures through the deployed app"; lines 605-606 "`bun run verify:live` reads the token over SSH into memory for its run"; line 955 "so the review can observe AC-10, AC-11 and AC-15 against it". This revision removed other `verify:live` mentions (lines 1008-1009, 1050) but not these.
+PROPOSAL: Remove the line 321 sentence and the `verify:live` sentence in Access token, and change line 955 to name AC-10, AC-12 (deployed part) and AC-15.
+
+FINDING: F-04
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (theme paragraph, lines 684-696; colour rules, lines 698-713); Acceptance Criteria AC-22 (line 1115) and AC-25 (line 1118); Test Plan rows AC-22 (line 1148) and AC-25 (line 1151)
+EVIDENCE: Design says the token block from guides/vh-midnight.md is copied "as written there" (which defines `--accent: #4f8cff` and `--card: rgba(255,255,255,.045)`, vh-midnight.md:39,43) and also that shadcn's variables, including `--card`, `--primary` "and the rest", are mapped onto those tokens. The names collide in one `:root`: shadcn's `--accent` is a subtle hover surface (outline and ghost Button `hover:bg-accent`, Toggle `data-[state=on]:bg-accent`), so the copied blue would paint solid blue hovers and selected toggles. Design never says which token `--primary` gets: shadcn's Button default, Switch on state, Checkbox checked and Progress indicator all use `bg-primary`. If it is `--ok` (Generate's colour), the switch, checkboxes and progress bars turn green, which the "no other element ... resolves to `--ok`" rule in AC-22 forbids. If it is `--accent`, Generate needs its own variant. The progress bars' colour is not stated anywhere. Two careful implementers build different pages here, and the AC-22 check does not cover misuse of `--accent`.
+PROPOSAL: Add a mapping table that gives every shadcn variable the components use (`--primary`, `--primary-foreground`, `--accent`, `--accent-foreground`, `--secondary`, `--muted`, `--destructive`, `--ring`, `--input`, `--popover`) a VH Midnight value, and resolve the `--accent` and `--card` name clash (for example by prefixing the VH tokens). Name the progress bar colour and Generate's variant.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Frontmatter covers (lines 7-29); Tasks T54 (line 1256)
+EVIDENCE: T54 adds `components.json` at the repository root (the shadcn CLI configuration that decides component paths and style). `covers` lists `app/`, `package.json`, `vite.config.ts` and others but not `components.json`. The standard says `covers` "lists every path whose change can affect the feature", and `feature_tree_clean` ignores uncovered changes.
+PROPOSAL: Add `components.json` to `covers`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (queue times, lines 742-750); Design > Glossary (lines 666-668); Acceptance Criteria AC-26 (line 1119)
+EVIDENCE: "A Waiting or Queued job shows `Queued <duration> ago`, its queue position, and `Starts in about <duration>`: the running job's remaining typical time plus the typical times of the jobs ahead of it." A Waiting (`pending`) job has no queue position: the API gives one only for submitted jobs (line 644; app/server/tracker.ts:80-82 returns a position only for prompts in ComfyUI's queue). Queue positions also count Comfy Desktop prompts the app has no typical time for (line 508-510), and the running prompt may not be an app job. Nothing says what "remaining typical time" is once the running job is past its typical time (negative, zero or no estimate), nor which jobs are "ahead" of a Waiting job. Implementers will compute different estimates and the unit tests in the AC-26 row cannot pin them.
+PROPOSAL: Define the estimate for Waiting jobs (no position shown; ahead means every submitted job plus earlier pending ones), what happens with foreign ComfyUI prompts in the queue or running, and clamp the running job's remainder at zero past its typical time. Add those cases to the AC-26 unit tests.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (summary strip, lines 731-733; job rows, lines 744-746); Design > Glossary (lines 666-668); Acceptance Criteria AC-18 (line 1111)
+EVIDENCE: The Glossary defines Queued as "Job state `submitted`, not yet running in ComfyUI" and Waiting as `pending`. The summary strip shows "Queued (counting Waiting jobs too)" with "its Glossary term", and a Waiting job row shows `Queued <duration> ago` next to its Waiting badge. The page then uses the term Queued with two meanings, which the standard's glossary rule ("User-facing terms ... are held to it by a criterion") is meant to prevent; the AC-18 test only reads the badge and field labels.
+PROPOSAL: Either count Waiting and Queued separately in the strip and use a neutral word in the row text (for example `Added <duration> ago`), or raise the merged count as an Open Question and widen the Glossary row.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (batch groups, lines 734-737); Acceptance Criteria AC-26 (line 1119); Test Plan row AC-26 (line 1152)
+EVIDENCE: `Cancel all` and `Retry failed` "send the per-job cancel or retry for each matching job", so one click is up to 25 separate requests across the network. Retry is refused at the unfinished-job limit (app/server/jobs.ts:121-124, 409), so `Retry failed` can succeed for some jobs and fail for others. Design does not say what the page shows on a partial failure, whether requests are sent one at a time or together, or whether the button can be clicked again meanwhile. It also leaves open whether a batch whose jobs are all `done` (no rows in a queue that "shows unfinished, failed and cancelled jobs") still gets a group, and whether a group that becomes finished while the user has it open collapses on the next refresh.
+PROPOSAL: State that the actions run in order, stop or continue on a refusal, and show one error naming how many jobs were not cancelled or retried, using the failed-job-action error style. State that groups appear only for batches with at least one queue row and that a group's open state is kept across refreshes. Add a partial-failure case to the AC-26 Playwright row.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (job rows, line 739); Design > HTTP API (source-preview row, line 651)
+EVIDENCE: Each queue row shows a 64-pixel image "from `source-preview`", which serves "the upload of an image job" (up to 20 MiB each, line 656) or the 1024 by 1024 PNG of a prompt job. A 25-image batch at the 200 MiB cap then makes every browser viewing the queue download about 200 MiB, over the tailnet and possibly on a phone, to draw 64-pixel images. conventions/react.md:131 says "Size images for their rendered dimensions and pixel density". The combined graph already writes a 256 by 256 thumbnail from the same source image (line 312-314) under `<attempt id>/` in the same output folder.
+PROPOSAL: Serve the 256-pixel thumbnail (`<attempt id>/thumb_*.png`) for prompt jobs once it exists, and for image jobs either a size cap or `loading="lazy"` with a stated bound; or raise the trade-off as an Open Question.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (job rows, lines 742-746; cards, lines 754-755; preview, lines 760-763); Acceptance Criteria AC-26 and AC-27 (lines 1119-1120)
+EVIDENCE: All times derive from `createdAt`, `startedAt` and `finishedAt`. In the tree, `started_at` is set only when a tick sees the prompt running (app/server/tracker.ts:279-280), so a job that ran entirely while the app was down ends `done` with `startedAt` null; `finished_at` is the app's collection time (tracker.ts:354), which after an outage can be hours after ComfyUI finished. Retry keeps `created_at` (jobs.ts:125-127 resets only started and finished), so a retried job shows `Queued 3 h ago` and a "time waited" that includes earlier attempts. Design does not say what a card, the dialog or the median shows or skips in these cases.
+PROPOSAL: Define the display when `startedAt` is null (omit the generation and waited times, exclude the job from the median), and whether `Queued ... ago` and time waited count from creation or from the current attempt (for example a stored attempt start time). Add one case of each to the AC-26 unit tests or AC-27 row.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (Shared style paragraph, lines 392-397); Design > Submission, concurrency and idempotency (lines 423-427); Test Plan row AC-28 (line 1154)
+EVIDENCE: The content hash is `JSON.stringify({ kind, presets, items })` over the parsed presets (app/server/batches.ts:72-73) and is stored per batch (batches.ts:290). Adding `sharedStyle` to the presets object changes the encoding: if absent is encoded as `sharedStyle: null`, a genuine retry of a batch created before the upgrade, sent by a page loaded before it, gets 409 instead of 200. Design also does not say whether null, absent and an empty string after trimming are the same value for the hash, for storage, and for the image-batch refusal ("An image batch that sends a Shared style is refused"); the page's multipart `presets` field (app/web/api.ts:102) may carry an empty or null value.
+PROPOSAL: State that null, absent and empty-after-trim are one value (no Shared style), stored as null, left out of the hash encoding so pre-upgrade hashes still match, and accepted on image batches; refuse only a non-empty value there. Add the pre-upgrade replay case to the AC-28 row.
+
+FINDING: F-12
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (composer, lines 722-727); Acceptance Criteria AC-28 (line 1121); Test Plan row AC-28 (line 1154)
+EVIDENCE: Design says the field "starts with the last value used in this browser", which reads as saved on submit. The AC-28 row checks that "a changed value survives a reload", which needs saving on every change. It is also not said whether Reset writes the default to the store, or what the page does with more than 300 characters (limit the input, or let the server refuse the batch). Two implementers build different behaviour, and one of them fails the row.
+PROPOSAL: Pick one: save on change (and on Reset), or save on a successful submit; align the AC-28 row with it. Say whether the field has `maxLength` 300.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (Playwright projects, lines 1041-1050); Test Plan row AC-26 (line 1152)
+EVIDENCE: The AC-26 row runs "Playwright `queue.spec.ts` on its own stack" and has it use Cancel all and Retry failed on "a seeded batch" on a faked clock. Design lists the projects that get their own container (sign-in, offline and incompatible, glossary, style, empty profile) and says the remaining journeys "share one seeded container; those that change data ... act only on jobs they created in the same test". `queue.spec.ts` is not in that list, so as Design reads, Cancel all on a seeded batch on the shared container breaks the rule and other specs' fixtures.
+PROPOSAL: Add the queue scenario to the list of projects with their own container in Design.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-26 (line 1152); Acceptance Criteria AC-26 (line 1119)
+EVIDENCE: AC-26 includes "the summary strip with counts and the queue-clear estimate". The row's unit tests cover the median, the fallback, the queued start sum, the 95 percent cap and the formatter; its Playwright part checks "the summary counts and terms". Nothing computes or shows `Queue clear in about <duration>`, its rule that it appears only "when every unfinished job has an estimate", or `about <duration> left`. A page without the queue-clear estimate passes the row.
+PROPOSAL: Add the queue-clear sum and its hidden case to the unit tests, and assert `Queue clear in about` and `about ... left` in `queue.spec.ts`.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-25 (line 1118); Test Plan row AC-25 (line 1151)
+EVIDENCE: AC-25 says "The page's controls are shadcn/ui components from `app/web/components/ui/`". The row checks that the component files exist, that `vite.config.ts` uses `@tailwindcss/vite`, and that `styles.css` maps six variables. A page that keeps its current native controls while the files sit unused passes. The row also says "`bun test ./app/docs` (or a new `app/web/ui.test.ts`)", leaving the check's place open.
+PROPOSAL: Add a rendered check, for example `style.spec.ts` asserting that Generate, the Detail group, the switch, the Select checkboxes and the dialog carry shadcn's `data-slot` attributes, and name one test file.
+
+FINDING: F-16
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after capture list, lines 1067-1077); Acceptance Criteria AC-22 (line 1115)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request) requires "an after image of each state the change adds or alters" and asks to "Name any changed state left uncaptured and say why". This revision adds the summary strip, batch groups (open and collapsed), Cancel all and Retry failed, a row with a source image and a Generating progress bar, the Shared style field and its disabled note, timing on cards and the dialog. The capture list was not changed and names none of them, and the AC-22 row checks the record against "the before-and-after record Design lists".
+PROPOSAL: Add the new states to the capture list (or name each left out and why).
+
+FINDING: F-17
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1082-1090); Test Plan rows AC-26 (line 1152) and AC-27 (line 1153); Tasks T52 (line 1254)
+EVIDENCE: The fixture paragraph is unchanged: no batch with several unfinished jobs to group, no running prompt job whose source PNG exists in the fake output folder, and no times. The rows rely on "the fixture's done jobs carry fixed start and finish times" and "fixture jobs with known times on a faked clock", but unfinished fixture jobs get `started_at` from the tracker at real time (tracker.ts:279-280) while the page's clock is faked, so `Generating for` is not deterministic. conventions/frontend-testing.md says "Time-dependent screens need a documented date anchor" and the fixture should "Cover the states the feature renders".
+PROPOSAL: Describe the new fixture in Design: a multi-job batch, a running prompt job with its source PNG written by the seed or fake, fixed `createdAt` and `startedAt` for unfinished fixture jobs relative to a stated anchor (the tracker keeps an existing `started_at`), and fixed durations for done jobs.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (composer, lines 718-729); Test Plan row AC-02 (line 1128)
+EVIDENCE: R-17 F-01 asked for the rule when prompts and images are both present; the owner's answer was built in T48 ("images win; the composer shows `Images are added; the prompts above are ignored.` and the Generate label counts only the images") but never folded into Design or the AC-02 row, which still says the page submits "each invalid case" although an empty form now only disables Generate (R-17 F-02). T55 rebuilds the composer from Design, so an implementer following Design can drop the rule, and this revision's Shared style rule ("disabled ... while images are chosen") depends on it.
+PROPOSAL: Add the images-win rule and its note to the composer paragraph, and update the AC-02 row with that case and the disabled empty Generate.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-11 (line 1104); Test Plan row AC-11 (line 1137)
+EVIDENCE: AC-11 says "No script, command or check in the repository submits generations to a deployed app". The row only checks that `app/cli/verify-live.ts` is gone and that the name `verify:live` appears in neither `package.json`, `README.md` nor `AGENTS.md`. The same live check under another file or script name passes. Today only app/memory/memory.test.ts:110 and the e2e specs post to `/api/batches`, all against a local container.
+PROPOSAL: Have the docs test also assert that no file outside `app/server`, `app/web`, `app/e2e` and `app/memory` posts to `/api/batches`, and that no `package.json` script targets a deployed URL.
+
+FINDING: F-20
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 84-86)
+EVIDENCE: "at every start the server on every tick with a compatible ComfyUI, cancels unfinished Hunyuan3D jobs" is still garbled. R-17 F-04 raised it; this revision edited the same paragraph (lines 87-88) without fixing it.
+PROPOSAL: Write "on every tick with a compatible ComfyUI the server cancels unfinished Hunyuan3D jobs".
+
+FINDING: F-21
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, line 767)
+EVIDENCE: "Selecting an asset loads the `<model-viewer>` module on demand." Cards keep a Select checkbox for export, and the thumbnail is now the Preview button. R-17 F-06 raised the wording; this revision edited the same line ("Preview control") and kept it.
+PROPOSAL: Write "Opening the preview loads the `<model-viewer>` module on demand."
+
+FINDING: F-22
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Page (component list, lines 684-686; preview, lines 760-764)
+EVIDENCE: Tooltip is listed but no Page text uses a tooltip; it adds `@radix-ui/react-tooltip` and its positioning code to a 150 KiB initial budget that stood at about 82 KiB. shadcn's `DialogContent` renders its own corner close button named "Close" by default, next to Design's Close button, so the page has two controls with that name.
+PROPOSAL: Drop Tooltip from the list or say where it is used, and say that the dialog's built-in close button is turned off (`showCloseButton={false}`).
+
+FINDING: F-23
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, lines 760-763); Test Plan row AC-27 (line 1153)
+EVIDENCE: The dialog shows "time waited", "generation time" and "total time", but the visible labels are not given, unlike the card's `Generated in <duration>`. The AC-27 row checks "the waited, generation and total times" without labels.
+PROPOSAL: Give the three labels (for example `Waited`, `Generated in`, `Total`).
+
+FINDING: F-24
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan row AC-15 (line 1141)
+EVIDENCE: The row tests "a test migration from schema 1 to 2" with a `schema-1-*` backup. app/server/store.test.ts:38 builds it as `[...MIGRATIONS, extra]`; once MIGRATIONS holds the real migration to 2, that becomes 2 to 3 and writes `schema-2-*`. The AC-28 row already covers the real 1 to 2 migration and its backup.
+PROPOSAL: Say "a test migration one past the current schema" and assert the backup of the current version.
+
+FINDING: F-25
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > HTTP API (source-preview row, line 651; `sourceReady`, lines 634-636)
+EVIDENCE: `sourceReady` is true once the file exists, but ComfyUI writes the PNG in place, so a fetch can catch a partly written file. The image URL never changes, so a broken image stays.
+PROPOSAL: Count the PNG ready only when its size is stable across two ticks, or add a cache-busting query with the file size.
 
 ## Sources
 
