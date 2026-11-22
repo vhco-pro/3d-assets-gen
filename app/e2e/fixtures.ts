@@ -47,3 +47,13 @@ export { expect };
 export function uniquePrompt(label: string): string {
   return `${label} ${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/** Opens every collapsed batch group in the queue, so finished batches show their rows. */
+export async function expandBatches(page: Page): Promise<void> {
+  // The queue renders after the first job list arrives; count groups only once it is there.
+  await expect(page.getByTestId("batch").first()).toBeVisible();
+  const collapsed = page.getByRole("button", { name: "Expand batch" });
+  for (let i = await collapsed.count(); i > 0; i--) {
+    await collapsed.first().click();
+  }
+}

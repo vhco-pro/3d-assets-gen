@@ -8,6 +8,7 @@ setup() {
 #!/usr/bin/env bash
 echo "gh $*" >> "$CALLS"
 args="$*"
+if [[ -n "${STUB_FAIL:-}" && "$args" == *"$STUB_FAIL"* ]]; then echo "HTTP 502: Bad Gateway (stub)" >&2; exit 1; fi
 case "$args" in
   "api repos/vhco-pro/3d-assets-gen") echo '{"visibility":"public","license":{"key":"apache-2.0"},"delete_branch_on_merge":true,"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}' ;;
   *"code-scanning/analyses?ref=refs/heads/main"*) printf '%s' "${STUB_CATEGORIES:-}" ;;
@@ -22,7 +23,7 @@ STUB
 }
 
 @test "analyses only on a pull request ref fail both analysis checks" {
-  export STUB_CATEGORIES="" STUB_INSTALLED="vhco-pro/3d-assets-gen"
+  export STUB_CATEGORIES=""
   run "$DEPLOY/check-repo.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Failed: a /language:js-ts analysis on main"* ]]
@@ -30,23 +31,24 @@ STUB
   [ "$(call_line 'ref=refs/heads/main')" != "" ]
 }
 
-@test "main analyses and an installation that lists the repository pass" {
-  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n' STUB_INSTALLED="vhco-pro/3d-assets-gen"
+@test "main analyses pass, and the script makes no installation-listing call" {
+  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n'
   run "$DEPLOY/check-repo.sh"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Passed: vhco-pro/3d-assets-gen is in the vhco-renovate installation"* ]]
+  [ "$(call_line 'installations')" = "" ]
+  [[ "$output" != *"Skipped"* ]]
 }
 
-@test "an installation without the repository fails" {
-  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n' STUB_INSTALLED="vhco-pro/other"
+@test "a code-scanning call that errors is reported as a failed check with its error" {
+  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n' STUB_FAIL="code-scanning/analyses"
   run "$DEPLOY/check-repo.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Failed: vhco-pro/3d-assets-gen is in the vhco-renovate installation"* ]]
+  [[ "$output" == *"Failed: a /language:js-ts analysis on main (JavaScript, TypeScript and Python): HTTP 502: Bad Gateway (stub)"* ]]
 }
 
-@test "a token that cannot list the installation reports a skip" {
-  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n' STUB_INSTALLED=""
+@test "a repository-settings call that errors is reported as a failed check with its error" {
+  export STUB_CATEGORIES=$'/language:actions\n/language:js-ts\n' STUB_FAIL="api repos/vhco-pro/3d-assets-gen"
   run "$DEPLOY/check-repo.sh"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Skipped: vhco-pro/3d-assets-gen in the vhco-renovate installation"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Failed: repository settings: HTTP 502: Bad Gateway (stub)"* ]]
 }

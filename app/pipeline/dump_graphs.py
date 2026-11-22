@@ -21,7 +21,7 @@ cases = {
 for faces in (5000, 10000, 20000):
     for tex in (1024, 2048):
         cases[f"trellis/{faces}/{tex}"] = g.trellis_graph("asset-studio/job.png", SEED, PREFIX, faces, tex)
-    cases[f"hunyuan/{faces}"] = g.mesh_graph("asset-studio/job.png", SEED, 256, PREFIX, faces)
+cases["trellis/ultra"] = g.trellis_graph("asset-studio/job.png", SEED, PREFIX, 30000, 4096, ultra=True)
 
 json.dump({"style_suffix": g.STYLE_SUFFIX, "prefix": PREFIX, "seed": SEED, "cases": cases},
           sys.stdout, indent=1, sort_keys=True)

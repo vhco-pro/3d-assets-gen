@@ -1,16 +1,16 @@
-// Builds the single ComfyUI graph a job submits: image graph plus mesh graph for a prompt job, or the
-// mesh graph alone for an image job, plus a thumbnail branch. Rules are in the feature document's Design.
-import { hunyuanGraph, imageGraph, STYLE_SUFFIX, trellisGraph, type Graph, type Ref } from "./graphs.ts";
-import { HUNYUAN_OCTREE, IMAGE_SIZE, type Engine } from "./presets.ts";
+// Builds the single ComfyUI graph a job submits: image graph plus the TRELLIS.2 mesh graph for a prompt job,
+// or the mesh graph alone for an image job, plus a thumbnail branch. Rules are in the feature document's Design.
+import { imageGraph, STYLE_SUFFIX, trellisGraph, type Graph, type Ref } from "./graphs.ts";
+import { isUltra } from "./presets.ts";
+import { IMAGE_SIZE } from "./presets.ts";
 
 interface Common {
   seed: number;
-  engine: Engine;
   faces: number;
-  tex: number | null;
+  tex: number;
 }
 export type JobGraphInput =
-  | (Common & { kind: "prompt"; prompt: string; style: boolean })
+  | (Common & { kind: "prompt"; prompt: string; style: boolean; sharedStyle?: string | null })
   | (Common & { kind: "image"; upload: string });
 
 const OFFSET = 100;
@@ -20,10 +20,7 @@ function isRef(v: unknown): v is Ref {
 }
 
 function meshGraph(input: JobGraphInput, image: string, prefix: string): Graph {
-  if (input.engine === "trellis") {
-    return trellisGraph({ image, seed: input.seed, prefix, faces: input.faces, tex: input.tex ?? 2048 });
-  }
-  return hunyuanGraph({ image, seed: input.seed, octree: HUNYUAN_OCTREE, prefix, faces: input.faces });
+  return trellisGraph({ image, seed: input.seed, prefix, faces: input.faces, tex: input.tex, ultra: isUltra(input.faces, input.tex) });
 }
 
 export function combineGraph(input: JobGraphInput, prefix: string): Graph {
@@ -34,7 +31,9 @@ export function combineGraph(input: JobGraphInput, prefix: string): Graph {
   const out: Graph = {};
   let source: Ref;
   if (input.kind === "prompt") {
-    const text = input.style ? input.prompt + STYLE_SUFFIX : input.prompt;
+    // The prompt, then the batch's Shared style, then the game-asset suffix.
+    const withShared = input.sharedStyle ? `${input.prompt}, ${input.sharedStyle}` : input.prompt;
+    const text = input.style ? withShared + STYLE_SUFFIX : withShared;
     Object.assign(out, imageGraph({ prompt: text, seed: input.seed, size: IMAGE_SIZE, prefix }));
     source = ["9", 0];
   } else {

@@ -1,11 +1,12 @@
 ---
 status: in-progress
-status_description: "Implementing the accepted revision on feat/asset-studio (T25 to T31)."
-issue: null
+status_description: "Implementing the R-22 revision on feat/asset-studio (T63 to T69, then T44 and T45)."
+issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
 covers:
   - app/
+  - components.json
   - package.json
   - bun.lock
   - bunfig.toml
@@ -45,9 +46,10 @@ many assets at once and pull them into their own engine or modelling tool.
 
 The app is TypeScript on Bun, packaged as a distroless Linux container without OpenSSL that runs under
 Docker Desktop on `win-main` beside the native ComfyUI. Each job is one combined ComfyUI graph (prompt to image to mesh,
-or uploaded image to mesh), and ComfyUI's own queue runs the jobs in order. Combined prompts were run on
-`win-main` during this spec for both engines at 10k and 20k triangles (TRELLIS.2 with 2048 textures),
-and all of them fit the 16 GB card. The app gives every submission
+or uploaded image to mesh), and ComfyUI's own queue runs the jobs in order. Every mesh comes from
+TRELLIS.2, textured; the owner dropped Hunyuan3D because its results were clearly worse. Combined prompts
+were run on `win-main` during this spec at 10k and 20k triangles with 2048 textures, and all of them fit
+the 16 GB card. The app gives every submission
 attempt its own prompt ID and output prefix, keeps a small job record, collects finished files, cleans
 its own files out of ComfyUI's folders, and resubmits jobs ComfyUI lost. Cancelling uses ComfyUI's
 per-job cancel, so it never stops other ComfyUI work. The app needs ComfyUI 0.46.2 or newer and stops
@@ -58,8 +60,11 @@ The friend reaches the app through a Tailscale node share of `win-main` and `tai
 signs in with a shared access token; the server accepts a session cookie for 30 days after sign-in. The token lives only in
 `config.yaml` on `win-main`; the owner reads it over SSH and passes it on, and a deploy flag rotates it.
 ComfyUI and the container's port stay on localhost. Like Comfy Desktop, the app runs only while the owner
-is signed in on `win-main`. The form offers presets (engine, 5k/10k/20k
-triangles, 1024 or 2048 textures, 1 to 4 variants, the style suffix and an optional seed). A batch holds
+is signed in on `win-main`. The form offers presets (5k/10k/20k
+triangles or Ultra, 1024 or 2048 textures or 4096 with Ultra, 1 to 4 variants, the style suffix and an optional seed). The page uses
+the owner's VH Midnight style: a deep-blue gradient, pale text, translucent surfaces and a solid green
+Generate button. On a desktop a composer column sits beside the queue and a thumbnail gallery, and the
+3D preview opens in a dialog; on a phone everything stacks in one column. A batch holds
 at most 25 jobs and 200 MiB of images, and the app allows at most 100 unfinished jobs, enforced inside
 one database transaction. Uploads stream to disk and export zips stream to the browser, so the container
 stays inside its 1 GiB memory limit. Downloads are a GLB per asset or a zip of up to 100 assets and
@@ -70,23 +75,58 @@ public exposure and changes to the ComfyUI install. Delivery ends at a working t
 node with the friend and limiting `autogroup:shared` to port 443 in the tailnet ACL are the owner's
 steps in the Tailscale admin console, and the README gives a checklist for them.
 
-Observed during implementation, before this revision: `bun run verify` passed end to end locally and in
-CI (graph equivalence with the Python builders, the fake ComfyUI tests of queueing, cancellation,
-timeouts, restarts, lost jobs and rejections, the Playwright journeys in Chromium and Firefox, the layout
-matrix, bundle budgets, CLI output tests, the image start check, and a memory check that found and fixed an
-out-of-memory export). The Firefox viewer render skipped in both places for lack of WebGL. Still planned:
-the Firefox render in CI with Mesa, the published image's start check, the deploy and rollback checks on
-`win-main`, the reachability and rate-limit checks from other tailnet devices, two real generations, the repository
-settings check and the manual 200 percent zoom check with its screenshot review.
+Observed before this revision: v0.1.0 passed `bun run verify` in CI, two real generations and the
+upgrade, rollback and logon-recovery script on `win-main`, and an independent implementation review (R-13)
+that met every criterion except the Renovate one, which waits for the owner to add the repository to the
+`vhco-renovate` installation.
 
-Changed since the accepted R-9 scope: the first release scan failed on an unfixed HIGH OpenSSL CVE in the
-distroless `cc` base, so the runtime is now `base-nossl` (the app links only glibc); CI installs Mesa so
-Firefox can render, and a missing WebGL there fails the run; a public `GET /api/session` tells the page
-whether its cookie is valid (it ignores bearer tokens, so it cannot be used to test tokens); `shellcheck`
-joins the pinned tools in `tools.env`, which the owner chose to keep as a sourced file rather than YAML;
-the manifest gains a `style` field and prompts are stored without the style suffix; image file names
-count toward a batch's content hash; and a failed release is retried with a fix commit and the next
-version.
+Changed in this revision, at the owner's request: the page is restyled in VH Midnight with the layout
+above; TRELLIS.2 is the only engine, so the Engine field, the Hunyuan3D builder and its golden graphs
+leave the app (`scripts/generate_3d.py` keeps its Hunyuan3D path as reference); on every tick with a
+compatible ComfyUI the server cancels unfinished Hunyuan3D jobs the way the Cancel button
+does and deletes finished ones with their files the way Delete does (until then they stay visible and
+downloadable, and retrying one is refused); the shared conventions pin moves to `edd4c09`, which brings the
+frontend design procedure, the interface colour guideline and a before-and-after screenshot record in
+pull requests that change the page. This revision adds the new pin's quick workflow and check rules
+(workflow permissions, a bash default shell, job timeouts, actionlint, a repository check that reports
+API errors as failures, and a recorded security-analysis coverage); its larger rules (tag-triggered, repeat-safe releases, 422
+and RFC 3339 in the API, test waits and container labels, fallbacks that announce themselves, a
+PowerShell analyzer, and running only the checks a change needs) are tracked in #3, and
+the Renovate installation gap in #4. Prompts may now be up to 2000 characters; the gallery clips them to
+two lines and the preview dialog shows the full text. This is an alpha: the owner accepts that a rollback across the
+Hunyuan3D removal and schema 2 change brings back no deleted Hunyuan3D jobs, and no check covers that. The existing upgrade and
+rollback procedure (AC-15, `scripts/deploy/check-upgrade.sh`) ran between two prereleases of the
+first restyle; see the third change below for this revision.
+
+Changed again, after the owner saw the restyled page (still before merge): the page moves to shadcn/ui
+components on Tailwind, themed with the VH Midnight tokens; the queue becomes the place to follow work,
+with a summary strip and an estimate of when the queue is empty, jobs grouped by batch with Cancel all and
+Retry failed, per-job times with a progress bar against the typical duration and an estimated start for
+queued jobs, settings chips, and the source image as soon as ComfyUI writes it; library cards and the
+preview show how long a job waited and generated; and a Shared style field joins one art-direction text to
+every prompt line of a batch, prefilled with `stylized hand-painted game art, clean readable silhouette,
+consistent muted color palette` and remembered per browser. Shared style adds a column to the job table, so
+the schema moves to version 2. The live generation check (`bun run verify:live`) is removed at the owner's
+request: nothing submits jobs to the production app any more, and real generation is no longer checked
+after a deploy; the automated suite still covers generation against the fake ComfyUI.
+
+Changed a third time, after the owner compared three high-quality runs in a 3D viewer and picked one:
+Detail gains an Ultra option, the highest quality the 16 GB card produced. An Ultra job makes 30k
+triangles with 4096 textures, runs the TRELLIS.2 samplers with more steps (20, 30, 20 and 20 instead of
+12, 20, 12 and 12) and remeshes at 1024 instead of 768. It took about 10.5 minutes on `win-main`, against
+about 7 for the same size at the usual steps, so the page says so, and Ultra jobs get a 30-minute run
+timeout instead of 15. Picking Ultra sets Texture to 4096 and locks it. Ultra jobs are stored as 30000
+triangles and 4096 textures, so the database does not change. `scripts/generate_3d.py` gains the same
+Ultra setting so the golden check still holds the app's graphs to it. The full-precision bf16 model was
+also measured: it fits, but it is slower and needs more system memory, so the app keeps the int8 model.
+`deploy.sh` now reads the schema version the database on `win-main` holds, with the new image or else the
+deployed one, and refuses an image that knows an older one, or any deploy when neither image can read it,
+before it writes any file or touches the Compose project, after a deploy of an older
+prerelease over the upgraded production database took the app down for about five minutes on
+2026-11-22 (its container restarted with `database is at schema 2, but this executable only knows
+schema 1` until `.3` was deployed again). The upgrade check runs on production between two schema 2
+prereleases, `0.2.0-feat-asset-studio.3` and this revision's Ultra prerelease, restarting the app a few
+times; the real upgrade from schema 1 to 2 on production is kept as extra evidence for the migration.
 
 The repository becomes public `vhco-pro/3d-assets-gen` under Apache-2.0, after the local history was
 scrubbed of `win-main`'s tailnet address, its Windows user name and its Windows paths. Two stored review
@@ -98,14 +138,17 @@ approved), through the shared container release action with scanning, signing, S
 shared GitVersion workflow versions them in the same CI run and tags with the repository's own
 `GITHUB_TOKEN`, so no App key is needed. Each version whose scan passed gets a GitHub Release holding its
 image digest, which deploy and rollback read. A prerelease image from the feature branch is deployed for the
-live checks before the implementation review; the release image from `main` is deployed after merge.
+deployed checks before the implementation review; the release image from `main` is deployed after merge.
 
-Acceptance authorizes building on a feature branch, creating that repository and turning on those
-settings, adding the repository to the `vhco-renovate` App installation, publishing images to GHCR and making
-the package public, merging the feature PR once CI and an independent implementation
-review pass, and deploying to `win-main`, including two scheduled tasks there: one that starts Docker
-Desktop in the owner's session for deploys, and one that, at each logon, brings the app back and
-reloads its image if it is missing. It does not authorize changing tailnet ACLs, sharing the node, changing Docker
+Acceptance of this revision authorizes building it on `feat/asset-studio`, opening its PR, pushing the
+before-and-after captures to `refs/pr-visuals/<PR number>`, publishing prerelease and release images to
+the public GHCR package, merging the PR once CI and an independent implementation review pass, and
+deploying prereleases and the release to `win-main`, where the two scheduled tasks from the first
+release stay as they are. After the owner adds the repository to the `vhco-renovate` installation (#4),
+it also authorizes re-adding the repository to `vhco-pro/renovate-runner`'s `config/targets.json`
+through a PR merged with the owner's admin bypass, as the owner approved for PR #11, followed at once by
+a dry run limited to this repository and a revert if that run fails. The installation change itself
+stays the owner's step. It does not authorize changing tailnet ACLs, sharing the node, changing Docker
 Desktop's or WSL's settings, or touching ComfyUI beyond creating the two `asset-studio` subfolders in its input and output
 folders and deleting the app's own files there.
 
@@ -210,11 +253,13 @@ In scope:
 - A Bun HTTP server, run in a container on `win-main`, that records jobs, submits each as one ComfyUI
   graph, tracks it through ComfyUI's queue and history, stores results, cleans up its own ComfyUI files
   and serves the API and the built web page.
-- A TypeScript port of the three graph builders in `scripts/generate_3d.py`, and a combiner that joins
-  the image graph, a mesh graph and a thumbnail branch into one graph.
-- A React page to sign in with the access token, submit a batch of prompts (one per line) or images,
-  watch queue progress, cancel or retry jobs, browse the library, preview a GLB in 3D and download one
-  asset or a zip of a selection.
+- A TypeScript port of the image and TRELLIS.2 graph builders in `scripts/generate_3d.py`, and a
+  combiner that joins the image graph, the TRELLIS.2 mesh graph and a thumbnail branch into one graph.
+- A React page built from shadcn/ui components on Tailwind, themed in the VH Midnight style, to sign in
+  with the access token, submit a batch of prompts (one per line, with an optional Shared style) or
+  images, follow the queue by batch with times and estimates, cancel or retry jobs one by one or per
+  batch, browse the library, preview a GLB in 3D and download one asset or a zip of a selection.
+- Removal of Hunyuan3D from the app, including the deletion of existing Hunyuan3D jobs and their files.
 - Reconciliation after an app restart and resubmission of jobs ComfyUI lost.
 - A deterministic fake ComfyUI server for tests and the development fixture, an idempotent seed command
   and a Playwright suite.
@@ -238,7 +283,12 @@ Out of scope:
 - Mesh editing, retexturing, or rerunning one stage of a finished job.
 - Exposure outside the tailnet, changes to tailnet ACLs, node sharing, and checking access from the
   friend's device.
-- Removing or changing `scripts/generate_3d.py`; it stays as the reference.
+- Removing or changing `scripts/generate_3d.py` beyond adding the Ultra setting and its `--ultra` flag;
+  it stays as the reference, Hunyuan3D path included.
+- A light theme; VH Midnight is dark only.
+- Keeping deleted Hunyuan3D jobs recoverable, and any rollback check across the Hunyuan3D removal and
+  schema 2 change.
+- Any check that submits real generations to the deployed app.
 - Changing the `vhco-renovate` App itself; the feature only adds this repository to its installation.
 - Tagging through the `vhco-release-bot` App; the repository's own token tags instead.
 
@@ -267,18 +317,18 @@ External input (HTTP bodies, ComfyUI responses, database rows, the configuration
 
 ### Pipeline port and combined graphs
 
-`app/pipeline/graphs.ts` exports `imageGraph`, `hunyuanGraph` and `trellisGraph`, pure functions that
-mirror `image_graph`, `mesh_graph` and `trellis_graph` node for node, including the cleanup nodes
-`mesh_graph` adds when faces is above zero and the `min(tex, 1024)` cap on the ambient occlusion bake.
+`app/pipeline/graphs.ts` exports `imageGraph` and `trellisGraph`, pure functions that mirror
+`image_graph` and `trellis_graph` node for node, including the `min(tex, 1024)` cap on the ambient
+occlusion bake. The app has no Hunyuan3D builder; `mesh_graph` stays in the script only.
 Their `prefix` input becomes each graph's `filename_prefix`, as in the script.
 
 `combineGraph` builds the graph a job submits, with the prefix `asset-studio/<job id>/<attempt id>`:
 
-- A prompt job takes the image graph unchanged (node IDs `1` to `10`) and a mesh graph with every node
+- A prompt job takes the image graph unchanged (node IDs `1` to `10`) and the TRELLIS.2 graph with every node
   ID raised by 100. The mesh graph's `LoadImage` node is dropped, and every input that pointed to it
   points to the image graph's `VAEDecode` output (`["9", 0]`) instead. The image graph's `SaveImage`
   stays, so ComfyUI stores the source image too.
-- An image job takes the mesh graph alone with IDs raised by 100; its `LoadImage` names the file the app
+- An image job takes the TRELLIS.2 graph alone with IDs raised by 100; its `LoadImage` names the file the app
   uploaded for that job.
 - Both kinds get a thumbnail branch: node `200` (`ImageScale`, `lanczos`, 256 by 256, `center` crop)
   takes the source image (`["9", 0]` or the `LoadImage` output) and node `201` (`SaveImage`) saves it
@@ -287,28 +337,49 @@ Their `prefix` input becomes each graph's `filename_prefix`, as in the script.
 Because the prefix contains the attempt ID, every attempt's output nodes have inputs ComfyUI has not
 seen before, so its output cache cannot skip writing them.
 
-The combined prompt fits on `win-main`'s card for both engines at 10k and 20k triangles, with TRELLIS.2
-at 2048 textures (Background). TRELLIS.2 at 1024 textures and 5k triangles were not measured; both ask
-less of the card than the measured cases. AC-11 repeats the default cases through the deployed app.
+The combined prompt fits on `win-main`'s card at 10k and 20k triangles with 2048 textures (Background).
+1024 textures and 5k triangles were not measured; both ask less of the card than the measured cases.
+Ultra was measured on `win-main` on 2026-11-22 with one combined prompt per setting, timed from
+submission to the end of ComfyUI's history entry while `nvidia-smi --query-gpu=memory.used -l 1` sampled
+the card over SSH, prompt `a weathered
+wooden treasure chest with iron bands` plus the style suffix and seed 1234567, int8 TRELLIS.2: 30000
+triangles and 4096 textures took 412 s at the script's steps and remesh, and 624 s with steps 20, 30, 20
+and 20 and remesh 1024, the Ultra setting; neither ran out of memory. ComfyUI streams model weights
+from system memory, so the Ultra run's 14.9 GB VRAM peak (15272 MiB over 620 samples, prompt
+`7c38a138-9596-449e-a8a1-6d79c4598537`) is how full the card got, not a requirement; ComfyUI's
+`/system_stats` reported 4.03 to 4.69 GB (`ram_free`, in 10^9 bytes) of system memory free before and after
+it. The bf16 model with the Ultra setting took 646 s without the image
+step and staged 9854 MB in system memory, so the app keeps the int8 file. The owner compared the three
+GLBs in a 3D viewer and chose the Ultra setting.
 
 Presets map to builder inputs in `app/pipeline/presets.ts`:
 
 | Form field | Values | Builder input |
 | --- | --- | --- |
-| Engine | TRELLIS.2 (default), Hunyuan3D 2.1 | which mesh builder |
-| Detail | 5k, 10k (default), 20k triangles | `faces` 5000, 10000 or 20000 |
-| Texture | 1024, 2048 (default); TRELLIS.2 only | `tex` |
+| Detail | 5k, 10k (default), 20k triangles, Ultra | `faces` 5000, 10000, 20000, or 30000 with `ultra` |
+| Texture | 1024, 2048 (default); 4096 with Ultra only | `tex` |
 | Variants | 1 (default) to 4; prompt batches only | number of jobs per prompt |
 | Game-asset style | on (default), off | appends the suffix at `scripts/generate_3d.py:23` |
 | Seed | empty (random) or 0 to 4294967295 | variant k, counted from 0, uses seed + k modulo 2^32 |
 
-Image size is fixed at 1024 and Hunyuan3D's octree at 256. With the seed field empty, one random seed
+Ultra is the pair `faces` 30000 and `tex` 4096; the batch API accepts 30000 only with 4096 and 4096
+only with 30000, and refuses any other pairing with 400 and `Ultra uses 30k triangles with 4096
+textures.` For that pair the builder's `ultra` input is true, and the TRELLIS.2 graph uses steps 20, 30,
+20 and 20 on the samplers at nodes 14, 19, 21 and 24 and `resolution` 1024 on the `RemeshMesh` node 26,
+as `trellis_graph(..., ultra=True)` in `scripts/generate_3d.py` does (its command line gains `--ultra`,
+which sets 30000 and 4096). Every other input is the same as for the other presets, including the
+ambient occlusion bake at `min(tex, 1024)`. A job's `faces` and `tex` columns already hold the pair, so
+Ultra needs no schema change and the batch hash's encoding is unchanged. After a rollback to the
+version before Ultra, that version keeps Ultra jobs, labels them `30k`, runs any it submits at the
+standard steps and remesh 768, and times them out at 15 minutes.
+
+Image size is fixed at 1024. With the seed field empty, one random seed
 is drawn uniformly from 0 to 4294967295 for each prompt line or image, and variant k of that line uses
 that seed + k modulo 2^32.
 
 The graph test checks the builders against the Python script. A dump helper in `app/pipeline/` loads
 `scripts/generate_3d.py` by path under `python3 -I` and prints each builder's graph as JSON for a fixed
-set of inputs, including a prefix of the `asset-studio/<job id>/<attempt id>` form. The committed golden
+set of inputs, including the Ultra pair and a prefix of the `asset-studio/<job id>/<attempt id>` form. The committed golden
 files come from it, so the test also runs where Python is absent, and `bun run golden:check`
 regenerates and compares them. The combiner test asserts the rewiring rules and the thumbnail branch on
 the same golden graphs.
@@ -357,8 +428,23 @@ Jobs and batches are stored in SQLite through `bun:sqlite` in WAL mode under `/d
 its batch, preset values, seed, prompt text or upload name, the current attempt's prompt ID, the time
 that attempt was last posted, the attempt count, the loss count, the consecutive server-error count, a
 cancel-requested flag, a fixture flag, the error message, and the times it was created, first seen
-running and finished. Files go to
+running and finished. The row's engine column keeps its schema and always holds `trellis` for new
+jobs. Files go to
 `/data/assets/<job id>/` as `source.png` (or the upload's extension), `thumb.png` and `model.glb`.
+
+A prompt batch may carry a Shared style: `presets.sharedStyle`, a string of at most 300 characters after
+trimming. Null, absent and empty after trimming are one value, no Shared style, stored as null. Each job of the batch stores it in the `shared_style` column, and
+the graph's prompt text is the job's prompt, then `, ` and the Shared style when it is not empty, then the
+game-asset suffix when that is on. An image batch that sends a non-empty Shared style is refused with 400 and
+`Shared style applies to prompts only.`; one without a value is accepted. A non-empty Shared style counts
+toward the batch's content hash; none is left out of the hash encoding, so a batch created before this
+revision still matches when its request is replayed; a retry
+keeps it, and the job view returns it as `sharedStyle`.
+
+The batch API's `presets` object no longer has an `engine` field. A request that still sends one is
+accepted when it is `trellis` and refused with 400 and `Hunyuan3D is no longer available; use TRELLIS.2.`
+for any other value, so a page loaded before the upgrade fails clearly. The status matches the API's other
+validation answers; moving them all to 422, as `conventions/http-api.md` asks, is tracked in #3.
 
 Job and batch IDs are canonical lowercase UUIDs. The app generates job IDs; fixture jobs use fixed UUIDs
 and carry the fixture flag. Every `<id>` in an API path is checked against that form, and anything else
@@ -379,8 +465,10 @@ bytes, and stops with 413 and the same message as soon as they pass 200 MiB; it 
 image or body in memory. Bun's `maxRequestBodySize` is 256 MiB, above both checks. The page checks the
 total image size before uploading.
 
-The batch's content hash is SHA-256 over a canonical encoding of what the batch asks for: the kind, the
-preset values, then each prompt line in order, or each image's file name and bytes in order. It does not depend on
+The batch's content hash is SHA-256 over a canonical encoding of what the batch asks for, in v0.1.0's
+form so a v0.1.0 batch replays: the kind, then the presets in the order `engine` (always `"trellis"`),
+`faces`, `tex`, `variants`, `style`, `seed`, with `sharedStyle` added last only when it is non-empty, then
+each prompt line in order, or each image's file name and bytes in order. It does not depend on
 the multipart boundary or field order, so a genuine retry of the same batch has the same hash.
 
 When a batch row with that ID already exists, the handler answers before writing anything: 200 with the
@@ -434,11 +522,13 @@ Each tick, every two seconds, the tracker:
    an error or interrupted status it marks the job `failed` with ComfyUI's message.
 5. For a job whose attempt is in neither, treats it as lost (ComfyUI restarted and dropped its queue or
    history): it clears the attempt ID, the started and finished times and the error message, returns
-   the job to `pending` with the same seed and adds one to its loss count. A job whose ComfyUI output files can no longer be fetched is treated the same way.
+   the job to `pending` with the same seed, sets `queued_at` to now and adds one to its loss count. A job whose ComfyUI output files can no longer be fetched is treated the same way.
    On its third loss the job becomes `failed` with a message saying ComfyUI lost it repeatedly. The
    next attempt has a new prompt ID and a new output prefix, so ComfyUI writes its files again.
 6. Cancels, through the per-job cancel, any job without the fixture flag that has been running for more
-   than 15 minutes since its started time. When the cancel answers `{"cancelled": true}`, the job
+   than 15 minutes since its started time, or more than 30 minutes for an Ultra job (30000 triangles
+   with 4096 textures). The timeout message names the limit that applied: `Stopped after running longer
+   than 15 minutes.` or `... 30 minutes.` When the cancel answers `{"cancelled": true}`, the job
    becomes `failed` with a timeout message. When it answers `{"cancelled": false}`, the tracker reads the
    history again and collects a success or records the error, as a user cancel does. When the cancel call
    is unreachable or gets a server error, the job stays `submitted` and the timeout is tried again on a
@@ -498,7 +588,8 @@ transaction as a batch insert and is refused with a message when the unfinished-
 Delete runs in the request handler, since it does not call ComfyUI's API. In one update guarded by the
 job being `done`, `failed` or `cancelled`, it removes the job's row, and then deletes its
 `/data/assets/<job id>/` directory and its files in ComfyUI's folders if any remain. It answers 204, and
-a later `GET` of the job answers 404. A file it fails to delete is left for the sweep. It removes `/data/uploads/<batch id>/` when the batch's
+a later `GET` of the job answers 404. A ComfyUI file or upload it fails to delete is left for the sweep; an asset directory it fails to
+delete stays, because the sweep does not cover `/data/assets/`. It removes `/data/uploads/<batch id>/` when the batch's
 last job is deleted. The data directory is a Linux volume, so deleting a file that a download is still
 streaming lets the download finish.
 
@@ -518,12 +609,30 @@ An app restart needs no separate recovery path. Rows keep their state and attemp
 tracker tick reconciles them against ComfyUI as described above: finished jobs are collected, queued
 ones keep waiting, and lost ones are resubmitted.
 
+The server removes Hunyuan3D jobs through the existing cancel and delete paths, which needs no schema
+change; schema version 2 below is this revision's one migration, for Shared style. On every tick with a compatible ComfyUI the tracker first sets the cancel-requested flag on
+every `pending` or `submitted` Hunyuan3D job, then handles cancels (step 1), then deletes the finished
+Hunyuan3D jobs as below, then submits pending jobs (step 2). The flag makes each Hunyuan3D job cancelled exactly as a
+user's Cancel is (see Cancel, retry and delete), including the 30-second wait for a recent post and the
+retry when the per-job cancel fails. The deletion removes every Hunyuan3D job that is `done`,
+`failed` or `cancelled` the way `DELETE /api/jobs/<id>` does, with its asset directory, its upload and
+its files in ComfyUI's `asset-studio` folders, and deletes its batch when no job is left. The tracker
+never submits a Hunyuan3D job, and retrying one answers 400 with the Hunyuan3D message. Until a Hunyuan3D
+job is deleted, it stays visible in the job list in its current state; `done` ones stay downloadable,
+and an export manifest gives their engine as `hunyuan` with `texture` null. A prompt cancelled while it was running may still
+write files; the sweep removes them because their job no longer exists. Ticks repeat, so a crash or a
+failed cancel only delays the removal.
+An earlier version still reads the database; Hunyuan3D jobs deleted before a rollback are not restored.
+
 The database holds a schema version. At start, the app refuses to run, with a message naming both
 versions, when the database's version is newer than the one it knows. Only when a migration is about to
 run, it writes a consistent copy with `VACUUM INTO '/data/backup/schema-<current schema version>-<timestamp>.sqlite'`,
 then runs each migration in a transaction. The executable's `schema-version` command prints the schema
 version it knows. The executable also has a `restore-backup <file>` command that replaces the
-database with that copy and deletes the `-wal` and `-shm` files. The first release has schema version 1
+database with that copy and deletes the `-wal` and `-shm` files. Schema version 2 adds two columns to `jobs`:
+the nullable `shared_style` (existing rows get null) and `queued_at`, the time the current attempt was
+queued, set at creation and again when a retry starts or a lost job is resubmitted (existing rows get their
+`created_at`). The first release has schema version 1
 and nothing to migrate.
 
 `scripts/deploy/rollback.sh` first ensures Docker Desktop runs in the owner's session through the
@@ -544,8 +653,7 @@ The configuration file holds one access token, at least 32 random bytes encoded 
 padding (43 or more characters from the base64url alphabet); the loader refuses any other value. The deploy
 script generates it on the first install and never prints it or copies it off `win-main`. The owner
 reads it with `ssh win-main` from `config.yaml` and gives it to the friend out of band.
-`scripts/deploy/deploy.sh --rotate-token` writes a new token and restarts the app. `bun run verify:live`
-reads the token over SSH into memory for its run and never writes it to disk or logs.
+`scripts/deploy/deploy.sh --rotate-token` writes a new token and restarts the app.
 
 Every `/api` route except `GET /api/health`, `GET /api/session` and `POST /api/session` requires either an
 `Authorization: Bearer <token>` header or the session cookie. `GET /api/session` always answers 200 with
@@ -572,7 +680,11 @@ are loopback addresses and the container's default gateway, which the server rea
 
 ### HTTP API
 
-JSON over HTTP under `/api`; the page uses only this API.
+JSON over HTTP under `/api`; the page uses only this API. A job in the job list and in `GET /api/jobs/<id>`
+carries `createdAt`, `startedAt` and `finishedAt` (epoch milliseconds or null), `sharedStyle`, and
+`sourceReady`, which is true when `source-preview` would answer with an image, and `queuedAt`; the server
+decides `sourceReady` by checking for the file and counts a thumbnail ready only when its size was the
+same on two consecutive ticks, so the page never fetches a missing or half-written image.
 
 | Method and path | Purpose |
 | --- | --- |
@@ -587,16 +699,18 @@ JSON over HTTP under `/api`; the page uses only this API.
 | `DELETE /api/jobs/<id>` | Delete a done, failed or cancelled job and its files |
 | `GET /api/assets/<id>/model.glb` | Download the GLB, named after the prompt |
 | `GET /api/assets/<id>/source` | The source image |
+| `GET /api/jobs/<id>/source-preview` | For a `pending` or `submitted` job, a small source image: for a prompt job, the 256-pixel thumbnail (`<attempt id>/thumb_*.png`) its graph writes in ComfyUI's `asset-studio` output folder; for an image job, its upload; 404 when there is none yet. The page loads these images lazily |
 | `GET /api/assets/<id>/thumb` | The 256 by 256 thumbnail |
 | `POST /api/exports` | Check a selection of done jobs and return a one-time download link |
 | `GET /api/exports/<export id>` | Stream the zip for that link, once, within five minutes |
 
 Uploaded images are limited to PNG, JPEG and WebP, checked by their leading bytes, at most 20 MiB each.
-Prompts are 1 to 500 characters after trimming; empty lines are dropped.
+Prompts are 1 to 2000 characters after trimming; empty lines are dropped.
 
 ### Glossary
 
-The page uses exactly these terms for job states, preset fields, banners and the library heading:
+The page uses exactly these terms for job states, preset fields, banners and the library heading. The
+Glossary covers only these; button labels are set in Page.
 
 | Term on the page | Meaning |
 | --- | --- |
@@ -606,40 +720,160 @@ The page uses exactly these terms for job states, preset fields, banners and the
 | Done | Job state `done` |
 | Failed | Job state `failed` |
 | Cancelled | Job state `cancelled` |
-| Engine | The mesh model: TRELLIS.2 or Hunyuan3D 2.1 |
-| Detail | The triangle target: 5k, 10k or 20k |
-| Texture | The texture size: 1024 or 2048 |
+| Detail | The triangle target: 5k, 10k, 20k or Ultra (30k with the Ultra steps) |
+| Texture | The texture size: 1024 or 2048, or 4096 with Ultra |
 | Variants | Jobs per prompt line, each with its own seed |
 | Game-asset style | Whether the style suffix is appended to the prompt |
 | Seed | The seed of the first variant |
+| Shared style | Art-direction text joined to every prompt line of a batch |
 | ComfyUI offline | The banner when ComfyUI does not answer |
 | ComfyUI incompatible | The banner when ComfyUI is older than 0.46.2 or reports no version |
 | Library | The heading of the list of done assets |
 
 ### Page
 
-The page has a sign-in screen and one main view with three areas: the submit form, the queue and the
-library. On load it asks `GET /api/session` whether it is signed in, so it never makes a failing call to
-find out. Each job's state label is its own element holding only its Glossary term; the queue position
-follows in separate text. A 401 from any API call stops every query that needs a session, clears the cached job data and
-shows the sign-in screen, so a tab left open after a token rotation stops sending the old cookie. A health query polls `/api/health` every five seconds while the page is open, and a banner
-shows when ComfyUI is offline or incompatible. The job list refetches every two seconds while any job is
-unfinished and every 15 seconds otherwise, so jobs another person submits appear too. The library shows
-the 256-pixel thumbnails and an empty state when there are none.
+The page is built from shadcn/ui components: their source lives in `app/web/components/ui/` (Button,
+Badge, Card, Dialog, Input, Textarea, ToggleGroup, Switch, Checkbox, Progress, Collapsible),
+added with the shadcn CLI and owned by this repository, on Radix primitives, styled with Tailwind CSS v4
+through `@tailwindcss/vite`. Every dependency is pinned in `bun.lock`. The VH Midnight tokens are
+copied with a `vh-` prefix (`--vh-bg-0`, `--vh-card`, `--vh-ink`, `--vh-accent`, `--vh-ok` and so on) so
+they never collide with shadcn's names, and shadcn's variables take these values: `--background` the page
+gradient's darkest stop with the gradient on `body`; `--foreground` `--vh-ink`; `--card` and `--popover`
+`--vh-card`; `--card-foreground` and `--popover-foreground` `--vh-ink`; `--primary` `--vh-accent` with
+`--primary-foreground` `--vh-on-accent` (the Switch's on state, checked Checkboxes, Progress indicators and
+the selected ToggleGroup item); `--secondary` `--vh-control-bg` with `--vh-ink`; `--accent` (shadcn's
+subtle hover surface) `--vh-control-bg-hover` with `--vh-ink`; `--muted` `--vh-control-bg` with
+`--muted-foreground` `--vh-ink-dim`; `--destructive` `--vh-danger`; `--border` `--vh-card-line`; `--input`
+`--vh-control-line-strong` (white at 40 percent, at least 3:1 against the card); `--ring` `--vh-accent`. Generate uses its own Button variant, solid `--vh-ok`
+with `--vh-on-ok` text, and no other control resolves to `--vh-ok`. Progress bars use `--vh-accent`. Three edits to the copied components hold the
+recipe: the ToggleGroup item's selected state uses `bg-primary`, Button's default variant is translucent,
+and the `.dark` class is set on `<html>`. The
+Dialog's built-in corner close button is turned off, so Close appears once. Tooltip is not used. The page follows
+`guides/vh-midnight.md` at the pinned revision, with its token block copied into `app/web/styles.css` with
+every name given the `vh-` prefix: the three-stop gradient from `#020814` to `#0b1f45`, `--vh-card`
+surfaces, `--vh-ink` text, `--vh-accent` for links, focus and selection, and the semantic `--vh-ok`,
+`--vh-warn` and `--vh-danger` colours. Below, the guide's names stand for those prefixed tokens. It is dark only: `color-scheme: dark`, `<meta name="theme-color" content="#020814">`
+and native controls styled for the dark scheme. Type is the guide's system sans-serif stack, with
+monospace for seeds and job IDs. The design follows `guides/use-frontend-design-skills.md`; colour
+follows `conventions/interface-colour.md`.
 
-Selecting an asset loads the `<model-viewer>` module on demand. While it loads, the viewer area shows a
-loading state; when the import fails, it shows an error with a retry button that imports it again. The
-viewer opens with camera controls on the asset's GLB, with no auto-rotation, and with camera
-interpolation turned off under `prefers-reduced-motion`. Single-asset downloads use the asset links
-directly; a zip export first posts the selection and then sends the browser to the returned link.
+Colour carries meaning only. Job state badges use the guide's badge recipe with these exact values: a
+coloured badge has its semantic colour at 15 percent opacity for the fill, at 40 percent for a 1px
+border, and a tint for the text (`#b9d1ff` for `--accent`, `#a7f0d2` for `--ok`, `#ffc4c4` for
+`--danger`); the neutral badge has white at 9 percent for the fill, white at 18 percent for its 1px
+border and `--ink-dim` text. Generating uses `--accent`, Done `--ok`, Failed `--danger`, and Waiting,
+Queued and Cancelled the neutral badge. Error messages are failed outcomes, so they use the
+`--danger` tint `#ffc4c4` for their text, start with an error icon and say what failed: the wrong-token
+error, a refused batch, a failed job's error text, a failed job action, the viewer's error state and the
+changed-selection notice after a gone export. `--ok`, `--warn` and `--danger` (and their tints) appear on
+nothing else except the Generate button, the two banners and the Delete hover state. Every
+badge shows its Glossary term, so colour is never the only signal. The ComfyUI offline and incompatible
+banners use `--danger` and `--warn` with their terms. Generate is the one solid `--ok` button with
+`--on-ok` text; every other button is translucent (`--control-bg`, a border at least 3:1 against its
+surface, `--control-bg-hover` on hover, a 2px `--accent` focus outline), and Delete turns a translucent
+`--danger` on hover. Descriptive facts (detail, texture, seed, times, IDs) stay neutral `--ink-dim`
+text. The header carries the identity: the `Asset Studio` name and a small `VH & Co` mark, beside a
+neutral ComfyUI status line.
+
+The sign-in screen is one centred card with the name, the Access token field and the Sign in button.
+
+The main view, at 1024 CSS pixels and wider, has two columns. The left column is the composer, at most
+380 pixels wide and sticky below the header while it fits the viewport: the Prompts field, an image
+drop zone that also opens the file picker, Detail and Texture as segmented button groups (each a radio
+group with its Glossary label; Detail's items are `5k`, `10k`, `20k` and `Ultra 30k`, and Texture's are
+`1024`, `2048` and `4096`), Variants as a number field with minus and plus buttons, the Game-asset
+style switch, the Seed field, a Shared style field (a two-line text input) with a Reset button that
+restores the default, and a Generate button whose label names the job count (`Generate 1 job`,
+`Generate 6 jobs`). With prompts and images both present, images win: the composer shows `Images are
+added; the prompts above are ignored.` and the label counts only the images. Choosing `Ultra 30k` selects `4096`
+and disables the other Texture items, and the composer shows `Ultra: best quality, about 10 min per
+job.`; choosing another Detail selects `2048` again, and `4096` stays disabled unless Ultra is chosen. The Shared style field
+(`maxLength` 300) is saved to `localStorage` on every change and on Reset (an unavailable store is
+ignored) and starts with that saved value, or with `stylized hand-painted game art, clean readable
+silhouette, consistent muted color palette` the first time; it is disabled, with the note `Shared style
+applies to prompts only.`, while images are chosen. With no prompt and no image the button reads `Generate` and is disabled; the server
+still refuses an empty batch as before. The right column holds the queue and then the library. Below 1024 pixels the
+composer comes first and everything stacks in one column.
+
+The queue shows unfinished, failed and cancelled jobs and is hidden when it would be empty. A summary
+strip at its top gives the counts of Generating, Queued, Waiting and Failed jobs, each with its Glossary
+term, and `Queue clear in about <duration>` when every unfinished job has an estimate. Jobs are grouped by
+batch, newest batch first, and only batches with at least one queue row get a group. A batch group is a
+collapsible section headed by its first prompt or file name, `<n> of <m> done` with a progress bar over
+the batch's jobs, and the actions `Cancel all` (when any job is unfinished) and `Retry failed` (when any
+job is failed or cancelled). An action sends the per-job cancel or retry for each matching job one at a
+time, continues past a refusal, keeps its button disabled until it finishes, and afterwards shows one
+error in the failed-action style when any job was refused, such as `2 of 6 jobs could not be retried.`.
+A group starts collapsed when it has no unfinished job; after that, its open or closed state is kept
+across refreshes for as long as the page is open.
+
+Each job row shows a 64-pixel source image when `sourceReady` is true (from `source-preview`, loaded
+lazily) or a neutral placeholder otherwise; the prompt or file name, clipped to two lines with `More` and
+`Less` when it is clipped and the full text as `title`; the state badge; Detail, Texture and Seed as
+neutral chips (`Ultra` instead of `30k` for an Ultra job); and its actions (Cancel, Retry, Delete).
+
+Times use the typical duration: the median of `finishedAt - startedAt` over the last 20 done jobs with the
+same Detail and Texture whose `startedAt` is known, or over the last 20 such done jobs of any setting when
+fewer than three match, or none when there are none. A job whose start the app never saw (it ran while
+the app was down) has `startedAt` null; it shows no waited or generation time and is left out of the
+median. Every unfinished row shows `Added <duration> ago`, counted from `queuedAt` (the current attempt).
+A Queued job also shows its queue position and `Starts in about <duration>`; a Waiting job shows no
+position and the same estimate. The estimate is the running app job's remaining typical time (zero once
+it is past its typical time) plus the typical times of the app's jobs ahead: for a Queued job, the
+submitted app jobs with a lower queue position; for a Waiting job, every queued, not running, submitted
+app job and the earlier Waiting jobs. `Queue clear in about` is the running app job's remaining typical
+time plus the typical times of every other unfinished app job, and is hidden when any of them has none
+or no job is unfinished. Prompts from outside the app (Comfy Desktop) are not counted, so the estimate can be
+short while such a prompt runs; when no typical duration exists the row shows no estimate. A Generating
+job shows `Generating for <duration>` and a progress bar of elapsed against typical time, capped at 95
+percent, with `about <duration> left`, or `taking longer than usual` past the typical time. A failed job
+shows its error. A duration reads like `45 s`, `6 min 40 s` or `1 h 5 min`. Estimates recompute on every
+job-list refresh from the current list.
+
+The library is a gallery of cards, four or more per row on wide screens, two from 390 pixels and one
+below that. Each card shows the 256-pixel thumbnail on a `--card` surface, the prompt or file name on
+at most two lines (the full text is its `title` and accessible name), its Done badge, its generation time
+(`Generated in <duration>`), a Select checkbox, and Download and Delete buttons; the thumbnail itself is
+the Preview button, named `Preview <name>`. A toolbar above the
+gallery shows the asset count, a Select all control and Download selected with the selected count.
+With no assets, the library shows its empty state.
+
+Preview opens a modal dialog (shadcn's Dialog: `role="dialog"`, `aria-modal="true"`, focus trapped
+inside) holding the `<model-viewer>`, the full prompt or file name, the Shared style when there is one, its
+detail (`Ultra (30k triangles)` for an Ultra job), texture, seed, creation time, time waited (`startedAt - queuedAt`), generation time
+(`finishedAt - startedAt`) and total time (`finishedAt - queuedAt`) as neutral text labelled `Waited`,
+`Generated in` and `Total` (the first two left out when `startedAt` is null), a Download button and
+a Close button. The
+dialog fits the viewport at every matrix size: the viewer shrinks first, the text scrolls inside the
+dialog, and Close and Download stay visible. Escape closes it
+and returns focus to the Preview control that opened it. Opening the preview loads the `<model-viewer>`
+module on demand. While it loads, the dialog shows a loading state; when the import fails, it shows an
+error with a retry button that imports it again. The viewer opens with camera controls on the asset's
+GLB, with no auto-rotation, and with camera interpolation turned off under `prefers-reduced-motion`.
+
+On load the page asks `GET /api/session` whether it is signed in, so it never makes a failing call to
+find out. Each job's state label is its own element holding only its Glossary term; the queue position
+or elapsed time follows in separate text. A 401 from any API call stops every query that needs a
+session, clears the cached job data and shows the sign-in screen, so a tab left open after a token
+rotation stops sending the old cookie. A health query polls `/api/health` every five seconds while the
+page is open, and a banner shows when ComfyUI is offline or incompatible. The job list refetches every
+two seconds while any job is unfinished and every 15 seconds otherwise, so jobs another person submits
+appear too. Single-asset downloads use the asset links directly; a zip export first posts the selection
+and then sends the browser to the returned link.
 
 The initial page load stays within 150 KiB of JavaScript after gzip at level 9, counted over the entry
 chunk, every chunk it imports statically and every `modulepreload` link in the built `index.html`. The
 viewer chunk loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
-`bun run size` measures both from the Vite build output.
+`bun run size` measures both from the Vite build output. The page loads no web fonts or other network
+resources besides its own.
 
-Layout rules the visual tests hold: body text at least 14 CSS pixels, prompt text in the queue and
-library at most 90 characters per line, no label or button text clipped, and no horizontal overflow.
+Layout rules the visual tests hold: body text at least 14 CSS pixels; prompt text in the queue and
+library at most 90 characters per line; no label or button text clipped; no horizontal overflow; text
+contrast at least 4.5:1, or 3:1 for text of at least 24 pixels or bold text of at least 18.66 pixels;
+and control borders and the focus outline at least 3:1 against the surface they sit on. The tests
+measure contrast against the composited background: the element's nearest background with an alpha
+above zero, blended over its ancestors' backgrounds down to the page gradient, checked against both
+the darkest and the lightest gradient stop.
 
 ### Export
 
@@ -664,11 +898,12 @@ holds `a-z`, `0-9` and `-`. The zip holds, per asset, `<slug>-<short id>.glb` an
 
 ```json
 {"schema": 1, "assets": [{"id": "<job id>", "glb": "<file>", "source": "<file>", "prompt": "<text or null>",
-  "upload": "<file name or null>", "engine": "trellis|hunyuan", "faces": 10000, "texture": 2048,
-  "style": true, "seed": 0, "created": "<RFC 3339 UTC>"}]}
+  "upload": "<file name or null>", "engine": "trellis", "faces": 10000, "texture": 2048,
+  "style": true, "sharedStyle": "<text or null>", "seed": 0, "created": "<RFC 3339 UTC>"}]}
 ```
 
-`texture` is `null` for Hunyuan3D. A selection of more than 100 assets, or whose files
+`engine` is the job's engine: `trellis`, with `texture` a number, for every new job, and `hunyuan` with
+`texture` null only for a Hunyuan3D job not yet removed. A selection of more than 100 assets, or whose files
 add up to more than 2 GiB, is refused with 413 and a message to split it, and the page shows the same
 limit before sending; the zip therefore never needs ZIP64. The server writes the zip to the response as a
 stream, one file at a time, without compression of the already-compressed GLB and PNG data, so its
@@ -741,13 +976,27 @@ file would need a parser for. A Renovate custom manager in `renovate.json` (rege
    gives the same layer diff IDs on both hosts. Image IDs can differ between Docker's classic and
    containerd image stores, while the uncompressed layer diff IDs do not. Registry pulls over SSH fail on `win-main` (Background), so the
    image never comes from a pull there.
-4. Creates the two ComfyUI `asset-studio` folders when missing, copies `compose.yaml` and
+4. Before it writes any file, `current.json` or `.env` or touches the Compose project on `win-main`, it
+   compares the schema the loaded image knows (`schema-version`, which every release has) with the
+   schema the database holds. When `docker volume inspect asset-studio_data` finds no volume, the
+   database holds `none` and the deploy proceeds without running a container, so the volume is still
+   created by Compose. Otherwise it reads the database's schema with `database-schema-version`, run in a
+   throwaway container with the data volume mounted, which opens `/data/asset-studio.sqlite` read-only
+   and prints its schema version, or `none` when the file does not exist. The command comes from the image
+   being deployed, or, when that image answers `unknown command` (a release from before this revision),
+   from the image `current.json` names. When the image knows an older schema than the database holds, it
+   stops with a failure naming both versions; going back to an older schema is what `rollback.sh` is for.
+   When neither image has the command, or the command fails in any other way, it stops with a failure
+   saying the database's schema could not be read; so after a rollback to a release from before this
+   revision, only a release that has the command can be deployed. Steps 1 to 3 may already have started
+   Docker Desktop and loaded the image; neither changes the running app.
+5. Creates the two ComfyUI `asset-studio` folders when missing, copies `compose.yaml` and
    `start-asset-studio.ps1`, registers `AssetStudio-Logon` when missing, and writes `config.yaml` with a
    new token only when none exists. It writes `current.json` with the version, tag and digest being
    deployed, and `.env` from it. When the running tag differs from the
    one being deployed, records the running tag as the previous one; a rerun of the same version leaves
    that record alone. Then brings the Compose project up on the new tag.
-5. Over SSH on `win-main`, waits up to three minutes until `/api/health` on `127.0.0.1:8790` reports the
+6. Over SSH on `win-main`, waits up to three minutes until `/api/health` on `127.0.0.1:8790` reports the
    new version and commit, failing the deploy when it does not, then runs
    `tailscale serve --bg --https=443 http://127.0.0.1:8790` unless serve already forwards there.
 
@@ -799,7 +1048,7 @@ label is added. The image's version and commit are the ones `/api/health` report
 
 1. The feature PR carries the `release:preview` label, so each push that passes CI gets a prerelease
    version and image. The prerelease image of the feature branch head is deployed before the
-   implementation review, so the review can observe AC-10, AC-11 and AC-15 against it.
+   implementation review, so the review can observe AC-10, the deployed part of AC-12 and AC-15 against it.
 2. After merge, the release image from `main` is deployed and AC-10's check is repeated.
 
 A version whose tag was pushed but whose `release` job failed has no GitHub Release and is never
@@ -816,7 +1065,7 @@ digest, never the action's `latest` alias.
 The repository is public `vhco-pro/3d-assets-gen` with an Apache-2.0 `LICENSE` naming VH & Co BV. The
 `checks` job runs `bun run verify` on every branch push, which a PR shows on its head commit; it builds
 the container image locally and runs the Playwright suite against it. Every action and reusable workflow is pinned to a
-full commit SHA with a release-tag comment, and every job has least-privilege permissions. The
+full commit SHA with a release-tag comment and every job has least-privilege permissions. The
 repository also has:
 
 - CodeQL workflows that call `reusable-codeql-js.yml` with `languages: javascript-typescript,python`
@@ -834,10 +1083,26 @@ repository also has:
   `delete_branch_on_merge`, turned on with `gh` right after the repository is created, before the
   first code push.
 
+Every workflow sets `permissions: {}` at the top and grants each job only what its steps use, sets
+`defaults.run.shell: bash`, and gives every job that runs steps a `timeout-minutes`, as
+`conventions/github-actions.md` requires. `bun run verify` runs `actionlint` over `.github/workflows/`
+right after shellcheck, with the binary pinned by version and SHA-256 in `scripts/deploy/tools.env` and
+fetched by `scripts/deploy/lib/tools.sh` like the other tools. The README records the security analysis
+coverage per language: CodeQL for JavaScript, TypeScript, Python and Actions; shellcheck (a linter, not
+a security analyzer) for the Bash scripts; and no analyzer yet for the PowerShell scripts; adopting
+`vhco-pro/pwsh-ci-action` (PSScriptAnalyzer) for them is tracked in #3.
+
+`check-repo.sh` fails closed: an API call that errors is reported as a failed check with its error,
+never as a missing analysis or a skip. It no longer checks the `vhco-renovate` installation's
+repository list, because no token the owner holds can read that listing (the endpoint needs a GitHub App
+user token, and fine-grained personal access tokens cannot list installation repositories). The
+installation is proven instead by a `vhco-pro/renovate-runner` manual run in `full` mode limited to this
+repository, which creates an installation token for it, and by Renovate's activity on the repository.
+
 ### Command-line output
 
 `deploy.sh`, `rollback.sh`, `check-repo.sh`, `check-image.sh`, `bun run seed`, `bun run size`,
-`bun run verify:live` and the executable's `restore-backup` command follow
+and the executable's `restore-backup` command follow
 `conventions/terminal-output.md`: each step and result is a line with a status symbol and an outcome
 word (`✓ Passed`, `✗ Failed`, `∅ Skipped`, `› <step>`), colour only on a TTY and never when `NO_COLOR`
 is nonempty, plain append-only output when the stream is not a terminal, and an `--ascii` flag that
@@ -850,7 +1115,8 @@ repository is in the `vhco-renovate` installation.
 ### Verification commands
 
 `bun run verify` (`scripts/verify.sh`) runs, in this order: the type check; lint; shellcheck of every
-shell script with the pinned binary; unit tests (`bun test app --path-ignore-patterns='app/e2e/**'
+shell script with the pinned binary; `actionlint` over `.github/workflows/` with the pinned binary;
+unit tests (`bun test app --path-ignore-patterns='app/e2e/**'
 --path-ignore-patterns='app/image/**' --path-ignore-patterns='app/memory/**'`; the flag replaces the
 `bunfig.toml` list, so all three are given); the workflow tests (`bun test ./.github`, by explicit path
 since Bun's discovery skips dot-directories); the shell tests (`bunx bats scripts/deploy/tests`); the
@@ -870,14 +1136,14 @@ seed ran before or after the fake started.
 
 Each of these Playwright projects runs against its own container, data directory and fake: the sign-in
 and token-rotation scenarios (their failures consume the rate-limit budget), the offline and
-incompatible-version scenarios and the glossary scenario (they stop or change the fake), and the
-empty-profile scenarios. The CI `checks` job installs Mesa's software GL (`libgl1-mesa-dri`, `libegl1`)
-before the suite and sets `E2E_REQUIRE_WEBGL=1`, which turns a missing WebGL context into a failure of the
-viewer render check, so CI supplies the Firefox render evidence. Without that variable, as on
+incompatible-version scenarios, the glossary scenario, the style scenario and the queue scenarios in `queue-board.spec.ts`,
+one stack per describe block (they stop or change the fake or the limits), and the empty-profile scenarios. The CI `checks` job installs `xvfb` and Mesa's software GL (`libegl1`,
+`libgl1-mesa-dri`, `libgles2`) and runs `bun run verify` under `xvfb-run -a` with `E2E_REQUIRE_WEBGL=1`,
+because Firefox creates a WebGL context only with an X display; the variable turns a missing context into
+a failure of the viewer render check, so CI supplies the Firefox render evidence. Without that variable, as on
 `fedora-43`, the check skips with the reason instead of passing or failing. The
 remaining journeys share one seeded container; those that change data (submit, cancel, retry, delete)
-act only on jobs they created in the same test. `bun run verify:live` runs the real generations against a deployed app and is never part
-of CI.
+act only on jobs they created in the same test. No check submits real generations to the deployed app.
 
 `bun run dev` starts the fake ComfyUI on `127.0.0.1:8189` and the server on `127.0.0.1:8790` with the
 committed `dev/config.yaml`, whose token is `ZGV2LXRva2VuLW5vdC1mb3ItcHJvZHVjdGlvbi0wMDA` (base64url of
@@ -890,96 +1156,140 @@ start with that token unless the ComfyUI URL answers the fake's marker endpoint
 `GET /asset-studio-fake`, so the development token can never serve a real ComfyUI. Bun, Docker and
 `python3` (for the golden check) are the only dependencies.
 
+Before handoff, the restyled page is reviewed with the procedure in `guides/use-frontend-design-skills.md`:
+the Vercel web interface rules at the commit that guide names, applied to the rendered page at the
+viewport matrix, with the result recorded in the evidence; Impeccable's launcher is not run, and the
+review reads its guidance directly. The pull request that delivers this revision carries the
+before-and-after record `conventions/frontend-testing.md` requires: for the sign-in screen and its wrong
+token error, the main view at 390x844 and 1280x720 with the queue open, the empty library, the open
+preview dialog, the viewer's error state, the offline and incompatible banners, the clipped long-prompt
+card, the long-prompt queue row expanded through `More`, a refused batch's error message, and the states
+this revision adds: the summary strip, a batch group open and one collapsed, the partial-failure error of
+`Retry failed`, a row with its source image and a Generating progress bar, the Shared style field and its
+disabled note with images chosen, a card's generation time and the dialog's timing. The failed
+job action and the changed-selection notice after a gone export use the same error style as the refused
+batch, so they are left uncaptured. Both sides serve copies of one data directory seeded by the
+base executable, and head migrates its copy at start; the states this revision adds are captured
+after-only from head's own fixture (owner answer to R-19 F-10). The viewer's loading
+state is left uncaptured because it lasts well under a second on the fixture. Captures are committed to
+`refs/pr-visuals/<PR number>` and linked at that ref's commit.
+
 `bun run bootstrap` runs `bun install --frozen-lockfile` and installs the Playwright browsers.
 `bun run clean` deletes `.dev-data/` and the ignored `.artifacts/` test output folder and nothing else.
 
 `bun run seed` runs the executable's `seed` subcommand, which loads the development fixture into the
 configured data directory and refuses to run unless the configured ComfyUI URL answers that marker
 endpoint. Fixture jobs have fixed UUIDs and the fixture flag, and a rerun replaces those rows and
-their files and leaves every other row alone. The fixture holds done jobs with
-fixture GLBs and thumbnails, a failed job, a cancelled job, and `submitted` jobs whose prompt IDs the
+their files and leaves every other row alone. Fixture times are fixed relative to the seed time T: every
+fixture job is queued at a stated offset before T, done jobs have fixed start and finish times (their
+generation times known) except one, `木箱`, whose `started_at` is null as if it ran while the app was
+down, and the four-job batch's Generating job is the only one with a fixed `started_at`, which the
+tracker keeps. The
+fixture holds a long prompt (about 2000 characters, with one 120-character unbroken word) on two jobs, one
+`done` and one `failed`; a batch of four jobs (one done, one Generating, one Queued, one failed) for the
+batch group, whose Generating job is the one fixture prompt the fake serves as running and whose
+256-pixel source thumbnail the seed writes into the fake's output folder; and done jobs with
+fixture GLBs and thumbnails, a failed job, a cancelled job, a cancelled Ultra job (30000 triangles,
+4096 textures) alone in its own batch, so no asserted summary count, estimate, running prompt or retry
+result changes, and `submitted` jobs whose prompt IDs the
 fake serves as queued and running prompts that never finish. The tracker's timeout skips
 flagged jobs, so they stay stable. `bun run seed --profile empty` loads no jobs. `bun run seed --reset`
 deletes only flagged fixture rows and their files.
 
 ## Acceptance Criteria
 
-- [x] AC-01: For every input in the golden set, each TypeScript graph builder returns the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering, rewiring, prefix and thumbnail rules in Design.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `golden graphs match scripts/generate_3d.py`.
+- [x] AC-01: For every input in the golden set, the TypeScript image and TRELLIS.2 graph builders return the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering, rewiring, prefix and thumbnail rules in Design.
+      Evidence: R-24 met at a77bdf7: `bun test app/server app/pipeline app/web app/docs app/cli app/fake-comfy ./.github` and `bun run golden:check`, a77bdf7, 186 pass 0 fail including app/pipeline/graphs.test.ts (golden cases and combiner rules), golden check printed `golden graphs match scripts/generate_3d.py`, none
 - [x] AC-02: Submitting a batch through the page creates one pending job per prompt line and variant, or per image; a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, more than 200 MiB of images, a malformed batch ID, or would exceed 100 unfinished jobs is rejected with a message that names the problem and creates no job and leaves no file; concurrent batches never take the unfinished count above 100; and a repeated batch ID, sequential or concurrent and with any multipart boundary, returns the existing batch, or a conflict when its content differs, without creating anything and without touching the first batch's uploads.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): batches unit tests and `submit.spec.ts` in Chromium and Firefox passed.
+      Evidence: R-24 met at a77bdf7: the unit run above (app/server API tests) and `E2E_TARGET=source npx playwright test --project=chromium --project=firefox --project=signin-chromium --project=signin-firefox`, a77bdf7 (dist/web byte-identical to a fresh scratch `vite build` of the commit), 53 passed 1 skipped exit 0 including submit.spec.ts in Chromium and Firefox; CI run 45047746705 at 357b527 (code identical) checks job 54 passed, none
 - [x] AC-03: Each job is submitted to ComfyUI as one prompt with its own attempt ID and output prefix, jobs run in submission order, and each ends `done` with its GLB, source image and thumbnail stored, or `failed` with ComfyUI's error message, including when ComfyUI rejects the prompt or the upload, or answers one job with three server errors in a row while later jobs still run.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): tracker tests passed, including the new Windows-subfolder collection test; live on win-main, verify:live at .4 ran both jobs to done (AC-11 evidence).
+      Evidence: R-24 met at a77bdf7: unit run above (tracker tests against the fake) and local Playwright queue.spec.ts, a77bdf7, all pass, none
 - [x] AC-04: While ComfyUI is unreachable the page shows it offline, and while it reports a version older than 0.46.2 or none the page shows it incompatible and the app neither submits, reconciles, cancels nor times out anything, whether or not jobs are unfinished; every job keeps its state, and jobs continue once a compatible ComfyUI answers again.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): tracker version and offline tests and `offline.spec.ts` passed.
+      Evidence: R-24 met at a77bdf7: unit run above (offline and incompatible tracker tests) and local Playwright offline.spec.ts, a77bdf7, all pass, none
 - [x] AC-05: A pending job can be cancelled, and ComfyUI receives a per-job cancel only when the job has an attempt ID; a submitted job is cancelled through ComfyUI's per-job cancel for its own prompt ID, unless it already finished, in which case it ends `done`; a failed or cancelled job can be retried and runs again as a new ComfyUI prompt with the same settings and seed; and a retry over the unfinished-job limit is refused with a message.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): cancel tests in tracker and `queue.spec.ts` passed.
+      Evidence: R-24 met at a77bdf7: unit run above (cancel, race and retry tracker tests) and local Playwright queue.spec.ts cancel and retry, a77bdf7, all pass, none
 - [x] AC-06: After an app restart, a timeout or a ComfyUI restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted as a new prompt with a new output prefix up to twice and fails on the third loss; a prompt ComfyUI accepted before the app recorded it, or after the app's request timed out, is adopted rather than submitted twice; no asset directory is left half written; and the sweep removes orphaned uploads and the app's leftover files in ComfyUI's `asset-studio` folders.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): restart, timeout, lost-job and 5xx tracker tests passed.
+      Evidence: R-24 met at a77bdf7: unit run above (restart, fault-injection, timeout and sweep tests in app/server/tracker.test.ts), a77bdf7, all pass, none
 - [x] AC-07: The library lists done assets with thumbnails, shows an empty state when there are none, renders the selected GLB in a 3D viewer in Chromium and Firefox, and recovers from a failed viewer load through its retry button.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `library.spec.ts` passed in both browsers with `E2E_REQUIRE_WEBGL=1`; webgl.log reported `firefox: llvmpipe, or similar` and `chromium: WebKit WebGL`.
+      Evidence: R-24 met at a77bdf7: local Playwright library.spec.ts at a77bdf7 passed in Chromium, the Firefox render test skipped locally without WebGL (the one skip); CI run 45047746705 checks job log at 357b527 (code identical) shows `E2E_REQUIRE_WEBGL: 1` and `[firefox] library.spec.ts:28 thumbnails load and the selected GLB renders in the viewer` passed, Firefox render observed through the CI log only
 - [x] AC-08: In Chromium and Firefox, a single asset downloads as a GLB, a selection of up to 100 assets and 2 GiB downloads as one zip holding each GLB, its source image and a `manifest.json` describing them, and a larger selection is refused with a message.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `export.spec.ts` and export/assets unit tests passed in Chromium and Firefox.
-- [x] AC-09: The page's sign-in, submit, queue and library journeys meet the layout rules in Design at every size in the project viewport matrix and at 200 percent zoom, are usable by keyboard with labelled controls, and the library and viewer journey works with reduced motion.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `layout.spec.ts` across the viewport matrix passed; manual 200 percent zoom check and screenshot review recorded under T30.
+      Evidence: R-24 met at a77bdf7: local Playwright export.spec.ts in Chromium and Firefox and app/server export tests in the unit run, a77bdf7, all pass, none
+- [x] AC-09: The page's sign-in, submit, queue and library journeys meet the layout and contrast rules in Design at every size in the project viewport matrix and at 200 percent zoom, including the open preview dialog with Close and Download visible and through a resize while it is open, are usable by keyboard with labelled controls, and the library and viewer journey works with reduced motion.
+      Evidence: R-24 met at a77bdf7: local Playwright layout.spec.ts (matrix, 640x450 reflow, dialog resize, keyboard, reduced motion) passed at a77bdf7; I also drove Chromium at a 640x360 CSS viewport with device scale 2 against the dev page (its assets match the commit's build): sign-in, the main view, Ultra 30k chosen and the open preview dialog each had 0 px horizontal overflow and no button or label with scrollWidth over clientWidth, Close and Download GLB inside the viewport, no console errors, screenshots reviewed; limitation: this is device-scale emulation, not browser zoom, the same method T70 records (see F-01)
 - [x] AC-10: The deployed app answers over HTTPS at `win-main`'s tailnet name from another device in the owner's tailnet with the deployed version and commit, while port 8790 and ComfyUI's port 8188 are not reachable on `win-main`'s tailnet address.
-      Evidence: 2026-11-22 from fedora-43 after deploying .2 and .4: `curl https://win-main.tail6948f.ts.net/api/health` returned the deployed version and commit (.4: `0.1.0-feat-asset-studio.4`, `6527af52efe7...`); `curl --connect-timeout 5` to win-main's tailnet address on 8790 and 8188 timed out.
-      Evidence: 2026-11-22 repeated after merge with the release image v0.1.0 (T31): health returned `0.1.0` at e1d8e1e4e5bb; 8790 and 8188 timed out.
-- [x] AC-11: Through the deployed app, one prompt job at the default TRELLIS.2 preset and one Hunyuan3D prompt job at 10k each produce a GLB from the real ComfyUI on `win-main`, the TRELLIS.2 one is textured, and the app's files for both are gone from ComfyUI's `asset-studio` folders afterwards.
-      Evidence: 2026-11-22 `bun run verify:live` against .6 (8ca8afe): TRELLIS.2 job ede521a2 and Hunyuan3D job 0b0dd416 reached done; `10.0 MiB glTF with a base colour texture` and `0.2 MiB glTF`; `both jobs' files are gone from ComfyUI's asset-studio folders`; exit 0.
-      Evidence: 2026-11-22 `bun run verify:live` against .4: TRELLIS.2 job ce23e62b and Hunyuan3D job a606c2fb reached done; `10.4 MiB glTF with a base colour texture` and `0.2 MiB glTF`; `both jobs' files are gone from ComfyUI's asset-studio folders`; exit 0. The earlier run at .2 failed (ComfyUI on Windows reports backslash subfolders); fixed in 6527af5 with a fake mode and tracker test.
-      Evidence: R-12 returned not verified.
-- [x] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): auth and session unit tests and `signin.spec.ts` in Chromium and Firefox passed. Deployed at .2 on 2026-11-22: eleven wrong sign-ins from fedora-43 returned 401 x10 then 429; a wrong sign-in from arch-1 right after returned 401.
+      Evidence: R-24 met at a77bdf7: from fedora-43, `curl https://win-main.tail6948f.ts.net/api/health` answered version 0.2.0-feat-asset-studio.4, commit b4c366e7503a5bb16250d59aaf52c62d11e77d63, ComfyUI reachable 0.46.2; `curl --connect-timeout 5` to 100.123.74.118 on 8790 and 8188 both exit 28; /api/jobs without credentials 401; the release deploy from main after merge (T45) is still to come
+- [x] AC-11: No script, command or check in the repository submits generations to a deployed app; generation is verified only against the fake ComfyUI, and the README, `AGENTS.md` and `package.json` name no live generation check.
+      Evidence: R-24 met at a77bdf7: app/docs/docs.test.ts in the unit run passed; `git grep api/batches a77bdf7` outside app/server, app/web, app/e2e, app/memory, app/docs and docs finds nothing; `verify:live` occurs 0 times in package.json, README.md and AGENTS.md, a77bdf7, none
+- [ ] AC-12: Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
+      Residual: R-24 not verified; the deployed two-device rate-limit step ran on 2026-11-22 against 0.2.0-feat-asset-studio.4 (T44) but the read-only review did not rerun it.
 - [x] AC-13: The production page's initial JavaScript stays within 150 KiB after gzip at level 9, and the 3D viewer loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `bundle budgets met`.
+      Evidence: R-24 met at a77bdf7: `bunx vite build --outDir <scratch>` then app/cli/size.ts checkSize on it, a77bdf7, `{"ok":true,"initial":120210,"viewer":287283,"problems":[]}` (117.4 KiB and 280.5 KiB); size fixture tests in the unit run passed, none
 - [ ] AC-14: The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows calling the organisation's reusable workflows with a completed run of each on the default branch, a Renovate configuration, and the dependency graph, Dependabot alerts, secret scanning, push protection and automatic branch deletion turned on.
-      Evidence: R-12 returned not met.
-      Evidence: R-13 returned not met (planned for after the merge).
-      Evidence: 2026-11-22 after merge, `scripts/deploy/check-repo.sh` exit 1: every check passed (licence apache-2.0, CodeQL and Scorecard runs on main, js-ts and Actions analyses on main, renovate.json on main, all settings) except Renovate activity; the installation listing skipped (HTTP 403). Cause: vhco-pro/renovate-runner only processes repositories in its config/targets.json, which does not list 3d-assets-gen; adding it is an owner decision outside this repository.
-      Evidence: 2026-11-22 owner-approved renovate-runner PR #11 added the target; the manual full run on main (renovate-runner run 45006612636) failed with 404 from `GET /repos/vhco-pro/3d-assets-gen/installation`, so the vhco-renovate installation does not include this repository yet. Reverted in PR #12 so other targets' scheduled runs keep working. Remaining owner step: add 3d-assets-gen to the vhco-renovate installation, then re-add the target and rerun check-repo.sh.
-- [x] AC-15: Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; and an executable refuses to start on a database with a newer schema version.
-      Evidence: 2026-11-22 `scripts/deploy/check-upgrade.sh 0.1.0-feat-asset-studio.5 0.1.0-feat-asset-studio.6` exit 0, all 13 checks passed: config.yaml unchanged by the second deploy and the rerun, previous recorded as .5 and kept by the rerun, job rows intact, rollback reloaded the removed .5 image, current.json and .env name .5, health reported .5 at 81b4b51b7a2c, and after compose down and removing the .6 image the logon task brought .6 back in 6 s (win-main logon.log: `Asset Studio 0.1.0-feat-asset-studio.6 started` at 07:59:15Z). The log is .artifacts/check-upgrade.log. bats and store tests pass in CI run 44999441049.
-      Evidence: 2026-11-22 on win-main: deployed .3 over .2 and reran .3; config.yaml SHA-256 stayed 9AA20BA8F3DDC903... throughout and both job rows stayed listed; `docker image rm` of the .2 image, then `rollback.sh` printed `Reloading ... .2`, `rolled back to 0.1.0-feat-asset-studio.2`; current.json and .env named .2 and /api/health reported .2 at 758052360b9f, which shows previous.json still held .2 after the rerun. Then deployed .4, ran `docker compose down` and `docker image rm` (`docker image inspect` reported it absent), ran `schtasks /run /tn AssetStudio-Logon`, and /api/health reported .4 after 52 s. bats and unit tests passed in the CI run named here: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped).
-      Evidence: R-12 returned not verified.
+      Residual: R-24 not met; `check-repo.sh` passes 13 checks and fails `Renovate is active`, which waits on owner action #4 and T45.
+- [ ] AC-15: Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
+      Residual: R-24 not verified; `check-upgrade.sh 0.2.0-feat-asset-studio.3 0.2.0-feat-asset-studio.4` passed on win-main (T44, .artifacts/check-upgrade.log) but the read-only review did not observe it.
 - [x] AC-16: The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): seed unit tests passed (repeatable, keeps non-fixture rows, refuses a real ComfyUI).
+      Evidence: R-24 met at a77bdf7: seed and config tests in the unit run passed at a77bdf7; CI run 45047746705 checks job log at 357b527 (code identical) shows `Passed: ready at http://127.0.0.1:8790` and `Passed: dev readiness`, readiness observed through the CI log
 - [x] AC-17: The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
-      Evidence: `scripts/deploy/check-image.sh 0.1.0-feat-asset-studio.4`: release record sha256:550a923d..., anonymous pull works, signature, provenance and SBOM verified, starts as UID 65532 read-only with a fresh volume and reports .4. The release job's Trivy gate passed on the base-nossl image (releases .2 to .4 recorded).
-- [x] AC-18: The page labels job states, the preset fields (Engine, Detail, Texture, Variants, Game-asset style, Seed), the two banners and the library heading with exactly the terms in the Glossary.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): `glossary.spec.ts` passed.
+      Evidence: R-24 met at a77bdf7: `bash scripts/deploy/check-image.sh 0.2.0-feat-asset-studio.4`, image sha256:cecf5b5c2bc6a5cf81811c4e8f3f2b570eaf15741b80ee8c4496cb403163e32d from b4c366e (no non-document change between b4c366e and a77bdf7), exit 0: release record, anonymous pull, signature, provenance and SBOM verified, starts as UID 65532 read-only with a fresh volume and reports its version; `bun test ./.github` in the unit run passed the Release step ordering tests, none
+- [x] AC-18: The page labels job states, the preset fields (Detail, Texture, Variants, Game-asset style, Seed, Shared style), the two banners and the library heading with exactly the terms in the Glossary.
+      Evidence: R-24 met at a77bdf7: local Playwright glossary.spec.ts, a77bdf7, pass, none
 - [x] AC-19: The command-line tools print labelled status lines, add no colour or cursor control when `NO_COLOR` is nonempty or the stream is not a terminal, offer an ASCII mode, and exit non-zero whenever a step failed.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): report bats and `app/cli` output tests passed; the deploy and check scripts printed labelled lines with NO_COLOR during today's runs.
+      Evidence: R-24 met at a77bdf7: app/cli tests in the unit run and `bunx bats scripts/deploy/tests` (38 ok), a77bdf7, all pass, none
 - [x] AC-20: A 25-image batch at the 200 MiB cap, two such batches at once, and an export of 100 assets each complete without the container being killed for memory under its 1 GiB limit, and the server's anonymous memory stays below 512 MiB.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): memory check passed (1 GiB limit, anon under 512 MiB).
+      Evidence: R-24 met at a77bdf7: CI run 45047746705 at 357b527 (code identical to a77bdf7), `bun run verify` log `Passed: image build`, `Passed: memory check`; observed through the CI log, not run locally
 - [x] AC-21: The README names `bun run bootstrap`, `bun run dev`, `bun run seed`, `bun run verify`, `scripts/deploy/deploy.sh`, `scripts/deploy/rollback.sh` and `bun run clean`, how readiness is detected, the dependencies, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
-      Evidence: CI run 44996495739 at 6527af5 (`bun run verify`: 108 unit, 6 workflow, bats, golden, build, budgets, image start 4, memory 1, docs 6, Playwright 34 passed, 0 skipped): docs check passed.
+      Evidence: R-24 met at a77bdf7: app/docs/docs.test.ts in the unit run passed, and AGENTS.md at a77bdf7 lists the commands and the terminal-output route, none
+- [x] AC-22: The page uses the VH Midnight tokens and recipes Design names: the gradient body background, `color-scheme: dark`, solid `--ok` only on Generate, the two-column composer layout from 1024 pixels and one column below it, the exact badge colours, semantic colours on nothing but job states, banners, error messages, Generate and the Delete hover, long prompts clipped to two lines with their full text reachable (in the dialog for a library asset, through `More` in the queue), and a preview in a modal dialog (role dialog, aria-modal) that shows the full prompt and that Escape closes with focus returned to its opener in Chromium and Firefox; the rendered page passed the design review Design names; and the pull request carries the before-and-after record Design lists.
+      Evidence: R-24 met at a77bdf7: local Playwright style.spec.ts passed in Chromium and Firefox at a77bdf7, and the T67 design review is recorded; PR #5 comment 7082743665 links `refs/pr-visuals/5` at 7fef04c (`git ls-remote` confirms the ref), whose `pr-5-long/` holds the long-prompt card at 1280 and 390 and the long-prompt queue row before and after plus the row expanded through More after; I downloaded and viewed them: before shows the whole prompt, after clips to two lines with an ellipsis and More, expanded shows the full text with Less; together with `pr-5-rework/` (comment 7080862670) and `pr-5-ultra/` (7082597436) every state in Design's list is present; base 25328bc is the merge base with main and head 357b527 differs from a77bdf7 only in the document; limitation: base has no long-prompt fixture, so the long rows were inserted into the base-seeded directory at schema 1, as T70 states
+- [x] AC-23: The app offers no engine choice and submits only TRELLIS.2 graphs; a batch that sends an engine other than `trellis` is refused with the Hunyuan3D message; the tracker cancels every unfinished Hunyuan3D job through the cancel path and deletes every finished one through the delete path, with its batch when no job is left and its files, never submits or retries a Hunyuan3D job, and leaves TRELLIS.2 rows and their files untouched; and the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+      Evidence: R-24 met at a77bdf7: unit run above (API and tracker Hunyuan3D removal tests, docs README test) and local Playwright glossary.spec.ts (no Engine field), a77bdf7, all pass, none
+- [x] AC-24: Every workflow sets `permissions: {}` at the top, a bash default shell and a timeout on every job that runs steps, and passes the pinned `actionlint` in `bun run verify`; `check-repo.sh` reports a failed API call as a failed check with its error; and the README records the security analysis coverage per language.
+      Evidence: R-24 met at a77bdf7: `bun test ./.github` and app/docs tests in the unit run, and `bunx bats scripts/deploy/tests` (38 ok, including the check-repo error cases 5 and 6 and the verify actionlint cases), a77bdf7, all pass; CI log at 357b527 shows `Passed: actionlint`, none
+- [x] AC-25: The page's controls are shadcn/ui components from `app/web/components/ui/` on Tailwind CSS v4, with shadcn's theme variables mapped to the VH Midnight tokens, and the bundle budgets of AC-13 still hold.
+      Evidence: R-24 met at a77bdf7: app/web/ui.test.ts in the unit run, local Playwright style.spec.ts data-slot assertions, and the scratch-build size check (117.4 KiB and 280.5 KiB), a77bdf7, all pass, none
+- [x] AC-26: The queue shows the summary strip with counts and the queue-clear estimate, groups jobs by batch with progress and working Cancel all and Retry failed, and shows per job the source image once it exists, the settings chips, queued and generating times, a progress bar and the start and remaining estimates computed from the typical duration as Design defines it.
+      Evidence: R-24 met at a77bdf7: app/web queue estimate tests and app/server source-preview tests in the unit run, and local Playwright queue-board.spec.ts, a77bdf7, all pass, none
+- [x] AC-27: Library cards show the generation time, and the preview shows the time waited, the generation time and the total time.
+      Evidence: R-24 met at a77bdf7: local Playwright library.spec.ts timing cases, a77bdf7, pass, none
+- [x] AC-28: A prompt batch's Shared style is stored on each job, joined into the graph's prompt text before the game-asset suffix, counted in the batch hash, kept by a retry, returned by the API and written to the manifest; an image batch with a Shared style is refused; the composer prefills the default or the last value used in that browser and resets to the default; and schema version 2 adds the `shared_style` column with null for existing rows.
+      Evidence: R-24 met at a77bdf7: app/server API, store migration and v0.1.0 replay-hash tests in the unit run and local Playwright submit.spec.ts Shared style cases, a77bdf7, all pass, none
+- [x] AC-29: Detail offers Ultra, which locks Texture to 4096 and shows its time note; an Ultra job's graph uses steps 20, 30, 20 and 20 and remesh 1024 exactly as the reference script's Ultra setting does, every other preset's graph is unchanged, the batch API refuses 30000 triangles without 4096 textures and 4096 textures without 30000 triangles, an Ultra job is timed out only after 30 minutes of running, and its chip reads `Ultra`.
+      Evidence: R-24 met at a77bdf7: `bun run golden:check` passed and the unit run (graphs Ultra golden case, API pairing refusals, tracker Ultra timeout cases) passed; local Playwright submit.spec.ts and queue-board.spec.ts Ultra cases passed; on the dev page choosing Ultra 30k left 1024 and 2048 disabled, selected 4096 and showed `Ultra: best quality, about 10 min per job.`, a77bdf7, none
 
 ## Test Plan
 
 | Criterion | Proof |
 | --- | --- |
-| AC-01 | `bun test app/pipeline` compares each builder with the committed golden graphs and asserts the combiner's renumbering, the dropped `LoadImage`, every rewired input, the `asset-studio/<job id>/<attempt id>` prefix on every save node, and the thumbnail branch's nodes and inputs; `bun run golden:check` regenerates the golden files from the Python script with `python3 -I` and fails on any difference. |
-| AC-02 | `bun test app/server` (which no longer contains the memory tests) API tests for each rejection case (asserting the message names the limit, no rows, and empty staging and uploads trees), a non-UUID `X-Batch-Id` such as `../x` (400, nothing written), the job counts, a 25-image batch with exactly 200 MiB of image bytes accepted, a batch with 200 MiB plus one byte of images refused with the app's 413 message, two concurrent batches that together exceed 100 (exactly one accepted), a repeated image batch ID sent again with a different multipart boundary (200, same batch, the first batch's upload files byte-identical), two concurrent requests with the same image batch ID (one creates the batch, the other answers 200, uploads intact), a reused ID with different content or the same bytes under a different file name (409, uploads intact), and a JSON prompt batch over 1 MiB (413 with the app's message). Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) in Chromium, an image batch in Chromium and Firefox, then each invalid case, against the fake ComfyUI. |
+| AC-01 | `bun test app/pipeline` compares the image and TRELLIS.2 builders with the committed golden graphs (which hold no Hunyuan3D case) and asserts the combiner's renumbering, the dropped `LoadImage`, every rewired input, the `asset-studio/<job id>/<attempt id>` prefix on every save node, and the thumbnail branch's nodes and inputs; `bun run golden:check` regenerates the golden files from the Python script with `python3 -I` and fails on any difference. |
+| AC-02 | `bun test app/server` (which no longer contains the memory tests) API tests for each rejection case (asserting the message names the limit, no rows, and empty staging and uploads trees), a non-UUID `X-Batch-Id` such as `../x` (400, nothing written), the job counts, a 25-image batch with exactly 200 MiB of image bytes accepted, a batch with 200 MiB plus one byte of images refused with the app's 413 message, two concurrent batches that together exceed 100 (exactly one accepted), a repeated image batch ID sent again with a different multipart boundary (200, same batch, the first batch's upload files byte-identical), two concurrent requests with the same image batch ID (one creates the batch, the other answers 200, uploads intact), a reused ID with different content or the same bytes under a different file name (409, uploads intact), and a JSON prompt batch over 1 MiB (413 with the app's message). Playwright `submit.spec.ts` submits three prompt lines with two variants (six jobs) in Chromium, an image batch in Chromium and Firefox, then each invalid case that can be submitted (the empty form is a disabled Generate reading `Generate`; its 400 is the API test's), and prompts plus images (the images-win note and a label counting only the images), against the fake ComfyUI. |
 | AC-03 | `bun test app/server` (which no longer contains the memory tests) tracker tests against the fake ComfyUI: each job reaches the fake as one `/prompt` call with a UUID `prompt_id` and a graph matching the combiner with that attempt's prefix; two batches finish in submission order with three files on disk; a fake execution error ends `failed` with its message; a fake 400 from `/prompt` and from `/upload/image` each end that job `failed` with the fake's error text while the next job is still submitted; a fake that answers one job's `/prompt` with 500 every time fails that job after the third answer while the next job is submitted and finishes. Playwright `queue.spec.ts` watches a job reach `done`, reloads and checks it persists. |
 | AC-04 | Tracker tests: stopping the fake ComfyUI with jobs pending and submitted leaves every state unchanged and `/api/health` reports offline, and restarting it lets the jobs finish; a fake that switches to `comfyui_version` 0.46.1 while staying up, and one that restarts within a single tick reporting 0.46.1 with its queue emptied, each make `/api/health` report incompatible with that version, leave every job state unchanged and receive no `/prompt` or cancel call, until the fake reports 0.46.2 again and the jobs finish. Playwright `offline.spec.ts` checks the banner appears and clears for offline with unfinished jobs, for offline on the empty profile, and for an incompatible version. |
 | AC-05 | Tracker tests with a fake that keeps finished, failed and cancelled prompts in its history: cancel pending without an attempt ID (the fake receives no call); cancel pending with an attempt ID the fake has queued (the fake receives `POST /api/jobs/<that id>/cancel`); cancel queued and cancel running (the fake receives the per-job cancel for that prompt ID and never `/interrupt`); cancel requested after the fake already finished the prompt (job ends `done`, no cancel call); the fake finishes the prompt between the history read and the cancel and answers `{"cancelled": false}` (job ends `done`); retry after a failure and retry after a cancel (the fake receives a new `/prompt` with a different `prompt_id` and prefix, the same seed and preset values, the cancel-requested flag, server-error count, started time and error message are cleared, and the job ends `done` without being cancelled again); retry after a timeout on a faked clock (the new attempt is not cancelled before it has run 15 minutes); retry at 100 unfinished jobs (refused with a message); cancel of a pending job whose post timed out 5 seconds earlier, with a fake that accepts the post 10 seconds after the cancel request (the job keeps its flag, the late prompt appears, receives the per-job cancel, and the job ends `cancelled`); a per-job cancel that is unreachable or answers 500 leaves the job in its state with the flag set, the job is not submitted meanwhile, and the next tick's successful cancel ends it `cancelled`. Playwright `queue.spec.ts` cancels and retries through the page. |
 | AC-06 | Restart tests kill and restart the server against the fake in these states: prompt finished in history (job ends `done`); prompt still queued (job stays submitted and later finishes); prompt unknown after a fake restart that empties queue and history (job resubmitted with a new `prompt_id` and prefix, and on the third loss `failed`); attempt ID stored with the prompt already posted but the job still `pending` (the job becomes `submitted`; the fake receives one `/prompt` call in total); the fake accepts a prompt 15 seconds after the client's 10-second timeout, later than the next tick (the job becomes `submitted` and the fake receives one `/prompt` call in total); the fake reports the previous attempt's files missing (the resubmitted prompt carries a different prefix). Fault-injection tests kill the server after the first file is written into the collection directory, and again after the rename and before the `done` update; each time the next tick ends with a `done` row and three complete files. A timeout test on a faked clock has the fake finish the prompt just before the per-job cancel, which answers `{"cancelled": false}`, and asserts the job ends `done`. Sweep tests: kill the server after the `done` update and before ComfyUI cleanup, and after a batch's uploads rename and before its commit, restart immediately, and assert the fake's `asset-studio` folders and `/data/uploads/` hold nothing for those jobs after the start sweep. |
-| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox (the Firefox render evidence comes from CI, where Mesa is installed and `E2E_REQUIRE_WEBGL=1` makes a missing WebGL context fail the test): on the seeded fixture, thumbnails load from `/api/assets/<id>/thumb`, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; with the viewer chunk blocked, the error state and retry button appear, and after unblocking, retry loads the viewer; on the empty profile, the library shows its empty state. |
+| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox (the Firefox render evidence comes from CI, where the suite runs under `xvfb-run -a` with Mesa installed and `E2E_REQUIRE_WEBGL=1` makes a missing WebGL context fail the test): on the seeded fixture, thumbnails load from `/api/assets/<id>/thumb`, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; with the viewer chunk blocked, the error state and retry button appear, and after unblocking, retry loads the viewer; on the empty profile, the library shows its empty state. |
 | AC-08 | Playwright `export.spec.ts` in Chromium and Firefox downloads one GLB and checks its glTF binary header, then selects three assets, starts the export, receives the browser download from the one-time link, and checks its six file names follow the slug and short ID rule and that `manifest.json` matches the documented schema with the six files and their settings; a fixture prompt with only non-Latin characters and the style suffix on downloads as `asset-<short id>.glb`, and manifest prompts carry no style suffix; a second request to the same link answers 404. `bun test app/server` (which no longer contains the memory tests) export tests: 101 assets refused with 413 and the split message, a selection whose fixture files add up to just over 2 GiB (sparse files) refused the same way, a link fetched without credentials refused with 401, a link whose selection lost a job after it was issued redirected to `/?export=gone` before any byte of zip is sent, and a link older than five minutes refused (clock faked). |
-| AC-09 | Playwright `layout.spec.ts` runs the sign-in, submit, queue and library journeys in Chromium at 320x568, 390x844, 390x667, 844x390, 768x1024, 1024x768, 1280x720 and 1440x900, and at 640x450 as the reflow equivalent of 1280x900 at 200 percent zoom: no horizontal overflow, body text at least 14 px, prompt lines at most 90 characters, no label or button whose `scrollWidth` exceeds its `clientWidth`, primary actions inside the viewport, every control with an accessible name, and sign-in and submit completed by keyboard alone. The library and viewer journey also runs with `reducedMotion: 'reduce'` and asserts the viewer has no auto-rotate and interpolation off. A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots. All screenshots are reviewed and the review result is recorded in the evidence. |
+| AC-09 | Playwright `layout.spec.ts` runs the sign-in, submit, queue and library journeys in Chromium at 320x568, 390x844, 390x667, 844x390, 768x1024, 1024x768, 1280x720 and 1440x900, and at 640x450 as the reflow equivalent of 1280x900 at 200 percent zoom: no horizontal overflow, body text at least 14 px, prompt lines at most 90 characters, no label or button whose `scrollWidth` exceeds its `clientWidth`, primary actions inside the viewport, text and control-border contrast as Design measures it, the open preview dialog with Close and Download inside the viewport, a resize from 1280x720 to 390x844 and to 844x390 while it is open with both still inside, every control with an accessible name, and sign-in and submit completed by keyboard alone. The library and viewer journey also runs with `reducedMotion: 'reduce'` and asserts the viewer has no auto-rotate and interpolation off. A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots. All screenshots are reviewed and the review result is recorded in the evidence. |
 | AC-10 | Manual procedure after each deploy, run from `fedora-43`: `curl https://win-main.<tailnet>.ts.net/api/health` returns the deployed version and commit; `curl --connect-timeout 5` to `win-main`'s tailnet address on ports 8790 and 8188 fails to connect. |
-| AC-11 | `bun run verify:live` against the deployed URL, with the token read over SSH into memory, submits `a small wooden crate` at the default TRELLIS.2 preset (10k, 2048) and `a stone pillar` with Hunyuan3D at 10k, waits for both to reach `done`, downloads both GLBs, checks both parse as glTF and the TRELLIS.2 one has at least one material with a base colour texture, then lists ComfyUI's `output/asset-studio/` and `input/asset-studio/` over SSH every ten seconds and passes once no entry for either job remains, failing if any remains after two minutes. |
+| AC-11 | `bun test ./app/docs` asserts that `app/cli/verify-live.ts` does not exist, that `package.json` has no `verify:live` script, and that neither `README.md` nor `AGENTS.md` mentions `verify:live`; it also asserts that no tracked `.ts`, `.tsx`, `.js`, `.mjs`, `.sh`, `.ps1` or `.py` file outside `app/server`, `app/web`, `app/e2e`, `app/memory` and `app/docs` has a line with a `fetch(` or `curl` call containing `/api/batches` (its own test fails on a fetch to `${base}/api/batches` and on `curl -X POST .../api/batches`, and passes on the API table row and a plain sentence naming the route), and that no `package.json` script names a `https://` URL. |
 | AC-12 | `bun test app/server` (which no longer contains the memory tests) auth tests: every protected route returns 401 without credentials, with a wrong bearer token and with a forged cookie, and succeeds with the bearer token and with the cookie from `POST /api/session` (whose `Max-Age` is 2592000), and refuses that cookie once the faked clock passes 30 days and a cookie with a future issue time; from the trusted gateway peer, the eleventh failed authentication within 60 seconds with one `X-Forwarded-For` value returns 429, counting wrong sign-ins, wrong bearer tokens and forged cookies together, a different `X-Forwarded-For` value still gets 401, and after 60 seconds without failures the first value gets 401 again (clock faked); from an untrusted peer the header is ignored; `GET /api/session` answers 200 `{"signedIn": false}` without a cookie, with a forged cookie and with a valid bearer token, 200 `{"signedIn": true}` with a valid cookie, and twelve calls with a wrong bearer token leave the next wrong sign-in at 401; a correct token from a client over the limit still succeeds. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, shows an error for a wrong token, and after the token is rotated shows the sign-in screen and sends no further job-list requests, then signs in with the new token. After deploy, from `fedora-43` and from a second tailnet device: the eleventh wrong sign-in from `fedora-43` within a minute gets 429 while the second device's next wrong sign-in still gets 401. |
 | AC-13 | `bun run size` after `vite build` gzips at level 9 and sums the entry chunk, its static imports and every `modulepreload` link in the built `index.html` (at most 150 KiB), and the viewer chunk (at most 350 KiB), and fails when the viewer module is reachable from the entry's static imports. Its own tests run it on two fixture builds and assert failure on one that imports the viewer statically and on one whose entry is above 150 KiB. |
-| AC-14 | `scripts/deploy/check-repo.sh` after the first merge: `gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, `delete_branch_on_merge` true, and `security_and_analysis.secret_scanning` and `secret_scanning_push_protection` enabled; `gh api repos/vhco-pro/3d-assets-gen/dependency-graph/sbom` returns 200; `gh api repos/vhco-pro/3d-assets-gen/vulnerability-alerts` returns 204; the CodeQL and Scorecard workflow files call the named reusable workflows at a full commit SHA, with `languages` naming `javascript-typescript` and `python`; `gh run list` shows a completed successful run of each on `main`, and code scanning lists a `/language:js-ts` analysis on `main` (which carries the Python results) and an Actions analysis; `renovate.json` exists on `main`; the repository is listed in the `vhco-renovate` installation's repositories, and a Renovate Dependency Dashboard issue or Renovate PR exists. |
-| AC-15 | Manual procedure on `win-main`: deploy two prerelease versions in turn and compare the SHA-256 of `config.yaml` (unchanged), confirm the recorded previous version is the first one and the job rows are intact, rerun `deploy.sh` with the second version and confirm the recorded previous version is still the first one, remove the first image with `docker image rm`, run `rollback.sh` and confirm it stops the app, reloads the first image, `current.json` and `.env` name the first version, and `/api/health` reports the first version and commit. Then run `docker compose down`, remove the current image with `docker image rm`, confirm `docker image inspect` reports it absent, start the `AssetStudio-Logon` task and confirm `/api/health` answers with the current version within five minutes. `bats` tests of `rollback.sh` with stubbed `docker`, `ssh` and `gh`: it ensures Docker Desktop first, reloads and verifies a missing previous image, runs the remote rollback, and fails without a previous version, without a release record or without a matching backup. Unit tests: write rows without a checkpoint, take the backup, run `restore-backup` on a copy and find every row; start the server on a database whose schema version is one higher and assert it exits with the version message; with a test migration from schema 1 to 2, assert a `schema-1-*` backup is written only on the migrating start and not on the next start, and that the rollback logic picks the newest `schema-1-*` backup. |
+| AC-14 | `scripts/deploy/check-repo.sh` after the first merge: `gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, `delete_branch_on_merge` true, and `security_and_analysis.secret_scanning` and `secret_scanning_push_protection` enabled; `gh api repos/vhco-pro/3d-assets-gen/dependency-graph/sbom` returns 200; `gh api repos/vhco-pro/3d-assets-gen/vulnerability-alerts` returns 204; the CodeQL and Scorecard workflow files call the named reusable workflows at a full commit SHA, with `languages` naming `javascript-typescript` and `python`; `gh run list` shows a completed successful run of each on `main`, and code scanning lists a `/language:js-ts` analysis on `main` (which carries the Python results) and an Actions analysis; `renovate.json` exists on `main`; and a Renovate Dependency Dashboard issue or Renovate PR exists. The installation is proven by a successful `vhco-pro/renovate-runner` manual run (`mode: full`, `repositories: vhco-pro/3d-assets-gen`) on its `main`, recorded with its run ID. |
+| AC-15 | Manual procedure on `win-main`: deploy two prerelease versions in turn and compare the SHA-256 of `config.yaml` (unchanged), confirm the recorded previous version is the first one and the job rows are intact, rerun `deploy.sh` with the second version and confirm the recorded previous version is still the first one, remove the first image with `docker image rm`, run `rollback.sh` and confirm it stops the app, reloads the first image, `current.json` and `.env` name the first version, and `/api/health` reports the first version and commit. Then run `docker compose down`, remove the current image with `docker image rm`, confirm `docker image inspect` reports it absent, start the `AssetStudio-Logon` task and confirm `/api/health` answers with the current version within five minutes. `bats` tests of `rollback.sh` with stubbed `docker`, `ssh` and `gh`: it ensures Docker Desktop first, reloads and verifies a missing previous image, runs the remote rollback, and fails without a previous version, without a release record or without a matching backup. Unit tests: write rows without a checkpoint, take the backup, run `restore-backup` on a copy and find every row; start the server on a database whose schema version is one higher and assert it exits with the version message; with a test migration one past the current schema, assert a backup of the current schema version is written only on the migrating start and not on the next start, and that the rollback logic picks the newest such backup. `bats scripts/deploy/tests` with stubbed `docker` and `ssh`: `deploy.sh` stops with the schema message and runs no `docker compose`, file copy, `current.json` or `.env` write on `win-main` when the image's `schema-version` is lower than `database-schema-version`; reads the database with the deployed image when the new one answers `unknown command` and then proceeds at an equal schema; stops when neither image has the command or the command fails otherwise; proceeds at an equal or higher schema and when the database reports `none`; and runs no container at all, proceeding, when `docker volume inspect` finds no volume. `bun test app/server`: `database-schema-version` prints the stored version of a database in WAL mode without writing to it, and `none` for a missing file. For this revision the manual procedure runs as `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.3 <Ultra prerelease>`, both at schema 2; the production upgrade of 2026-11-22 from `.1` (schema 1) to `.3` (schema 2), with backup `schema-1-1795358770987.sqlite` and 26 jobs before and after (17 done and 9 submitted before; 21 done and 5 submitted at the next listing), is kept as extra evidence for the migration and backup. |
 | AC-16 | `bun test app/server` (which no longer contains the memory tests) seed tests: running the seed twice gives the same row count and IDs; a non-fixture job inserted beforehand survives the seed and `--reset`; the seed refuses a ComfyUI URL that does not answer `/asset-studio-fake`; with the app and fake running on a faked clock advanced 20 minutes after seeding, every fixture job keeps its state, both when the seed ran before the fake started and when it ran after; the loader refuses a token shorter than 43 base64url characters; the server refuses to start with `ZGV2LXRva2VuLW5vdC1mb3ItcHJvZHVjdGlvbi0wMDA` against a ComfyUI without the marker. The `bun run dev` readiness step of `bun run verify` starts it and sees its ready line within 30 seconds. |
 | AC-17 | `bun run verify` builds the image (on `base-nossl-debian13`) and runs it with `--read-only`, the declared mounts and a new named volume at `/data`: the process runs as UID 65532, a write to `/` fails, the database is created in `/data`, and the page and `/api/health` answer. After publication, `scripts/deploy/check-image.sh <version>` checks that an anonymous `docker pull` of the digest works (the package is public), reads `release.json` from the GitHub Release, runs the same `cosign verify` and two `gh attestation verify` checks as `deploy.sh` with the pinned tools, then runs that digest the same way with a new named volume and asserts UID 65532, a failed write to `/`, and the page and `/api/health` answering with that version and commit. `bun test ./.github` parses `ci.yml` and asserts the Release step comes after the release action in the same job with no `if: always()`, `if: failure()` or `continue-on-error`, and that no other step or job creates a Release or uploads `release.json`. |
 | AC-18 | Playwright `glossary.spec.ts` on the seeded fixture reads the job-state label elements, the labels of the six preset fields, the banner term element for both banners and the library heading, and asserts each equals its Glossary term. |
 | AC-19 | `bun test app/cli` and `bats` tests in `scripts/deploy/tests/` (both run by `bun run verify`) capture each tool's output for passed, failed, skipped and partial runs: with `NO_COLOR` absent, empty, `0` and `1`, on a pseudoterminal and redirected to a file, in Unicode and `--ascii` mode; they assert the status words, no ANSI or cursor-control bytes in plain captures, and a non-zero exit whenever a step failed. |
 | AC-20 | The memory tests in `app/memory/`, run by `bun run verify` after the image build, run the built image with `docker run --memory 1g`, find the container's cgroup on the host from `docker inspect` (`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.stat` on a systemd host) and sample its `anon` value every 100 ms while it accepts a 25-image 200 MiB batch, two such batches concurrently, and streams an export of 100 fixture assets; they assert `docker inspect` reports `OOMKilled` false and every `anon` sample stays below 512 MiB. |
 | AC-21 | `bun test ./app/docs` reads `README.md` and `AGENTS.md` and asserts both name the seven commands exactly as listed in AC-21, that each `bun run` name exists in `package.json` scripts and each script path exists on disk, that the README lists the dependencies, the readiness signal and the checklist items, that `AGENTS.md` links `conventions/terminal-output.md`, and that the sentence saying no commands exist is gone. |
+| AC-22 | Playwright `style.spec.ts` on the seeded fixture: the body's computed `background-image` is a linear gradient through `rgb(2, 8, 20)`, `rgb(6, 18, 41)` and `rgb(11, 31, 69)`; the root's `color-scheme` is `dark` and the theme-color meta is `#020814`; Generate's background is `rgb(52, 211, 156)` and no other element's text, border or background resolves to `--ok`, `--warn`, `--danger` or their tints except the badges, the banners, the error messages and Delete on hover, and the wrong-token error and a failed job's error use `#ffc4c4` text with the error icon; each badge's fill, border and text colour equal Design's exact values, with Waiting observed on a job the fake holds unaccepted through its `hold-accept` control and Done on a library card; with the fake stopped and then reporting 0.46.1, the offline banner uses `--danger` and the incompatible banner `--warn`; at 1280x720 and 1024x768 the composer and the queue sit side by side and at 1023x768 and 390x844 the composer is above the queue; on the long fixture prompt (about 2000 characters, with one 120-character unbroken word), the `done` job's card clips to two lines with the full text as `title` and its dialog shows it in full without overflow, and the `failed` job's queue row expands it through `More` and collapses it through `Less`; in Chromium and Firefox Preview opens an element with `role="dialog"` and `aria-modal="true"` that shows the full prompt, Escape closes it and focus returns to that Preview button. The design review of the page as it stands after T67 is recorded in that task's evidence, following T56's method, and the before-and-after record is checked by reading the PR body links at `refs/pr-visuals/<number>`. |
+| AC-23 | `bun test app/server`: a batch with `engine` `hunyuan` answers 400 with the Hunyuan3D message and creates nothing, one with `engine` `trellis` or without the field is accepted, and a 2000-character prompt is accepted while 2001 is refused; retrying a failed Hunyuan3D job answers 400 with the message. Tracker tests with Hunyuan3D jobs `pending` without an attempt ID, `pending` with an attempt ID posted 10 seconds earlier, `submitted`, `done`, `failed` and `cancelled`, TRELLIS.2 jobs in the same states, their asset directories, an upload batch and their ComfyUI files: after the first tick the `done`, `failed` and `cancelled` Hunyuan3D jobs, the `submitted` one (which received the per-job cancel) and the `pending` one without an attempt ID are all gone with their files and their batch when emptied, and no Hunyuan3D graph was posted; the recent `pending` one keeps its row until its post shows up or 30 seconds pass on the faked clock, then is cancelled and deleted on the following tick; a fake that answers the cancel with 500 keeps that row until a later tick succeeds; after the ticks that remove every Hunyuan3D job, every TRELLIS.2 row that was `done`, `failed` or `cancelled` and every file under `/data/assets/` and `/data/uploads/` that belongs to a TRELLIS.2 job is byte-identical, and every graph posted uses the TRELLIS.2 node types. Playwright `glossary.spec.ts` asserts the form has no Engine field. `bun test ./app/docs` asserts the README names TRELLIS.2 as the mesh model and does not mention Hunyuan3D or an engine choice. |
+| AC-24 | `bun test ./.github` parses every workflow and asserts top-level `permissions: {}`, `defaults.run.shell: bash` and `timeout-minutes` on each job with `steps`; `bats scripts/deploy/tests/verify.bats` runs the verify script's actionlint step with the pinned binary on a fixture directory holding a workflow with an error and asserts it fails, and on `.github/workflows/` and asserts it passes; `bats scripts/deploy/tests/check-repo.bats` asserts that a code-scanning call and a repository-settings call that exit non-zero are each reported as a failed check carrying the error (exit 1), and that the script makes no installation-listing call; `bun test ./app/docs` asserts the README's coverage list names JavaScript, TypeScript, Python, Actions, Bash and PowerShell. |
+| AC-25 | `bun test ./app/web/ui.test.ts` asserts each listed component file exists under `app/web/components/ui/`, `vite.config.ts` uses `@tailwindcss/vite`, and `styles.css` maps `--background`, `--foreground`, `--card`, `--border`, `--ring` and `--primary` to VH Midnight tokens; Playwright `style.spec.ts` keeps its token, badge and colour assertions, which now run on the shadcn page, and asserts that Generate, the Detail group, the switch, the Select checkboxes and the dialog carry shadcn's `data-slot` attributes; `bun run size` holds both budgets. |
+| AC-26 | `bun test app/web` unit tests of the estimate function: the median over the last 20 matching done jobs, the any-setting fallback below three matches, no estimate without done jobs, the queued start sum, the 95 percent cap and the over-typical text, the running remainder clamped at zero, a Waiting job's estimate over the queued, not running, submitted jobs and earlier Waiting jobs without counting the running job twice, jobs with null `startedAt` left out of the median, and the queue-clear sum and its hidden case when a job has no estimate; and of the duration formatter (`45 s`, `6 min 40 s`, `1 h 5 min`). `bun test app/server` tests of `source-preview` (an image job's upload, a prompt job's 256-pixel thumbnail under its current attempt's prefix, 404 before it exists and for done jobs) and of `sourceReady`, false until the thumbnail's size held for two ticks. Playwright `queue-board.spec.ts` on its own stacks: the summary counts and terms with Waiting and Queued separate, and `Queue clear in about`; a seeded batch grouped with `n of m done` and its progress bar; Cancel all cancelling every unfinished job of the batch, Retry failed retrying its failed and cancelled ones, and with the unfinished limit lowered so one retry is refused, the `2 of 3 jobs could not be retried.` error; a collapsed group staying collapsed across a refresh; a running fake job whose image step the fake writes early showing its source image; the chips; `Added ... ago`, `Starts in about`, `Generating for`, `about ... left` and a progress bar on fixture jobs with times fixed relative to the seed time, on a faked page clock. |
+| AC-27 | Playwright `library.spec.ts`: a fixture card shows `Generated in` with the duration from its fixed times, and its preview shows `Waited`, `Generated in` and `Total` with their durations; a fixture job with null `startedAt` shows neither waited nor generation time. |
+| AC-28 | `bun test app/server`: a prompt batch with `sharedStyle` stores it on each job, the posted graph's prompt text is `<prompt>, <shared style>` followed by the suffix (and without the suffix when style is off), the same prompts with a different Shared style form a different batch hash (409 on a reused ID), a retry posts the same text and resets `queuedAt`, the job view and the manifest carry it, 301 characters and an image batch with a non-empty Shared style are refused while one with an empty value is accepted, and a pre-upgrade batch's request replayed without the field still matches its stored hash; a store test migrates a schema-1 database to 2 with null `shared_style` and `queued_at` equal to `created_at`, and writes a `schema-1-*` backup first. Playwright `submit.spec.ts`: the field is prefilled with the default, a changed value survives a reload (saved on change to localStorage), Reset restores and saves the default, the field stops at 300 characters, and the field is disabled with its note when images are chosen. |
+| AC-29 | `bun test app/pipeline` compares the Ultra graph with the committed golden case `trellis/ultra`, which `bun run golden:check` regenerates from `trellis_graph(..., ultra=True)` under `python3 -I`, and keeps the six existing TRELLIS.2 cases byte for byte. `bun test app/server`: a batch with 30000 and 2048, 20000 and 4096, or 30000 and 1024 answers 400 with the Ultra message and creates nothing, 30000 with 4096 creates jobs whose submitted graph has the Ultra steps and remesh, and the tracker cancels a running Ultra job past 30 minutes but not at 20, while a 10k job is still cancelled past 15. Playwright `submit.spec.ts`: choosing `Ultra 30k` selects `4096`, disables `1024` and `2048`, shows the note, and submits `faces` 30000 with `tex` 4096; choosing `10k` again selects `2048` and disables `4096`. `queue-board.spec.ts`: the cancelled Ultra fixture job's chip reads `Ultra`; and, on a separate stack of its own, an Ultra batch submitted through the page finishes against the fake and its preview shows `Ultra (30k triangles)`. `bun test app/server`: a timed-out Ultra job's message names 30 minutes. |
 
 ## Tasks
 
@@ -1055,6 +1365,73 @@ deletes only flagged fixture rows and their files.
       Evidence: check-upgrade.sh .5 to .6 and verify:live against .6 both passed on 2026-11-22 (evidence under AC-11 and AC-15); the follow-up review is dispatched with permission to rerun both.
 - [x] T31 `docs/internal/plans/asset-studio.md` - after merge, deploy the release image from `main` with `deploy.sh` and repeat the AC-10 check; the result recorded under AC-10 (AC-10)
       Evidence: 2026-11-22 after merge e1d8e1e: `scripts/deploy/deploy.sh 0.1.0` passed (release record sha256:e3560222..., signature and attestations verified, layers matched, serving through tailscale serve); from fedora-43 /api/health returned `0.1.0` at e1d8e1e4e5bb with ComfyUI reachable, and ports 8790 and 8188 on win-main's tailnet address timed out.
+- [x] T37 `app/pipeline/graphs.ts`, `app/pipeline/combine.ts`, `app/pipeline/presets.ts`, `app/pipeline/dump_graphs.py`, `app/pipeline/golden/`, `app/pipeline/graphs.test.ts`, `README.md`, `app/docs/docs.test.ts` - remove the Hunyuan3D builder, its golden cases and the engine preset, and the README's engine wording, with the docs assertion; `bun test app/pipeline`, `bun run golden:check` and `bun run typecheck` pass (the engine type stays exported until T38 removes its users, R-17 F-07) (AC-01, AC-23)
+      Evidence: Tests first: `bun test app/pipeline` failed 6 (combined graphs still routed through the Hunyuan3D builder, the golden set held Hunyuan3D cases, the module exported `hunyuanGraph`); after removing the builder, its golden cases, `HUNYUAN_OCTREE` and the combiner's engine field, `bun test app/pipeline` 17 pass and `bun run golden:check` passes. The README now names TRELLIS.2 as the only mesh model; its new docs assertion failed first and `bun test ./app/docs` passes (7). `bun run typecheck` and lint clean, unit suite 111 pass. The Presets engine field stays until T38.
+- [x] T38 `app/server/batches.ts`, `app/server/jobs.ts`, `app/server/export.ts`, `app/server/api.test.ts`, `app/server/export.test.ts`, `app/web/App.tsx`, `app/web/api.ts` - presets without an engine, the 400 for a non-`trellis` engine, prompts up to 2000 characters on server and page, manifest `engine` from the row, with `texture` null only for a Hunyuan3D row not yet removed; tests written first fail, then pass (AC-23, AC-08)
+      Evidence: Tests first: `bun test app/server/api.test.ts` failed 19 of 23 (the server still required an engine and capped prompts at 500). After dropping the engine from Presets and the page, refusing any engine other than `trellis` with `Hunyuan3D is no longer available; use TRELLIS.2.`, requiring a texture and raising the limit to 2000: 23 pass, including engine hunyuan and x refused with that message, no engine field and engine trellis both stored as `trellis`, 2000 characters accepted and 2001 refused. The export already writes the row's engine with `texture` null for a Hunyuan3D row (export.test.ts case kept). Unit suite 116 pass, typecheck and lint clean.
+- [x] T39 `app/server/tracker.ts`, `app/server/jobs.ts`, `app/server/assets.ts`, `app/server/tracker.test.ts` - the Hunyuan3D removal on each tick (cancel flags on unfinished jobs, deletion of finished ones and emptied batches through the delete path) and the 400 on retrying one; the AC-23 removal tests fail first, then pass (AC-23, AC-05)
+      Evidence: Tests first: the five AC-23 tracker tests failed 4 (no removal, retry allowed). After adding the per-tick flagging before cancel handling, the delete-path removal before submission, the TRELLIS.2-only submit filter and the retry refusal: `bun test app/server/tracker.test.ts` 33 pass. One tick removed Hunyuan3D jobs in pending (no attempt), submitted (the fake received its per-job cancel), done, failed and cancelled states with their asset directories, ComfyUI output and input files and emptied batches, posted no Hunyuan3D graph and left TRELLIS.2 rows and files byte-identical; a pending one posted 10 s earlier stayed pending until the 30 s passed and was then removed; a cancel answering 500 kept the row until a later tick; retry answers 400 with the Hunyuan3D message. Typecheck and lint clean. The full unit suite has 119 pass and 2 fail at this commit: the two seed timeout tests in seed.test.ts fail because the fixture's Hunyuan3D job is now removed; T40 replaces that fixture.
+- [x] T40 `app/server/seed.ts`, `app/server/seed.test.ts`, `app/fake-comfy/`, `app/cli/verify-live.ts`, `app/memory/memory.test.ts` - TRELLIS.2-only fixtures with one long prompt (about 2000 characters, one 120-character unbroken word) on a `done` and a `failed` job, the fake's `hold-accept` control, fake outputs, and the live check's second job at 20k with 1024 textures; seed and memory tests pass (AC-16, AC-11, AC-20)
+      Evidence: The fixture is TRELLIS.2 only (the Hunyuan3D 'a stone pillar' job is now TRELLIS.2) and holds a 1990-character prompt with a 120-character unbroken word on a done and a failed job; the fake gains `hold-accept`/`release-accept`, which leave /prompt unanswered and nothing queued; verify-live's second job is `a stone pillar` at 20k/1024 and both GLBs must carry a base colour texture; the memory test's presets drop the engine. The new seed and fake tests were written with the change, so their failing run was not observed. Unit suite  123 pass and 0 fail (the two seed timeout tests T39 broke pass again); typecheck and lint clean. The memory test runs with the image build in verify.
+- [x] T41 `app/e2e/style.spec.ts`, `app/e2e/layout.spec.ts`, `app/e2e/glossary.spec.ts`, `playwright.config.ts` - the VH Midnight style checks, the contrast measurement and the missing Engine field; they fail against the current page (AC-22, AC-09, AC-18, AC-23)
+      Evidence: Added app/e2e/style.spec.ts (own stack: tokens and theme-color, semantic-colour audit, exact badge colours including Waiting via hold-accept and Done on a card, banner colours, the 1024/1023 breakpoint, long-prompt clipping with title, dialog full text and the queue's More/Less, and the modal dialog's Escape and focus return, the last tagged @firefox), the composited-background contrast check and dialog-inside-viewport checks in layout.spec.ts (every size plus a resize while open), and the no-Engine assertion in glossary.spec.ts. Against the current page, `E2E_TARGET=source npx playwright test style.spec.ts glossary.spec.ts layout.spec.ts --project=chromium` failed as expected: every layout size failed the contrast check, the style tests found no gradient, badge recipe, banner attribute or dialog. playwright.config.ts needed no change: the spec starts its own stack, like the other isolated scenarios.
+- [x] T42 `app/web/styles.css`, `app/web/App.tsx`, `app/web/Viewer.tsx`, `app/web/index.html`, `app/web/api.ts`, `app/e2e/` - the restyled page: tokens, header, sign-in card, composer column, queue rows, gallery, preview dialog; the Playwright suite passes in Chromium and Firefox and `bun run size` stays within budget (AC-22, AC-07, AC-09, AC-13, AC-18)
+      Evidence: Restyled page in app/web (VH Midnight tokens copied into styles.css, theme-color and color-scheme metadata, header with the VH & Co mark, sign-in card, sticky composer with segmented Detail and Texture, Variants stepper, style switch and the solid --ok Generate naming its job count, compact queue rows with exact badges and More/Less, a gallery whose lit thumbnail opens the preview, and a native modal preview dialog with the full prompt, facts, Download GLB and Close). Existing specs updated for the renamed Generate button and exact Variants matching. `E2E_TARGET=source npx playwright test --project=chromium --project=firefox`: 39 passed, 1 skipped (the Firefox render without local WebGL, as before; CI requires it); signin projects 4 passed; `bun run size`: initial 82.2 KiB, viewer 280.5 KiB. Typecheck and lint clean. Screenshot 1280x720-submitted.png reviewed: two columns, nothing clipped. The T48 page behaviour (images-win note, disabled empty Generate, UTF-16 length check) is in this commit; T48 adds its tests. The image-target run comes with `bun run verify` before T44.
+- [x] T48 `app/web/App.tsx`, `app/e2e/submit.spec.ts` - owner answer to R-17 F-01: with prompts and images both present, images win; the composer shows `Images are added; the prompts above are ignored.` and the Generate label counts only the images; `submit.spec.ts` checks it, and checks the empty batch as a disabled Generate button reading `Generate` while the API test keeps the 400 with its message (R-17 F-02); the page counts prompt length in UTF-16 code units like the server (R-17 F-05) (AC-02, AC-22)
+      Evidence: `submit.spec.ts` now checks the empty form as a disabled Generate reading `Generate`, prompts plus images showing `Images are added; the prompts above are ignored.` with `Generate 1 job` and one job added, and the 2001-character refusal through the page; the empty batch's 400 stays in api.test.ts. The page behaviour landed with T42, so these tests were not seen failing first. Chromium and Firefox suites 39 passed, 1 skipped.
+- [x] T49 `docs/internal/plans/asset-studio.md` - before the first prerelease deploy of this revision, list the Hunyuan3D job IDs on `win-main`; within a few ticks after it, confirm those rows, their `/data/assets/<id>/` directories and their ComfyUI `asset-studio` files are gone and the TRELLIS.2 rows unchanged; record it under AC-23 (R-17 F-03) (AC-23)
+      Evidence: 2026-11-22 before deploying 0.2.0-feat-asset-studio.1 to win-main, the job list held no Hunyuan3D job (the 3 done and 1 failed seen at 09:00 had been deleted through the page since) and 7 TRELLIS.2 jobs (5 done, 2 submitted). After the deploy: still no Hunyuan3D row, all 7 TRELLIS.2 jobs present with the same IDs, and the 2 that were generating during the restart finished as done (reconciled after the restart). So the deployed removal had nothing to remove on win-main; the removal path is covered by the AC-23 tracker tests.
+- [x] T46 `.github/workflows/`, `.github/tests/ci.test.ts`, `scripts/deploy/tools.env`, `scripts/deploy/lib/tools.sh`, `scripts/verify.sh`, `scripts/deploy/tests/verify.bats` - workflow permissions, bash default shell and job timeouts, `# v1.2.4` comments on the `vhco-pro/.github` pins; pinned actionlint in verify; the workflow tests fail first, then pass (AC-24)
+      Evidence: Tests first: `bun test ./.github` failed 8 (ci.yml without top-level `permissions: {}`, no `defaults.run.shell` anywhere, preview.yml's job without a timeout, `# main` pin comments) and verify.bats failed its repository case (no actionlint step). After the edits (top-level `permissions: {}` with the checks job granting `contents: read`, `defaults.run.shell: bash` in all four workflows, a 5-minute timeout on preview.yml's job, `# v1.2.4` on the vhco-pro/.github pins, actionlint v1.7.12 pinned by SHA-256 in tools.env and run by scripts/ci/actionlint.sh as verify's step after shellcheck): `bun test ./.github` 22 pass, verify.bats 2 ok (a fixture workflow with an error fails, .github/workflows passes), all 30 bats ok, shellcheck clean.
+- [x] T47 `scripts/deploy/check-repo.sh`, `scripts/deploy/tests/check-repo.bats`, `README.md`, `app/docs/docs.test.ts` - API errors reported as failed checks and the installation listing removed; the coverage list in the README; bats and docs tests fail first, then pass (AC-24, AC-14)
+      Evidence: Tests first: check-repo.bats failed 3 of 4 (the script still listed the installation and swallowed gh errors with `2>/dev/null || true`) and the README coverage test failed. After routing every gh call through a helper that reports a failed call as a failed check carrying gh's error (passed back through a file because the calls run in subshells) and removing the installation listing: check-repo.bats 4 ok (pull-request-only analyses fail; main analyses pass with no installation call; a failing code-scanning call and a failing settings call each fail with `HTTP 502: Bad Gateway (stub)` in the line), all 30 bats ok, shellcheck clean. The README gains a Security analysis table (JavaScript, TypeScript, Python, Actions, Bash, PowerShell with the #3 gap); `bun test ./app/docs` 8 pass. The real run passes everything except Renovate activity, which waits for #4.
+- [x] T43 `docs/internal/plans/asset-studio.md` - the design review of the rendered page with the pinned Vercel rules at the viewport matrix, screenshots reviewed, result recorded; the restyled dev page is offered to the owner as a verified private tailnet preview through the remote-gui workflow (R-17 F-08); the model-viewer module loads when the preview opens, not when a card is selected (R-17 F-06) (AC-22, AC-09)
+      Evidence: Design review of the rendered page with the Vercel web interface rules at 434b7f9 (command.md) and the frontend-design skill at dbd4588, applied to the viewport-matrix screenshots and the code; Impeccable's launcher not run, its guidance read at 7510e23. Met: labelled controls, aria-label on the icon-only stepper and thumbnail buttons, alt and width/height on images with lazy loading below the fold, aria-live status, visible :focus-visible rings with no outline removal, no transition: all, reduced motion honoured, color-scheme dark and a matching theme-color, Intl dates, translate=no on the brand, overscroll containment in the dialog, touch-action on buttons, empty and error states with a next step. Fixed during the review: a skip link to the library and content-visibility on gallery cards for long libraries. Recorded deviations: Delete acts at once without confirmation or undo (as v0.1.0; not in Design), labels use sentence case per the frontend-design skill rather than Title Case, Generate is disabled on an empty form as Design requires, and no state lives in the URL. Screenshots reviewed: 1280x720-submitted, 320x568-preview. The owner got a verified private tailnet preview of the dev page through remote-gui (share fa8b5aa1, Tailscale identity). Chromium and Firefox suites after the review fixes: 39 passed, 1 skipped (the Firefox render without local WebGL).
+- [x] T50 `app/cli/verify-live.ts`, `package.json`, `README.md`, `AGENTS.md`, `app/docs/docs.test.ts` - remove the live generation check; the docs test asserting its absence fails first, then passes (AC-11, AC-21)
+      Evidence: Tests first: the new AC-11 docs tests failed 2 (verify-live.ts, its package.json script and its README row still present; the script posted to /api/batches). After removing app/cli/verify-live.ts, the `verify:live` script and the README row: `bun test ./app/docs` 11 pass; typecheck and lint clean.
+- [x] T51 `app/server/store.ts`, `app/server/batches.ts`, `app/server/jobs.ts`, `app/server/tracker.ts`, `app/server/export.ts`, `app/server/*.test.ts` - schema 2 with `shared_style` and `queued_at` (reset on retry), the Shared style in batches, graphs, retries, the job view and the manifest, outside the hash when empty; the AC-28 server tests fail first, then pass (AC-28)
+      Evidence: Tests first: the store, API and tracker Shared style tests failed (11 of them: no schema 2, no sharedStyle in presets, prompt text without it, retry without queued_at). After schema 2 (shared_style, queued_at backfilled from created_at), Shared style parsed with null/absent/empty as none and a 300-character limit, refused only when non-empty on image batches, stored per prompt job, joined as `<prompt>, <shared style>` before the suffix, kept by retries that reset queued_at, returned as sharedStyle/queuedAt and written to the manifest: unit suite 137 pass (store migration test asserts null shared_style, queued_at = created_at and a schema-1 backup); typecheck and lint clean.
+- [x] T52 `app/server/http.ts`, `app/server/assets.ts`, `app/server/jobs.ts`, `app/fake-comfy/fake.ts`, `app/server/*.test.ts`, `app/server/seed.ts` - `source-preview` (256-pixel thumbnail or upload), `sourceReady` stable across two ticks, `finishedAt` and `queuedAt` in the job view, the fake's early thumbnail write, the fixture's four-job batch, running job thumbnail and times fixed relative to the seed time; the AC-26 server tests fail first, then pass (AC-26, AC-27)
+      Evidence: Tests first: the tracker and API source-preview tests failed 3 (no sourcePreview, no route, no sourceReady). After the fake writes a thumbnail when a prompt starts running, the tracker watches each running prompt job's thumb_*.png under its current attempt and counts it ready once its size held on two consecutive ticks (image jobs: the upload), GET /api/jobs/<id>/source-preview serves it for pending and submitted jobs (404 otherwise, 401 without credentials), and the job view carries sourceReady, queuedAt and finishedAt: the 4 source tests pass. The fixture now has the four-job batch (done, Generating with a fixed start 3 min before T and a seeded thumbnail, Queued, failed), 木箱 done with started_at null, done jobs with 400 s generation times, and every time relative to the seed time T; its new seed test passes. Unit suite 141 pass; typecheck and lint clean.
+- [x] T53 `app/web/queue.ts`, `app/web/queue.test.ts` - the typical-duration estimate and the duration formatter; their unit tests fail first, then pass (AC-26)
+      Evidence: Tests first: app/web/queue.test.ts failed (module missing). app/web/queue.ts adds formatDuration (`45 s`, `6 min 40 s`, `6 min`, `1 h 5 min`), typicalDuration (median of the last 20 matching done jobs with a seen start, any-setting fallback below three, null without any) and estimates; `bun test app/web/queue.test.ts` 10 pass. The web tsconfig excludes web test files and the node one includes them with queue.ts; typecheck and lint clean.
+- [x] T54 `package.json`, `bun.lock`, `vite.config.ts`, `components.json`, `app/web/components/ui/`, `app/web/lib/utils.ts`, `app/web/styles.css` - Tailwind CSS v4 and the shadcn components with the VH Midnight theme mapping; the AC-25 test fails first, then passes, and `bun run size` holds (AC-25, AC-13)
+      Evidence: Tests first: app/web/ui.test.ts failed 2 (no Tailwind import, no shadcn mapping). Added Tailwind CSS 4.3.5 with @tailwindcss/vite, tw-animate-css 1.4.0, radix-ui 1.8.1, class-variance-authority 0.7.1, clsx 2.1.1, tailwind-merge 3.7.0 and lucide-react 1.70.0 (exact pins, each published at least two weeks ago), components.json, the @/ alias in vite.config.ts and the tsconfigs, app/web/lib/utils.ts, and the twelve shadcn 4.23.0 components (button, badge, card, dialog, input, textarea, toggle, toggle-group, switch, checkbox, progress, collapsible). The CLI resolved the utils alias to an unrelated npm package `cn` and installed it unpinned; removed it and pointed the imports at app/web/lib/utils.ts. styles.css: the guide's tokens with the vh- prefix, shadcn's variables mapped onto them, the @theme inline bridge. `bun test app/web` 13 pass, `bun run size` initial 82.2 KiB and viewer 280.5 KiB, typecheck and lint clean.
+- [x] T55 `app/web/App.tsx`, `app/web/Viewer.tsx`, `app/e2e/` - the page rebuilt on the shadcn components: composer with Shared style, the grouped queue with summary, times, estimates, chips and source images, cards with generation time, the dialog with timing; the new and updated Playwright specs pass in Chromium and Firefox (AC-22, AC-25, AC-26, AC-27, AC-28, AC-09, AC-18)
+      Evidence: Page rebuilt on the shadcn components: the composer (ToggleGroup Detail and Texture, Variants stepper, Switch, Seed, Shared style Textarea with Reset and maxLength 300, saved to localStorage on change, disabled with its note while images are chosen, images-win note, solid Generate), the queue (summary strip with Generating, Queued, Waiting and Failed counts and the queue-clear estimate; Collapsible batch groups with n of m done, a progress bar, Cancel all and Retry failed run one job at a time with one partial-failure error, first open state kept across refreshes; rows with the lazy source thumbnail, chips, Added/Generating times, position, start and remaining estimates and a Progress bar), cards with Generated in, and the preview as a shadcn Dialog with download progress (Loading model… n%), the Shared style, Waited, Generated in and Total, focus returned to the opening thumbnail. The first run of the updated suite failed 17 (hidden Radix checkbox input, collapsed finished batches, native-dialog selectors, a group collapsing when its batch finished); after fixing the page (kept first open state, explicit focus return) and the specs: `E2E_TARGET=source npx playwright test` over chromium, firefox and both sign-in projects, 50 passed and 1 skipped (the Firefox render without local WebGL); `bun run size` within budget; typecheck and lint clean.
+- [x] T56 `docs/internal/plans/asset-studio.md` - the design review of the rebuilt page with the pinned Vercel rules at the viewport matrix, screenshots reviewed, the 200 percent zoom check with its method and effective viewport (R-19 F-08, F-09), a verified private preview for the owner; result recorded here as AC-22's design-review evidence (AC-22, AC-09)
+      Evidence: Design review of the rebuilt shadcn page with the Vercel web interface rules at 434b7f9 and the frontend-design skill at dbd4588, on the viewport-matrix screenshots from layout.spec.ts and the code. Met: labelled controls (radiogroup labels for Detail and Texture, label-for on Switch, Checkbox and Textarea), aria-label on icon-only stepper, collapse and thumbnail buttons, aria-label on every Progress, alt and width/height on images with lazy loading, aria-live status, the 2px accent focus outline replacing shadcn's translucent ring, Radix focus trap and Escape in the dialog with focus returned to the opener, reduced motion, color-scheme dark with theme-color, Intl dates, translate=no on the brand, overscroll containment, empty and error states with a next step. Recorded deviations: Delete and Cancel all act without confirmation or undo; labels use sentence case per the frontend-design skill; no state lives in the URL. Screenshots reviewed: rework-1280.png, rework-390.png, rework-dialog.png (two columns at 1280, one at 390, nothing clipped). 200 percent zoom: Chromium page zoom on a 1280x720 window emulated as a 640x360 viewport at device scale factor 2; sign-in, main view after a submit and the open preview dialog had 0 px horizontal overflow, Generate at 574 x 40 px inside the viewport, Close and Download inside the viewport with the text scrolling within the dialog. The private preview for the owner (remote-gui share c5a97a01, Tailscale identity) ended compatibility-blocked during its own verification (sign-in did not reach the main view through the share); it was stopped and no link was given. The deployed prerelease on win-main serves the same page on the tailnet.
+- [x] T57 `app/server/batches.ts`, `app/server/api.test.ts` - R-19 F-01: the batch hash keeps v0.1.0's canonical encoding (`engine: "trellis"` first, the same key order) with `sharedStyle` added only when non-empty; the replay test uses a hash recorded from v0.1.0's encoding (AC-28)
+      Evidence: The hash keeps v0.1.0's encoding: `{ kind, presets: { engine: "trellis", faces, tex, variants, style, seed[, sharedStyle] }, items }` with sharedStyle only when set. The replay test inserts a batch whose hash is computed from v0.1.0's literal encoding and replays the request with `engine: trellis` and no Shared style: 200. A different Shared style under the same ID answers 409.
+- [x] T58 `app/server/tracker.ts`, `app/server/tracker.test.ts` - owner answer to R-19 F-05: a lost-job resubmission resets `queued_at` like a retry; a restart test asserts it (AC-06, AC-26)
+      Evidence: Test first: a lost job resubmitted after a fake restart kept its old queued_at (the new test failed). After the resubmission update also sets queued_at to the tracker's clock: `bun test app/server/tracker.test.ts` 37 pass, the new test asserting losses 1 and queued_at equal to the faked clock 60 s later; typecheck and lint clean.
+- [x] T59 `app/web/queue.ts`, `app/web/queue.test.ts` - R-19 F-04: a Waiting job's estimate is the running app job's remainder plus every queued, not running, submitted app job and the earlier Waiting jobs; queue clear is the running remainder plus the typical times of every other unfinished app job, hidden when any has none; a no-double-count test (AC-26)
+      Evidence: estimates() counts the running app job's remainder once (zero past its typical time); a Queued job adds the queued app jobs with lower positions, a Waiting job every queued, not running, app job and the earlier Waiting jobs; queue clear is the remainder plus every other unfinished app job, null when any has no typical time or nothing is unfinished. The no-double-count, clamp and queue-clear tests are among the 10 passing.
+- [x] T60 `app/server/seed.ts`, `app/fake-comfy/fake.ts`, `app/e2e/queue.spec.ts`, `app/e2e/library.spec.ts` - R-19 F-06 and F-07: the four-job batch's Generating job is the one fixture job that runs, the only one with a fixed `started_at`, and owns the seeded thumbnail; the partial-failure batch has two failed or cancelled jobs; one done fixture job has `started_at` null; queue.spec keeps the fixture job running on its own stack (AC-26, AC-27)
+      Evidence: The new queue-board.spec.ts runs on its own stacks: on a page clock fixed at the seed time it asserts the summary (1 Generating, 1 Queued, 0 Waiting, 3 Failed, Queue clear in about 10 min 20 s), the four-job batch's 1 of 4 done, Generating for 3 min with about 3 min 40 s left and a progressbar, the chips, Added 12 min ago and Starts in about 3 min 40 s, and the running job's source image; a finished batch starting collapsed and staying open across refreshes once opened; Cancel all; and, with the unfinished limit at 3, Retry failed reporting `2 of 3 jobs could not be retried.`. library.spec.ts asserts Generated in 6 min 40 s on a card, Waited, Generated in and Total in the dialog, and none of them for 木箱. All pass.
+- [x] T61 `app/web/styles.css`, `app/web/components/ui/`, `app/e2e/style.spec.ts` - R-19 F-02 and F-03: every guide token copied with the `vh-` prefix and used by those names; ToggleGroup items selected with `bg-primary`; a translucent Button variant on every button except Generate; `--input` a concrete value meeting 3:1; the `.dark` class set on `<html>`; style.spec checks the selected Detail segment's colour and a translucent non-Generate button (AC-22, AC-25)
+      Evidence: style.spec.ts now asserts data-slot button, toggle-group, switch, checkbox and dialog-content, the selected Detail segment's background rgb(79, 140, 255) (--vh-accent via --primary, toggle edited to select with bg-primary) and a translucent non-Generate button (rgba(255, 255, 255, 0.07)); the tokens are vh- prefixed throughout styles.css, --input is the 3:1 control border, .dark is set on <html>. Passes in Chromium.
+- [x] T62 `app/docs/docs.test.ts` - R-19 F-11: the AC-11 check matches a `fetch` or `curl` call whose URL contains `/api/batches` in tracked source and script files, excluding app/docs; must fail on a fetch to `${base}/api/batches` and on `curl -X POST .../api/batches`, must pass on the docs test itself and on a README sentence naming the route (AC-11)
+      Evidence: The AC-11 check matches a fetch( or curl call whose line contains /api/batches, in tracked .ts/.tsx/.js/.mjs/.sh/.ps1/.py files outside app/server, app/web, app/e2e, app/memory and app/docs; its own test asserts the two must-fail examples (a fetch to `${base}/api/batches`, `curl -X POST .../api/batches`) and the two must-pass ones (the API table row, a plain sentence naming the route); it passes on the tree and failed while verify-live.ts existed.
+- [x] T63 `scripts/deploy/tests/deploy.bats`, `app/server/store.test.ts` - failing cases: with stubbed `docker` and `ssh`, an image whose `schema-version` is 1 over a database reporting 2 must make `deploy.sh` exit non-zero with the schema message and run no `docker compose`, copy, `current.json` or `.env` write on `win-main`, as must a failing `database-schema-version` and a pair of images that both answer `unknown command`; equal, higher, `none`, a missing volume (no container run) and a new image answering `unknown command` over a deployed image that reads the database at an equal schema proceed; the reader's volume mount is not `:ro` (R-22 F-01); a `docker volume inspect` error other than no such volume stops (R-22 F-08); a unit case reads a cleanly closed WAL database with no `-wal` or `-shm` file; a unit test that `database-schema-version` reads a WAL-mode database without writing and prints `none` for a missing file; fail because neither exists (AC-15)
+      Evidence: Test first: `bunx bats scripts/deploy/tests/deploy.bats` with the new stubs for `docker volume inspect`, `current.json`, `schema-version` and `database-schema-version`: the 8 existing cases pass and 7 of the 8 new guard cases fail because deploy.sh has no step 4 (the missing-volume case passes since today's deploy runs no container); the cases cover the order after load and before prepare, an older schema refused with nothing prepared, copied or brought up, equal, higher and `none` proceeding, a missing volume running no container, another inspect error stopping, the read-write mount, the fallback to the deployed image's reader, and stops for two `unknown command` images, a failing reader and no current.json. `bun test app/server/store.test.ts` fails with `Export named 'databaseSchemaVersion' not found` for the cleanly closed WAL case and the open-database and missing-file case.
+- [x] T64 `scripts/deploy/deploy.sh`, `scripts/deploy/remote/`, `app/server/main.ts`, `app/server/store.ts`, `README.md` - the `database-schema-version` command, opening the database read-only from a read-write volume mount (owner answer to R-22 F-01), and the step 4 comparison before anything is written on `win-main`; the README's deploy row names the refusal; T63 passes and `bats scripts/deploy/tests` passes (AC-15)
+      Evidence: Added `databaseSchemaVersion` (bun:sqlite opened with `readonly: true`, `none` without a file) and the executable's `database-schema-version [--data /data]` command, and deploy.sh step 4 (`schema_guard` in lib/common.sh) between the image load and prepare: `docker volume inspect asset-studio_data` first (no such volume proceeds without running a container, any other error stops), then the image's `schema-version` and `database-schema-version` with the volume mounted read-write, falling back to the image current.json names when the new image answers `unknown command`, refusing an older schema and stopping when no reader works. The README's deploy row names the refusal. `bunx bats scripts/deploy/tests`: 38 ok, 0 not ok (the missing-volume case first failed because the guard ran `schema-version` before the volume check; the check now comes first); `bun test app/server/store.test.ts` 8 pass including the cleanly closed WAL case; `bun test app/server app/docs` 115 pass; pinned ShellCheck, typecheck and lint clean.
+- [x] T65 `scripts/generate_3d.py`, `app/pipeline/dump_graphs.py`, `app/pipeline/golden/graphs.json`, `app/pipeline/graphs.test.ts` - `trellis_graph(..., ultra=False)` with the Ultra steps and remesh and a `--ultra` flag in the script; the dump adds `trellis/ultra`; the graph test asserts the Ultra case and fails because `trellisGraph` has no `ultra` input (AC-29, AC-01)
+      Evidence: scripts/generate_3d.py gains `trellis_graph(..., ultra=False)` (steps 20, 30, 20, 20 at nodes 14, 19, 21, 24 and RemeshMesh resolution 1024 when true) and `--ultra` (30000 and 4096); the dump adds `trellis/ultra`. `bun run golden:check -- --write` rewrote graphs.json: the six existing TRELLIS.2 cases and both image cases are equal to the previous file, the new case has steps [20, 30, 20, 20], remesh 1024, 30000 faces, 4096 texture and the AO bake at 1024, the inputs of the measured run b. `bun test app/pipeline`: 17 pass, 1 fail, the new Ultra test, because trellisGraph has no `ultra` input.
+- [x] T66 `app/pipeline/graphs.ts`, `app/pipeline/presets.ts`, `app/pipeline/combine.ts`, `app/server/batches.ts`, `app/server/tracker.ts` and their tests - `ultra` builder input from the 30000 and 4096 pair, `DETAILS` with 30000 and `TEXTURES` with 4096, the batch pairing rule with the Ultra message, and the 30-minute Ultra timeout with a message naming the limit, tested at 29 min 58 s (left running) and 30 min 2 s (cancelled) on the faked clock (R-22 F-04); T65's test, `bun run golden:check` and the new server tests pass (AC-29)
+      Evidence: Test first: the three pairing rejections (30000 with 2048, 30000 with 1024, 20000 with 4096), the submitted Ultra graph and the 29 min 58 s / 30 min 2 s timeout edge failed (5 fail, 70 pass; the 10k-past-15-minutes case already passed). Then presets gain 30000 and 4096 with `isUltra` and `validPairing`, trellisGraph takes `ultra` (steps 20/30/20/20, remesh 1024), combineGraph passes `isUltra(faces, tex)`, batches refuse other pairings with `Ultra uses 30k triangles with 4096 textures.`, and the tracker times Ultra jobs out after 30 minutes with a message naming the limit. `bun test app/server app/pipeline` 128 pass, 0 fail (the Ultra graph posts steps [20, 30, 20, 20], remesh 1024, 30000 faces and texture 4096; a 10k job keeps [12, 20, 12, 12] and 768; the Ultra job is still submitted at 29 min 58 s and failed at 30 min 2 s with `Stopped after running longer than 30 minutes.`); `bun run golden:check` passes; typecheck and lint clean.
+- [x] T67 `app/web/App.tsx`, `app/web/Viewer.tsx`, `app/e2e/submit.spec.ts`, `app/e2e/queue-board.spec.ts`, `app/server/seed.ts`, `README.md` - the `Ultra 30k` Detail item, the locked 4096 Texture item and the note, the `Ultra` chip and the preview's `Ultra (30k triangles)` fact; the cancelled Ultra fixture job alone in its own batch; Ultra in the README's presets sentence; a design review of the page after the change with T56's method, recorded in this task's evidence; the Playwright cases pass in Chromium and Firefox with `bun run size` within budget (AC-29, AC-18, AC-26)
+      Evidence: Detail shows `5k`, `10k`, `20k`, `Ultra 30k`; choosing Ultra selects 4096 and disables 1024 and 2048 with the note `Ultra: best quality, about 10 min per job.`, choosing another Detail returns to 2048 with 4096 disabled; the queue chip reads `Ultra` and the preview's Detail `Ultra (30k triangles)`; the seed adds the cancelled Ultra job `an ornate dragon statue` alone in batch 0x103; the README presets sentence names Ultra. New Playwright cases: submit.spec (lock, note, posted presets `{faces: 30000, tex: 4096}`, back to 2048) and queue-board.spec (the fixture chip reads Ultra and not 30k; on a separate empty stack an Ultra batch finishes against the fake and its preview shows `Ultra (30k triangles)`). First full run: 52 passed, 1 failed (glossary read the job states before the queue rendered); expandBatches now waits for the first batch group, and glossary passed 3 runs in a row. Final `E2E_TARGET=source npx playwright test` over chromium, firefox and both sign-in projects: 53 passed, 1 skipped (the Firefox render without local WebGL); `bun run size`: initial 117.4 KiB, viewer 280.5 KiB, within budget; typecheck and lint clean. Design review with T56's method (Vercel web interface rules at 434b7f9, frontend-design skill at dbd4588) on the composer at 1280x900, 390x844 and 320x568 and the expanded Ultra batch: the first version wrapped Detail's four items and Texture's three onto two rows each in the two-column field grid, so both groups now take the full composer width and stay on one row at all three widths with 0 px horizontal overflow; disabled Texture items keep their labels, the note is neutral `--ink-dim` text, the selected items use `--primary`, the Ultra chip is a neutral chip; no console errors.
+- [x] T68 `app/docs/docs.test.ts` - R-22 F-05: the AC-11 scan flags any line containing `/api/batches` in tracked `.ts`, `.tsx`, `.js`, `.mjs`, `.sh`, `.ps1` and `.py` files outside the excluded folders, with must-fail examples for a Python `urllib.request.Request(base + "/api/batches", ...)`, an `Invoke-RestMethod -Method Post .../api/batches` and a URL assigned on the line before a `fetch`, and must-pass examples for the API table row and a plain sentence; passes on the tree (AC-11)
+      Evidence: Test first: four must-fail examples (a Python `urllib.request.Request(base + "/api/batches", ...)`, `Invoke-RestMethod -Method Post .../api/batches`, `wget --post-file ... /api/batches`, and a URL assigned on the line before a `fetch(url, ...)`) made the pattern test fail (10 pass, 1 fail). The scan now flags a line containing `/api/batches` when an HTTP client call (fetch(, curl, wget, urllib, requests., http.client, XMLHttpRequest, Invoke-WebRequest, Invoke-RestMethod) is on it or within three lines; the API table row and the plain sentence still pass. `bun test app/docs` 11 pass, 0 fail, including the tree scan over tracked .ts/.tsx/.js/.mjs/.sh/.ps1/.py files outside the excluded folders; lint clean.
+- [x] T69 `app/server/api.test.ts`, `app/server/tracker.test.ts`, `app/e2e/style.spec.ts` - R-22 F-02 and F-03: confirm the proofs T57, T58, T60 and T61 built are still present and passing (the replay case's literal v0.1.0 hash, the `queued_at` reset on a lost-job resubmission, the selected Detail segment's `rgb(79, 140, 255)` with a translucent non-Generate button, the seeded Generating job's source image), adding any that is missing (AC-06, AC-22, AC-26, AC-28)
+      Evidence: All four proofs are present and pass, none needed adding: app/server/api.test.ts:131 computes the replay hash from v0.1.0's literal encoding (`{kind, presets: {engine: "trellis", faces, tex, variants, style, seed}, items}`) and replays it with 200; app/server/tracker.test.ts:371-377 asserts a lost-job resubmission sets `queued_at` later than before with one loss; app/e2e/style.spec.ts:158 and 160 assert the selected Detail segment's `rgb(79, 140, 255)` and a translucent `rgba(255, 255, 255, 0.07)` non-Generate button; app/e2e/queue-board.spec.ts:50 asserts the seeded Generating job's source image `Source of a glowing crystal`. `bun test app/server/api.test.ts app/server/tracker.test.ts` 75 pass, 0 fail; the two Playwright specs passed in the T67 run (53 passed, 1 skipped).
+- [x] T44 `docs/internal/plans/asset-studio.md` - PR with the before-and-after record at `refs/pr-visuals/<number>` refreshed for the final page, pairs taken from one base-seeded directory that head's executable migrates, new states after-only from head's fixture (owner answer to R-19 F-10); the Ultra prerelease deployed to `win-main` with `deploy.sh`, then the AC-10 check, the AC-12 deployed check and `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.3 <Ultra prerelease>`, run when no job is generating if possible; the production schema 1 to 2 upgrade recorded under AC-15 as extra evidence; results recorded (AC-10, AC-12, AC-15, AC-17, AC-22, AC-23, AC-29)
+      Evidence: On 2026-11-22 CI run 45042346062 (checks, version and release all success) published `0.2.0-feat-asset-studio.4` (sha256:cecf5b5c…, commit b4c366e). `scripts/deploy/deploy.sh 0.2.0-feat-asset-studio.4` passed every step, including the new guard (`v0.2.0-feat-asset-studio.4 knows schema 2; the database is at schema 2`), with 14 jobs (9 done, 4 submitted, 1 cancelled) the same before and after. AC-10: health over HTTPS at win-main's tailnet name from fedora-43 and from arch-1 reports 0.2.0-feat-asset-studio.4 and b4c366e7503a; ports 8790 and 8188 on win-main's tailnet address time out. AC-12 deployed: ten wrong-token sign-ins from fedora-43 answer 401, the eleventh 429, while arch-1 still gets 401; /api/jobs without credentials 401. AC-15: after the live queue was empty, `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.3 0.2.0-feat-asset-studio.4` exited 0 with every check passed: config.yaml hash unchanged by the second deploy and the rerun, previous recorded as .3 and kept by the rerun, job rows `14:FE185422D38B4125` intact at every step, rollback reloaded the removed .3 image and current.json, .env and health named .3 at 13a725f890d7, and the logon task brought the removed .4 image back in 7 s; observations in .artifacts/check-upgrade.log. The first deploy of .3 over .4 went through the guard's fallback (.3 has no `database-schema-version`, the deployed .4 read schema 2). Health right after the logon step said ComfyUI offline for its first probe, and reachable 0.46.2 on the next request. Extra migration evidence: the production upgrade from .1 (schema 1) to .3 (schema 2) earlier that day wrote `schema-1-1795358770987.sqlite` and kept all 26 jobs. AC-17: `scripts/deploy/check-image.sh 0.2.0-feat-asset-studio.4` passed (anonymous pull, signature, provenance and SBOM, UID 65532, read-only root, fresh volume, version). Visual record: the full before-and-after record at 13a725f (PR comment 7080862670, pairs from one base-seeded directory migrated by head, new states after-only) plus the Ultra addendum at b4c366e (PR comment 7082597436, refs/pr-visuals/5 at 5cb2915), since only the composer changed after 13a725f.
+- [x] T70 `docs/internal/plans/asset-studio.md` - R-23 F-01: capture the clipped long-prompt card (before and after) and the long-prompt queue row expanded through `More` from the final page, from one base-seeded directory head migrates, push them to `refs/pr-visuals/5`, link them in a PR comment and correct T44's record note; rerun the 200 percent zoom check on the final page (R-23 F-02) (AC-22, AC-09)
+      Evidence: Captured from one data directory seeded by base 25328bc's executable, with a done and a failed copy of base fixture rows carrying the 1990-character LONG_PROMPT added at schema 1, served by base and by head (which migrated its copy): the long-prompt card at 1280 and 390 (before: the whole prompt on the card; after: two lines with an ellipsis), the failed long-prompt queue row at 1280 before and after, and after only the row expanded through More with Less. Pushed to refs/pr-visuals/5 at 7fef04c and linked in PR comment 7082743665. Correction to T44's record note, kept here because checked task lines stay as written: the record of the final page is the three comments 7080862670 (13a725f), 7082597436 (b4c366e) and 7082743665 (357b527); 7080862670 alone did not hold the long-prompt states. 200 percent zoom on the final page (R-23 F-02): Chromium with a 640x360 CSS viewport at device scale factor 2 (a 1280x720 window at 200 percent), dev stack on the final build: sign-in, the main view with Ultra 30k chosen and the open preview dialog had 0 px horizontal overflow, every Detail and Texture item inside the viewport, Generate 574 x 40 px, Close and Download inside the viewport, no console errors.
+- [ ] T45 `docs/internal/plans/asset-studio.md` - after merge, deploy the release from `main` and repeat the AC-10 check; after the owner adds the repository to the `vhco-renovate` installation (#4), re-add it to `vhco-pro/renovate-runner`'s targets, run the limited `full` dry run and record its run ID, wait for Renovate's activity and rerun `check-repo.sh` (AC-10, AC-14)
 
 ## Open Questions
 
@@ -1079,6 +1456,20 @@ None.
 | 2026-11-22 | R-11 | spec | `5400611` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-12 | implementation | `81b4b51` | claude-opus-5-5 | procedural | 18 met, 1 not met (AC-14, after merge), 2 not verified (AC-11, AC-15: live procedures not rerun by the read-only reviewer); 0 blocking, 3 should-fix, 3 nits |
 | 2026-11-22 | R-13 | implementation | `b54bca4` | claude-opus-5-5 | procedural | 20 met, 1 not met (AC-14, after merge); 0 blocking, 1 should-fix, 2 nits |
+| 2026-11-22 | R-14 | spec | `adeab21` | claude-opus-5-5 | procedural | 0 blocking, 15 should-fix, 5 nits |
+| 2026-11-22 | R-15 | spec | `e0f334f` | claude-opus-5-5 | procedural | 1 blocking, 7 should-fix, 4 nits |
+| 2026-11-22 | R-16 | spec | `c9f3009` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 1 nit |
+| 2026-11-22 | R-17 | spec | `557c810` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 5 nits |
+| 2026-11-22 | R-17 | spec | `557c810` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-18 | spec | `8b38a87` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 6 nits |
+| 2026-11-22 | R-19 | spec | `2420d68` | claude-opus-5-5 | procedural | 0 blocking, 11 should-fix, 2 nits |
+| 2026-11-22 | R-19 | spec | `2420d68` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-20 | spec | `05f83e4` | claude-opus-5-5 | procedural | 1 blocking, 6 should-fix, 3 nits |
+| 2026-11-22 | R-21 | spec | `cc73fb2` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix, 3 nits |
+| 2026-11-22 | R-22 | spec | `d8ba062` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 5 nits |
+| 2026-11-22 | R-22 | spec | `d8ba062` | n/a | n/a | accepted by owner |
+| 2026-11-22 | R-23 | implementation | `357b527` | claude-opus-5-5 | procedural | 24 met, 2 not met (AC-14 after merge, AC-22 PR record), 2 not verified (AC-12, AC-15: deployed procedures not rerun by the read-only review); 1 blocking, 1 nit |
+| 2026-11-22 | R-24 | implementation | `a77bdf7` | claude-opus-5-5 | procedural | 26 met, 1 not met (AC-14, after merge), 2 not verified (AC-12, AC-15: deployed procedures not rerun by the read-only review); 0 blocking, 2 nits |
 
 ### R-1
 
@@ -2498,8 +2889,1091 @@ WHERE: scripts/deploy/remote/state.ps1:7-11; scripts/deploy/check-upgrade.sh ("j
 EVIDENCE: state.ps1 leaves `jobs` as an empty string when the authenticated /api/jobs call fails, so "job rows intact" compares two empty strings and passes if the API is unreachable in both states. In my run every state had `6:C898BD99DEBC6FC9`, so the check was real this time.
 PROPOSAL: Make the check fail when `jobs` is empty.
 
+### R-14
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (sweep paragraph, lines 470-477); Design > Restart, upgrade and rollback (lines 533-538 and 558-560); Tasks T39 (line 1126)
+EVIDENCE: Line 535-536 says the sweep removes the purged jobs' asset directories "because it deletes any asset directory that has no job row, as it already does for uploads without a batch". The sweep paragraph at lines 470-475 lists ComfyUI's folders, uploads without a batch row, and staging and collection directories, but no asset directories. The code agrees with the paragraph, not with line 535: app/server/tracker.ts:383-387 only removes `.collect-*` entries under `/data/assets/`. T39 adds "the sweep of asset directories without a row" as new work. Line 558-560 still says that after a rollback, asset directories of jobs created after the backup "stay in the volume". The new sweep deletes them the next time this version runs. This sentence was written before this revision added the rule.
+PROPOSAL: Add "every `/data/assets/<job id>/` directory with no job row, apart from collection directories" to the sweep paragraph. Drop "as it already does". Say whether a seed running beside a live server writes rows before files, so the new sweep cannot remove fresh fixture files. Update the rollback sentence.
+
+FINDING: F-02
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 537-538); Context > Owner summary (lines 84-85); Open Questions
+EVIDENCE: "A Hunyuan3D prompt still queued or running in ComfyUI keeps running there." Up to 100 unfinished jobs are allowed (line 349), and Background measured about 90 seconds per Hunyuan3D job. ComfyUI runs jobs first submitted, first run (line 479), so those orphaned prompts run ahead of every new TRELLIS.2 job, and their output is then thrown away. Before the purge deletes them, the rows hold each attempt's prompt ID, and the per-job cancel already exists (line 148-150, `app/server/comfy.ts`). Leaving the prompts running is a settled trade-off that is not raised as an Open Question.
+PROPOSAL: Before deleting the rows, cancel each `submitted` Hunyuan3D attempt, and each `pending` one that has an attempt ID, through the per-job cancel. For example, keep their prompt IDs and cancel them on the first compatible tick. Otherwise, raise the choice as an Open Question.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-23 (line 1047); Acceptance Criteria AC-23 (line 1018)
+EVIDENCE: The row seeds "Hunyuan3D and TRELLIS.2 jobs in every state, their asset directories, an upload batch and files in both ComfyUI `asset-studio` folders". It then requires that a start through `start()` "keeps every TRELLIS.2 row and file byte-identical". By Design (line 470-471, and app/server/tracker.ts:347-351), the start sweep deletes the ComfyUI files of every `done` job. After that, the first tick changes `submitted` and `pending` TRELLIS.2 rows that the fake does not know (lost-job handling, line 447-449). Read literally, the proof fails a correct implementation, or two implementers scope the fixture differently.
+PROPOSAL: Limit the byte-identical assertion to TRELLIS.2 rows and to files under `/data/assets/` and `/data/uploads/`, checked before the first tick. Say that ComfyUI files are seeded only for Hunyuan3D jobs, or for TRELLIS.2 jobs that the sweep keeps.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (badge paragraph lines 649-652, queue line 670-672, library lines 674-678); Design > Glossary (Done and Waiting rows); Acceptance Criteria AC-18 (line 1013) and AC-22 (line 1017); Test Plan rows AC-18 (line 1042) and AC-22 (line 1046)
+EVIDENCE: Badges define "Done `--ok`". However, the queue lists only "unfinished, failed and cancelled jobs", and a library card shows a thumbnail, a name, a checkbox and buttons, with no state badge. The Done term and badge therefore have no place on the page. AC-18 still requires job states to be labelled with the Glossary terms, and the AC-22 proof checks "each state badge's border colour". A Waiting badge cannot be observed on the seeded fixture either: app/server/seed.ts:29-37 holds no `pending` job, and the tracker submits a pending job within one tick.
+PROPOSAL: State where a Done job shows its badge, for example on its library card. Give the AC-18 and AC-22 proofs a way to observe Waiting, such as a fake held offline or a fixture pending job the tracker skips.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-22 (line 1017); Test Plan row AC-22 (line 1046); Design > Page (lines 649-656); Design > Verification commands (lines 973-976); Tasks T43 (line 1130)
+EVIDENCE: The AC-22 proof checks the gradient, the colour scheme, Generate, badge borders, side by side at 1280x720, stacked at 390x844, and the dialog. It does not check that semantic colours appear "only on job states and banners", or the banner colours (`--danger` and `--warn`). It also does not check the 1024-pixel breakpoint: a layout that switches at 1200 passes, although 1024x768 is in the matrix. "About 40 percent" for the border leaves the expected colour open. The guide (guides/vh-midnight.md, Tokens) defines a neutral badge as white at 9% with `--ink-dim` text and gives it no border, so "neutral" has no border colour to match. The row checks the design review, but no criterion text requires that review.
+PROPOSAL: Fix the badge fill, border and text alphas (including a neutral border). Add assertions at 1024x768 (two columns) and at 1023 wide (one column), and for both banner colours. Assert that no other element uses `--ok`, `--warn` or `--danger` as text, border or background. Add the design review to AC-22's text, or drop it from the row.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (preview dialog lines 680-685; layout rules lines 703-709); Acceptance Criteria AC-09 (line 1004); Test Plan rows AC-09 (line 1033) and AC-22 (line 1046)
+EVIDENCE: conventions/frontend-testing.md (Responsive visual quality) asks that "a dialog's controls must stay reachable at short heights", and to "Resize and change orientation while a scene or dialog is open". It also asks for Firefox coverage of browser APIs. This revision adds a native modal `<dialog>` holding the viewer, metadata and two buttons. The AC-09 journeys and layout rules never name the dialog, and do not check Close and Download inside the viewport at 844x390 or 320x568. They also do not check a resize while the dialog is open. Escape closing the dialog and focus returning to the opener are checked only in Chromium.
+PROPOSAL: Add the open dialog to the AC-09 journeys at every matrix size, with Close and Download inside the viewport and a resize while it is open. Run the Escape and focus-return check in Firefox as well.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (library card line 675-676; preview dialog line 680-681)
+EVIDENCE: A card shows "the prompt or file name on at most two lines". The dialog shows "the asset's name", which may be the slug. guides/vh-midnight.md (Type and layout) asks to keep long content "accessible without page-wide scrolling or truncation", and guides/use-frontend-design-skills.md says "Do not hide content to make an overflow assertion pass". Prompts may be up to 500 characters (line 616). The document does not say where the full prompt can be read once it is clamped.
+PROPOSAL: State that the dialog shows the full prompt (or the full file name), and that the clamped card text keeps the full text as its accessible name or title.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 976-980); Acceptance Criteria AC-22 (line 1017); Tasks T40 (line 1127) and T44 (line 1131)
+EVIDENCE: conventions/frontend-testing.md (Visual record) requires both sides "with the same fixture data", with the before from the base commit and the after from the head. It also requires an after image of each state the change alters, and asks the author to name any changed state left uncaptured. The base's fixture holds a Hunyuan3D done job (app/server/seed.ts:32, "a stone pillar"). T40 removes it at head, and head's start purge would delete it, so the two libraries differ. The listed captures leave out restyled states: the offline and incompatible banners, the viewer loading and error states inside the dialog, and the sign-in error.
+PROPOSAL: Name one fixture for both sides (for example head's TRELLIS.2-only fixture loaded into the base build), or name the one-asset difference. Add the banner, viewer error and sign-in error states to the record, or name them as left uncaptured with the reason.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 954-957); Test Plan row AC-07 (line 1031)
+EVIDENCE: Design says that the CI `checks` job "installs Mesa's software GL (`libgl1-mesa-dri`, `libegl1`)", and the AC-07 row credits the Firefox render to "CI, where Mesa is installed". .github/workflows/ci.yml:31-36 installs `xvfb libegl1 libgl1-mesa-dri libgles2` and runs `xvfb-run -a bun run verify`. T28's evidence (line 1105) says Mesa alone still failed the render, and that the missing xvfb-run was "recorded here for the next revision". This revision does not fold it in.
+PROPOSAL: State that the checks job installs xvfb and Mesa and runs `bun run verify` under `xvfb-run -a` with `E2E_REQUIRE_WEBGL=1`, and say the same in the AC-07 row.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope (line 222); Tasks T37-T47 (lines 1124-1134); Acceptance Criteria AC-21 and AC-23 (lines 1016, 1018)
+EVIDENCE: README.md:4 says "pick an engine and a detail level", and README.md:8-9 says "TRELLIS.2 (textured) or Hunyuan3D 2.1 makes the mesh". No task updates these lines: T47 touches README.md only for the coverage list. No proof checks the README for the engine choice. An implementer following the Tasks would ship a README that describes a removed engine.
+PROPOSAL: Add the README description to T37 or T42, and add an assertion to `bun test ./app/docs` that the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-24 (line 1019); Test Plan row AC-24 (line 1048); Design > Repository and CI (lines 913-915); Tasks T47 (line 1134)
+EVIDENCE: The row says "`bun run verify` runs `actionlint` from the pinned binary and fails on a fixture workflow with an error". `bun run verify` lints `.github/workflows/` (line 906), so it never sees a fixture workflow, and the row does not say which test feeds it one. Design and T47 also require that "API errors in the other checks are reported as errors rather than as a missing analysis". Today scripts/deploy/check-repo.sh:43 hides errors with `2>/dev/null || true`. No criterion or proof covers this part.
+PROPOSAL: Name the test that runs the verify actionlint step on a fixture directory and expects a failure (for example a bats test of that step). Add the API-error rule to AC-24, with a bats case in which a stubbed code-scanning call that fails is reported as an error.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 913-915); Test Plan row AC-14 (line 1038); Tasks T45 (line 1132)
+EVIDENCE: scripts/deploy/check-repo.sh:53-58 lists the installation's repositories with `gh api user/installations/<id>/repositories`. The comment there says this "needs a token the installation authorises (a personal access token or a GitHub App user token)". T32's evidence (line 1113) records HTTP 403 with the owner's `gh` token. Once the check fails closed, the AC-14 proof run through check-repo.sh cannot pass with that token, even after #4 is resolved. The document does not name a credential that can read the listing.
+PROPOSAL: Name the credential T45 uses for the installation listing and how it is obtained, or replace the listing with evidence that the owner's token can read, such as the renovate-runner dry run.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 107-114); Tasks T45 (line 1132)
+EVIDENCE: The permissions paragraph still says that acceptance authorises "creating that repository and turning on those settings" and "adding the repository to the `vhco-renovate` App installation". For this revision the first is done, and #4 calls the second an owner step in organisation settings. T45 has the agent "re-add it to `vhco-pro/renovate-runner`'s targets with a dry run first". That is a change to another repository, and the paragraph does not authorise it. The earlier attempt needed separate owner approval (renovate-runner PR #11, per the removed AC-14 evidence).
+PROPOSAL: Rewrite the paragraph for this revision: what acceptance authorises now (branch, PR, merge, prerelease and release deploys, the visual-record ref) and whether it covers the renovate-runner target change. Keep the installation change as the owner's step.
+
+FINDING: F-14
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 92-93); Scope > Out of scope (line 248); Tasks T44 (line 1131); Acceptance Criteria AC-15 (line 1010)
+EVIDENCE: The summary says that "the revision adds no rollback checks", and the dispatch records that the owner does not want rollback checks for this revision. AC-15 still requires a rollback that reloads a missing image and serves the previous version. T44 runs `scripts/deploy/check-upgrade.sh` between two prereleases on `win-main`, which deploys, removes images, rolls back and runs logon recovery. The summary does not tell the owner that this rollback procedure still runs.
+PROPOSAL: State in the summary that AC-15's rollback procedure still runs, between two prereleases of this revision, and that only a rollback across the revision is unchecked. If the owner meant no rollback run at all, raise residualising AC-15 as an Open Question.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 908-911); Context > Owner summary (lines 88-92)
+EVIDENCE: Design says that "no analyzer for the PowerShell scripts ... stays an accepted gap tracked in #3". Issue #3 lists "recorded security coverage for Bash and PowerShell" among the gaps this revision fixes, and does not track a PowerShell analyzer. The repository-security convention at edd4c09 says "Use an appropriate source-security analyzer for other languages and record each language's actual coverage". knowledge/shared-delivery.md lists `vhco-pro/pwsh-ci-action` (PSScriptAnalyzer) for PowerShell source.
+PROPOSAL: Add the PowerShell analyzer gap to #3, naming `vhco-pro/pwsh-ci-action`, or adopt it in this revision. Cite the tracker accurately.
+
+FINDING: F-16
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Verification commands (lines 932-941); Design > Repository and CI (lines 906-908)
+EVIDENCE: Repository and CI says that `bun run verify` runs `actionlint` "right after shellcheck". The ordered list in Verification commands does not include actionlint, and scripts/verify.sh:2 says it follows "the order the feature document's Verification commands give".
+PROPOSAL: Insert the actionlint step after shellcheck in the Verification commands list.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: nit
+WHERE: Frontmatter (`issue`, line 4)
+EVIDENCE: `issue: 2`. conventions/feature-documents.md (Frontmatter) shows the field as a full issue URL (`https://github.com/OWNER/REPO/issues/42`). The binary's lint passes with the number.
+PROPOSAL: Use `https://github.com/vhco-pro/3d-assets-gen/issues/2`.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: nit
+WHERE: Sources (lines 2578-2592); Design > Jobs and batches (line 373); Design > Repository and CI (line 906)
+EVIDENCE: Design cites `conventions/http-api.md` and `conventions/github-actions.md` for rules it adopts or defers, and the Vercel rules commit through the frontend guide. Sources does not list them, although it lists the other new convention pages. A blank line also splits Sources into two lists.
+PROPOSAL: Add the HTTP API and GitHub Actions pages at edd4c09 to Sources, each with the claim it supports, and join the two lists.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 88-90)
+EVIDENCE: "The new pin's quick workflow and check rules are met here (workflow permissions, a bash default shell, job timeouts, actionlint, a fail-closed installation check ...)". AC-24 is unticked and T46-T47 are open. ci.yml still has top-level `permissions: contents: read` and no `defaults.run.shell`. The feature-documents convention asks the summary to tell planned checks apart from observed proof.
+PROPOSAL: Write "this revision adds" instead of "are met here".
+
+FINDING: F-20
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Page (lines 666-667, 676-677, 680-681); Design > Glossary
+EVIDENCE: The restyle changes user-facing labels: `Generate` becomes `Generate 1 job` or `Generate 6 jobs`, `Close preview` (app/web/Viewer.tsx:63) becomes `Close`, and `Select all` is new. The Glossary rows and AC-18 do not cover them. The label for a form that would create no job (for example `Generate 0 jobs`, or a disabled button) is not defined.
+PROPOSAL: Add the button terms to the Glossary or state that the Glossary is limited to states, fields, banners and the heading. Define the Generate label and state when no job would be created.
+
+### R-15
+
+TARGET: e0f334fe90c0abb296b6c116778b250c0e783f28
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Repository and CI (lines 938-945); Test Plan row AC-14 (line 1073); Acceptance Criteria AC-24 (line 1054); Test Plan row AC-24 (line 1083); Tasks T45 (line 1167) and T47 (line 1169); Context > Owner summary (lines 111-121)
+EVIDENCE: Design says the installation check reads its token from `ASSET_STUDIO_INSTALLATION_TOKEN`, "a fine-grained personal access token the owner creates with read access to the organisation's GitHub Apps". The check calls `GET /user/installations/<id>/repositories` (scripts/deploy/check-repo.sh:55). GitHub's page "Endpoints available for fine-grained personal access tokens" (fetched from docs.github.com/api/article/body?pathname=/en/rest/authentication/endpoints-available-for-fine-grained-personal-access-tokens) lists, under apps, only `PUT` and `DELETE /user/installations/{installation_id}/repositories/{repository_id}`, not the `GET .../repositories` listing. Fine-grained tokens also have no "GitHub Apps" read permission to grant. So the credential the document names cannot make the check pass. The AC-14 row still requires "the repository is listed in the `vhco-renovate` installation's repositories" through check-repo.sh. The alternative proof (a renovate-runner dry run) appears only in Design, not in the row, so the AC-14 proof as written cannot be executed after #4 is resolved. The Owner summary does not mention that the owner must create a token at all. This traces to how the previous revision applied R-14 F-12.
+PROPOSAL: Name a credential that can list the installation (for example a GitHub App user access token, verified against the endpoint) or drop the listing. Put the renovate-runner dry run into the AC-14 row as the accepted proof. Mention any owner credential step in the Owner summary, and raise the choice as an Open Question if it adds owner work.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 542-556); Design > Submission, concurrency and idempotency (sweep paragraph, lines 477-486); Acceptance Criteria AC-23 (line 1053); Test Plan row AC-23 (line 1082); Tasks T39 (line 1161)
+EVIDENCE: The purge runs "on the first tick with a compatible ComfyUI", and "The sweep that follows removes those jobs' asset directories, uploads and files". The sweep runs "at start and every ten minutes" (line 477). In the tree the start sweep runs before the first tick: app/server/tracker.ts:84-85 calls `this.sweep({ atStart: true })` and only then starts the tick interval. So the sweep that follows the purge is the ten-minute one. The AC-23 row asserts that a start through `start()` "leaves no Hunyuan3D row, no batch without jobs and none of their files" without saying when. One implementer runs a sweep right after the purge commits; another leaves the files for up to ten minutes and the test advances a faked clock. The two build different things, and a test that checks soon after start fails the second.
+PROPOSAL: State whether a sweep runs right after the purge completes. In the AC-23 row, say when the file assertion is read (for example after the purge's own sweep, or after the faked clock passes the next ten-minute sweep).
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 543-549); Design > Cancel, retry and delete (lines 497-501); Context > Owner summary (lines 84-86); Acceptance Criteria AC-23 (line 1053)
+EVIDENCE: For a user cancel, a `pending` job whose post is under 30 seconds old keeps its flag until the attempt appears or 30 seconds pass (lines 497-499), because a post that timed out may still be accepted. The purge has no such wait: it cancels each known Hunyuan3D prompt ID at once, treats `{"cancelled": false}` for an unknown ID as done, and deletes the rows. A v0.1.0 post that was in flight when deploy.sh replaced the container can land in ComfyUI after that cancel. It then runs with no row, and its GPU time is lost ahead of TRELLIS.2 jobs. Line 548-549 says "no Hunyuan3D row is deleted while its prompt might still be queued", which is not true in that window. The Owner summary says the server cancels "any Hunyuan3D prompt still queued or running", while AC-23 says only "every Hunyuan3D prompt it knows".
+PROPOSAL: Apply the same 30-second rule to Hunyuan3D `pending` rows with a recent post time before cancelling and deleting them, or state the window as accepted. Align the Owner summary with AC-23's "it knows".
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 93-94); Design > HTTP API (line 632); Design > Page (queue paragraph lines 692-694, library lines 696-699, layout rules lines 728-734); Test Plan rows AC-09 (line 1068) and AC-22 (line 1081); Tasks T38 (line 1160) and T40 (line 1162)
+EVIDENCE: This revision raises prompts from 500 to 2000 characters. It says the gallery clips them to two lines with the full text as `title` and in the dialog. The queue row shows "the prompt or file name" with no rule: unclipped, a 2000-character prompt fills about 23 lines at 90 characters each; clipped, a failed or cancelled job never reaches the library, so its full prompt can be read nowhere. guides/vh-midnight.md asks to keep long content "accessible without page-wide scrolling or truncation", and conventions/frontend-testing.md asks to "Include longer text or expanded copy when content length affects sizing". The fixture holds no long prompt: app/server/seed.ts:28-38 has prompts of at most 24 characters, and T40 only makes it TRELLIS.2-only. The AC-22 assertion "a card's clipped prompt carries the full text as `title`" then has no clipped card to check, and the AC-09 layout runs never meet a long prompt.
+PROPOSAL: Define how a queue row shows a long prompt and where its full text can be read. Add a long fixture prompt (near 2000 characters, including one long unbroken word) to T40, and run the AC-09 layout rules and the AC-22 title check on it.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 1005-1015); Acceptance Criteria AC-22 (line 1052); Tasks T44 (line 1166)
+EVIDENCE: The before side is "the base commit's build seeded with that fixture through the base executable's own `seed` command fed head's fixture rows". The base executable's seed takes no fixture input. Its rows are compiled in as `FIXTURE_JOBS` (app/server/seed.ts:28-38, including the Hunyuan3D "a stone pillar" job), and its options are only `--profile default|empty` and `--reset` (app/server/main.ts:5). As written, the procedure cannot be executed without changing the base build, which would no longer be the base commit's build.
+PROPOSAL: Describe an executable route, for example seeding the data directory with head's `seed` command (the schema version is 1 on both sides) and then serving that directory with the base executable.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (lines 666-679); Acceptance Criteria AC-22 (line 1052); Test Plan row AC-22 (line 1081)
+EVIDENCE: Design says "`--ok`, `--warn` and `--danger` appear on nothing else except the Generate button, the two banners and the Delete hover state", and the AC-22 proof asserts no other element's text, border or background resolves to them. The page has other error outputs: the wrong-token error, batch rejection messages, a failed job's error text, job action errors, the viewer error state and the export-gone notice. Today they use the danger colour (app/web/styles.css:32 `.error`, :51 `.job-error`). conventions/interface-colour.md says to use colour for "whether an action succeeded or failed". The document does not say these messages turn neutral. One implementer keeps them red and fails the AC-22 proof. Another makes them neutral and departs from the colour guideline. Neither choice is raised as an Open Question.
+PROPOSAL: Name the error messages and say which colour each uses. Either add them to the allowed list in Design, AC-22 and its row, or state that they stay neutral with their text as the signal. Raise the choice as an Open Question if it departs from the colour guideline.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 982-991); Test Plan row AC-22 (line 1081); Tasks T40 (line 1162) and T41 (line 1163)
+EVIDENCE: The AC-22 row stops the fake, switches it to 0.46.1, and holds it "from accepting" so a Waiting badge can be seen. Design lists the Playwright projects that get their own container and fake: sign-in and token rotation, offline and incompatible, glossary, and empty profile. Every other journey shares one seeded container. `style.spec.ts` is not on the isolated list, so as written it stops the fake under the shared journeys. The fake's Playwright control (app/fake-comfy/fake.ts:340-366) offers `version`, `restart`, `reject-next`, `hold`, `release`, `hold-matching`, `release-matching` and `fail-matching`. `hold` holds running prompts and does not stop acceptance. No task names adding a control that keeps a post unaccepted.
+PROPOSAL: Add `style.spec.ts`, or its banner and Waiting cases, to the isolated projects. Name the fake control that holds a post unaccepted, and add it to T40 or T41.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T43-T47, lines 1165-1169)
+EVIDENCE: conventions/feature-documents.md (Tasks) asks to "Order by dependency". T46 (workflow permissions, shell, timeouts, actionlint) and T47 (fail-closed check-repo.sh, README coverage) come after T44, which deploys the prerelease and records the live checks, and after T45, which runs "after merge". Both change files that ship in the PR and that AC-24 checks before merge. Followed in order, the prerelease evidence of T44 is taken at a commit without them, and T45 runs on `main` before T46 and T47 exist.
+PROPOSAL: Move T46 and T47 before T43 (or at least before T44). Keep T44 and T45 last.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-22 (line 1052)
+EVIDENCE: AC-22 says "semantic badge colours only on job states and banners" and later "semantic colours on nothing but job states, banners, Generate and the Delete hover". Generate and the Delete hover use `--ok` and `--danger`, so read literally the first clause conflicts with the second. The previous revision added the second clause without removing the first. The AC-22 row follows the second.
+PROPOSAL: Drop "semantic badge colours only on job states and banners" from AC-22.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 89-93)
+EVIDENCE: The summary lists what #3 tracks as "tag-triggered, repeat-safe releases, 422 and RFC 3339 in the API, test waits, container labels and a PowerShell analyzer". Issue #3 also tracks `conventions/coding.md` fallbacks that announce themselves (app/server/assets.ts, app/server/auth.ts, scripts/deploy/rollback.sh), and the github-actions rule to run only the checks a change needs.
+PROPOSAL: Add the fallback rule and the check-selection rule to the summary's list, or write "among them" before the list.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Repository and CI (lines 909-911)
+EVIDENCE: Design says "Every action and reusable workflow is pinned to a full commit SHA with a release-tag comment". .github/workflows/codeql.yml (both jobs) and .github/workflows/scorecard.yml pin `vhco-pro/.github` at `e03ad61274b2bf0738b36ed67dff1c376321fb64` with the comment `# main`, which is a branch, not a release tag.
+PROPOSAL: Say that reusable workflows from a repository without release tags carry the branch name in the comment, or change the comments to name a tag where one exists.
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Restart, upgrade and rollback (lines 548-549); Design > Export (line 763); Tasks T39 (line 1161)
+EVIDENCE: "Until the purge completes, the tracker submits nothing for Hunyuan3D rows and the job list hides them." T39 touches only `app/server/tracker.ts`, `app/server/main.ts` and `app/server/tracker.test.ts`. The job list is served elsewhere (`app/server/jobs.ts`, `app/server/http.ts`). While ComfyUI stays offline the purge waits, so hidden Hunyuan3D `done` jobs can still be fetched or exported by ID. Their manifest entry would then say `engine` "trellis", which Export calls always true.
+PROPOSAL: Add the file that hides Hunyuan3D rows to T39. Say whether `GET /api/jobs/<id>`, assets and exports also refuse Hunyuan3D rows before the purge completes.
+
+### R-16
+
+TARGET: c9f3009dff45af43b0da1513dcd6b85e689f9385
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Context > Owner summary (lines 84-86); Design > Restart, upgrade and rollback (lines 541-552); Acceptance Criteria AC-23 (line 1055); Test Plan row AC-23 (line 1084); Tasks T39 (line 1163)
+EVIDENCE: The Owner summary says "at every start the server cancels unfinished Hunyuan3D jobs the way the Cancel button does and then deletes every Hunyuan3D job with its files". Design now says "On every tick with a compatible ComfyUI, before submitting anything, the tracker sets the cancel-requested flag ... In the same tick it deletes ...", and that the removal waits while ComfyUI is offline or incompatible ("Ticks repeat, so a crash or a failed cancel only delays the removal"). T39 says "the Hunyuan3D removal on each tick". The summary still describes the start-time purge that the previous revision replaced when it applied R-15 F-02 and F-03. It also leaves out that Hunyuan3D jobs stay visible and downloadable until they are removed, and that retrying one answers 400.
+PROPOSAL: Change the summary to say that on every tick with a compatible ComfyUI the tracker cancels unfinished Hunyuan3D jobs through the cancel path and deletes finished ones through the delete path, and that they stay visible until then.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 548-550); Design > Export (lines 759-765); Tasks T38 (line 1162)
+EVIDENCE: Design says a Hunyuan3D job stays visible until deleted, "`done` ones stay downloadable, and an export manifest names their engine `hunyuan`". Export says "`engine` is always `trellis` and `texture` always a number", and T38 builds "manifest `engine` always `trellis`". Hunyuan3D rows have no texture size: app/server/seed.ts:63 writes `tex` as null for them, and app/server/export.ts:142 writes `texture: job.engine === "trellis" ? job.tex : null`. So an export of a Hunyuan3D `done` job, possible while ComfyUI is offline or incompatible and no tick runs, holds `engine` `hunyuan` and `texture` null, which breaks both Export rules. One implementer follows T38 and hard-codes `trellis`. Another keeps the row's engine. This traces to how the previous revision applied R-15 F-12, which made the rows visible and exportable without changing Export or T38.
+PROPOSAL: Choose one rule. Either Export says `engine` is the row's engine and `texture` is null for Hunyuan3D rows until they are removed, and T38 says the same. Or exports and asset routes refuse Hunyuan3D rows. Then align line 550, Export and T38.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 541-552); Design > Submission, concurrency and idempotency (tick steps, lines 429-465); Test Plan row AC-23 (line 1084)
+EVIDENCE: Design places the flagging "before submitting anything" and the deletion "in the same tick". It does not say whether the flags are set before step 1 (cancel handling), or whether the deletion runs before or after step 1. In the tree, step 1 and step 2 run back to back (app/server/tracker.ts:124-125, `handleCancels` then `submitPending`), so flags set between them still count as "before submitting anything". The AC-23 row expects that "after the first tick ... the `submitted` one received the per-job cancel" (flags set before step 1). It also expects that the recent `pending` one "is cancelled and deleted on the following tick" (deletion after step 1 in the same tick). An implementation that sets flags after step 1, or deletes before it, follows Design and fails the row. The row also never states that the `submitted` job and the `pending` job without an attempt ID are deleted after their cancel. It only refers to "the ticks that remove every Hunyuan3D job", so a test could pass while cancelled rows stay.
+PROPOSAL: State the order in Design, for example: set the flags, run step 1, delete finished Hunyuan3D jobs, then run step 2. In the AC-23 row, assert that every Hunyuan3D row, including the `submitted` one and the `pending` one without an attempt ID, is gone after a stated number of ticks.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-22 (line 1083); Tasks T40 (line 1164); Design > Page (queue paragraph lines 692-696, library lines 698-703); Design > Verification commands (fixture, lines 1025-1028)
+EVIDENCE: The AC-22 row runs three checks "on the long fixture prompt": "the card clips to two lines with the full text as `title`, the dialog shows it in full without overflow, and the queue row's `More` expands it and `Less` collapses it". A card and the dialog exist only for `done` jobs (the library "lists done assets"). The queue lists only "unfinished, failed and cancelled jobs". So one fixture job cannot appear as both a card and a queue row. T40 asks for "TRELLIS.2-only fixtures with one long prompt". One implementer seeds one long-prompt job and cannot run half the row. Another seeds two jobs, one `done` and one `failed`, with the same text. This traces to how the previous revision applied R-15 F-04.
+PROPOSAL: Say in T40 and the fixture paragraph that the long prompt is seeded on two jobs, one `done` and one `failed` (or `cancelled`). In the AC-22 row, name which job each check uses.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 1009-1017); Acceptance Criteria AC-22 (line 1054); Tasks T44 (line 1170)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request, lines 192-198) asks for "an after image of each state the change adds or alters, such as an open dialog, a collapsed narrow layout or an error", and to "Name any changed state left uncaptured and say why". This revision adds or alters these states, none of them in the capture list: the queue row expanded through `More`; error messages now in `#ffc4c4` with an error icon (Page, lines 668-671) for a refused batch, a failed job action and the changed-selection notice after a gone export; and the clipped long-prompt card. The list names only the viewer's loading state as uncaptured. AC-22 is met when the PR "carries the before-and-after record Design lists", so it can be ticked while the convention's record is incomplete. This traces to the previous revision adding `More`/`Less` and the error styling (R-15 F-04 and F-06) without extending the record.
+PROPOSAL: Add the expanded queue row, the long-prompt card and at least one of the newly styled error messages (refused batch, failed action, export-gone notice) to the record. Otherwise name each one as uncaptured with a reason.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Repository and CI (lines 912-914)
+EVIDENCE: Design says pins carry "a release-tag comment (the branch name for `vhco-pro/.github`, which has no release tags)". `gh api repos/vhco-pro/.github/tags` lists v1.0.0 to v1.2.4, and v1.2.4 is commit `e03ad61274b2bf0738b36ed67dff1c376321fb64`, the exact SHA that .github/workflows/codeql.yml:19,29 and scorecard.yml:18 pin with the comment `# main`. `gh api repos/vhco-pro/.github/compare/v1.2.4...e03ad61...` answered `identical`. The exception is false, and it tells implementers to keep a branch comment where a release tag exists. Renovate's `helpers:pinGitHubActionDigests` would then follow the branch instead of releases. This traces to how the previous revision applied R-15 F-11.
+PROPOSAL: Drop the parenthetical and change the three comments to `# v1.2.4`. The tag rule then holds for every pin.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Cancel, retry and delete (line 521); Design > Submission, concurrency and idempotency (sweep paragraph, lines 478-485); Design > Restart, upgrade and rollback (lines 545-547 and 571-573)
+EVIDENCE: Delete says "A file it fails to delete is left for the sweep", and the Hunyuan3D removal now relies on that path for "its asset directory". The sweep paragraph no longer covers `/data/assets/<job id>/` directories without a row. The previous revision removed that rule, and the code agrees: app/server/tracker.ts:404-409 removes only `.collect-*` entries under `/data/assets/`. app/server/assets.ts:47-55 also skips the remaining deletions once one throws. So an asset directory that fails to delete is never removed, and the rollback paragraph's "stay in the volume" now means for good.
+PROPOSAL: Say that a failed asset-directory deletion is not swept, or limit "left for the sweep" to ComfyUI files and uploads.
+
+### R-17
+
+TARGET: 557c8100911b1f8acfb9f2c0e5e579697ca59dbb
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (composer paragraph, lines 686-692); Design > Jobs and batches (line 355); Test Plan row AC-02 (line 1070)
+EVIDENCE: Jobs and batches says "A batch is one submission: either prompts or images". The new composer shows the Prompts field and the image drop zone together, and "a Generate button whose label names the job count (`Generate 1 job`, `Generate 6 jobs`)". Nothing says what happens when the user has typed prompts and also dropped images. Today app/web/App.tsx:150-156 quietly sends only the images when any are chosen and drops the prompts without a word. Under the new layout, one implementer counts and sends only the images, as today. Another counts both and sends two batches. A third disables Generate or shows an error. The label count differs between them, and no row checks this case.
+PROPOSAL: State the rule for prompts and images together, for example that images take precedence and the composer says the prompts will be ignored, or that Generate is disabled with a message until one of them is cleared. Add that case to `submit.spec.ts` in the AC-02 row.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (lines 690-692); Acceptance Criteria AC-02 (line 1041); Test Plan row AC-02 (line 1070)
+EVIDENCE: This revision adds "With no prompt and no image the button reads `Generate` and is disabled; the server still refuses an empty batch as before." AC-02 says a batch that is empty "is rejected with a message that names the problem", and the AC-02 row has Playwright `submit.spec.ts` submit "each invalid case" through the page. The current spec clicks Generate on an empty form and expects "Add at least one prompt or image" (app/e2e/submit.spec.ts:33-38). With a disabled button that click never happens and no message appears, so the page half of the row cannot run its empty case against a correct implementation. Implementers will differ on whether the empty case is dropped from the page test, kept as a disabled-button assertion, or still expected to show a message.
+PROPOSAL: In the AC-02 row, say that the empty batch is checked through the API (400 with the message) and on the page as a disabled Generate button reading `Generate`, and that the other invalid cases still go through the page.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks T44 (line 1177); Test Plan row AC-23 (line 1091); Design > Restart, upgrade and rollback (lines 543-556)
+EVIDENCE: T44 lists AC-23 among its criteria, but neither T44's text nor the AC-23 row says what the deployed prerelease should show for it. The only AC-23 proof uses tracker tests against the fake. The real database on `win-main` holds Hunyuan3D rows written by v0.1.0: app/cli/verify-live.ts:57 submits a Hunyuan3D "a stone pillar" job on every run, and the script never deletes its jobs (no delete call in the file). Those rows have `tex` null and real asset directories. The first deploy of this revision deletes them irreversibly, and owner acceptance assumes that happens. As written, an implementer can tick T44 for AC-23 without looking at the real removal, while another records it.
+PROPOSAL: Either drop AC-23 from T44, or add a deployed step to T44 and the AC-23 row: before the first prerelease deploy, list the Hunyuan3D job IDs on `win-main`. After it, confirm within a few ticks that those rows, their `/data/assets/<id>/` directories and their ComfyUI `asset-studio` files are gone, and that TRELLIS.2 rows are unchanged.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 84-87)
+EVIDENCE: The sentence reads "on every tick with a compatible ComfyUI the server cancels unfinished Hunyuan3D jobs ...". When R-16 F-01 was applied, "on every tick ..." was added but "at every start the server" was left in place, so the sentence is garbled and still mentions the start-time purge that Design replaced.
+PROPOSAL: Change it to "on every tick with a compatible ComfyUI the server cancels unfinished Hunyuan3D jobs ...".
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Design > HTTP API (line 632); Context > Owner summary (line 95); Test Plan row AC-23 (line 1091); Tasks T38 (line 1169); Design > Verification commands (fixture, line 1031)
+EVIDENCE: The document gives the limit as "1 to 2000 characters after trimming" but never says what counts as a character. The server already counts UTF-16 code units (`p.length > MAX_PROMPT_CHARS`, app/server/batches.ts:257). A page that counts code points would accept an emoji-heavy prompt that the server refuses. The AC-23 row's 2000 and 2001 cases pass under either count if they use ASCII. An implementer following the tree changes only the number, so nothing different gets built.
+PROPOSAL: Say "2000 UTF-16 code units (JavaScript string length)" once in HTTP API, and have the page count the same way.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, lines 712-713); Acceptance Criteria AC-13 (line 1052)
+EVIDENCE: "Selecting an asset loads the `<model-viewer>` module on demand." The new gallery has a Select checkbox on every card for export, so "selecting" now also means ticking that box. AC-13 settles it ("loads only when an asset is opened"), so the meaning is only unclear in the wording.
+PROPOSAL: Write "Opening the preview loads the `<model-viewer>` module on demand."
+
+FINDING: F-07
+KIND: factual
+SEVERITY: nit
+WHERE: Tasks T37 (line 1168), T38 (line 1169), T42 (line 1173)
+EVIDENCE: T37 removes the engine preset from app/pipeline/presets.ts. `ENGINES` and `Engine` are used by app/server/batches.ts:8,53, app/server/tracker.ts:252 (through `JobGraphInput`), app/server/seed.ts and app/web/App.tsx. None of those files is in T37, and T37's done condition (`bun test app/pipeline`, `bun run golden:check`) does not type-check the rest of the tree, so the T37 commit leaves `bun run typecheck` failing until T38 to T40 land. T38 changes the page's presets but does not list app/web/api.ts, where `PresetsInput` declares `engine` (app/web/api.ts:17); that file appears only in T42.
+PROPOSAL: Add `bun run typecheck` to T37's done condition and list the files it needs, or keep the engine type until T38. Add app/web/api.ts to T38.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Verification commands (design review paragraph, lines 1009-1012); Tasks T43 (line 1176)
+EVIDENCE: guides/use-frontend-design-skills.md (Review the result) says: "For a remote session, give the owner a verified reachable private preview URL through the available host workflow." The design review paragraph names the Vercel rules, the viewport matrix and the Impeccable launcher being skipped. It neither includes the preview URL nor says why it is left out. Nothing a proof checks depends on it.
+PROPOSAL: Add one clause to the paragraph saying whether the restyled page is offered to the owner as a private preview URL, or why it is not.
+
+### R-18
+
+TARGET: 8b38a87e3542272c94304073befe2d54137bbb8a
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1067-1077); Acceptance Criteria AC-22 (line 1115); Test Plan row AC-22 (line 1148); Tasks T44 (line 1259)
+EVIDENCE: Line 1073 says "head's `seed` command writes a data directory (schema version 1 on both sides), and the before is the base commit's executable serving a copy of that directory". This revision makes head's schema 2 (lines 583-584, AC-28). The base executable's store refuses a newer database: app/server/store.ts:96-98 throws `SchemaTooNewError` ("database is at schema ${current}, but this executable only knows schema ${target}") when the stored version is above `MIGRATIONS.length`, which is 1 on the base. So the "before" side cannot start on head's fixture, and the record AC-22 requires cannot be produced as written. This traces to this revision's schema 2 change; the paragraph was not updated.
+PROPOSAL: Say how the before side gets a schema-1 fixture (for example the base commit's own `seed` writing the before directory and head's `seed` the after one, with the fixture differences named), and drop "schema version 1 on both sides".
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (lines 563-564 and 583-585)
+EVIDENCE: Line 563-564: "The server removes Hunyuan3D jobs through the existing cancel and delete paths; the schema version stays 1." Lines 583-584, added by this revision, say "Schema version 2 adds the nullable `shared_style` column to `jobs`". The same section now states both. An implementer reading the first sentence could skip the migration and its backup.
+PROPOSAL: Change the first sentence to say the Hunyuan3D removal needs no schema change, and keep schema 2 as the one migration of this revision.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Pipeline port and combined graphs (line 321); Design > Access token (lines 605-606); Design > Versioning and release path (lines 953-955)
+EVIDENCE: AC-11 is rewritten to "No script, command or check in the repository submits generations to a deployed app", and Scope now excludes "Any check that submits real generations to the deployed app" (line 270). Three Design lines still describe the removed check: line 321 "AC-11 runs 10k with 2048 textures and 20k with 1024 textures through the deployed app"; lines 605-606 "`bun run verify:live` reads the token over SSH into memory for its run"; line 955 "so the review can observe AC-10, AC-11 and AC-15 against it". This revision removed other `verify:live` mentions (lines 1008-1009, 1050) but not these.
+PROPOSAL: Remove the line 321 sentence and the `verify:live` sentence in Access token, and change line 955 to name AC-10, AC-12 (deployed part) and AC-15.
+
+FINDING: F-04
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (theme paragraph, lines 684-696; colour rules, lines 698-713); Acceptance Criteria AC-22 (line 1115) and AC-25 (line 1118); Test Plan rows AC-22 (line 1148) and AC-25 (line 1151)
+EVIDENCE: Design says the token block from guides/vh-midnight.md is copied "as written there" (which defines `--accent: #4f8cff` and `--card: rgba(255,255,255,.045)`, vh-midnight.md:39,43) and also that shadcn's variables, including `--card`, `--primary` "and the rest", are mapped onto those tokens. The names collide in one `:root`: shadcn's `--accent` is a subtle hover surface (outline and ghost Button `hover:bg-accent`, Toggle `data-[state=on]:bg-accent`), so the copied blue would paint solid blue hovers and selected toggles. Design never says which token `--primary` gets: shadcn's Button default, Switch on state, Checkbox checked and Progress indicator all use `bg-primary`. If it is `--ok` (Generate's colour), the switch, checkboxes and progress bars turn green, which the "no other element ... resolves to `--ok`" rule in AC-22 forbids. If it is `--accent`, Generate needs its own variant. The progress bars' colour is not stated anywhere. Two careful implementers build different pages here, and the AC-22 check does not cover misuse of `--accent`.
+PROPOSAL: Add a mapping table that gives every shadcn variable the components use (`--primary`, `--primary-foreground`, `--accent`, `--accent-foreground`, `--secondary`, `--muted`, `--destructive`, `--ring`, `--input`, `--popover`) a VH Midnight value, and resolve the `--accent` and `--card` name clash (for example by prefixing the VH tokens). Name the progress bar colour and Generate's variant.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Frontmatter covers (lines 7-29); Tasks T54 (line 1256)
+EVIDENCE: T54 adds `components.json` at the repository root (the shadcn CLI configuration that decides component paths and style). `covers` lists `app/`, `package.json`, `vite.config.ts` and others but not `components.json`. The standard says `covers` "lists every path whose change can affect the feature", and `feature_tree_clean` ignores uncovered changes.
+PROPOSAL: Add `components.json` to `covers`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (queue times, lines 742-750); Design > Glossary (lines 666-668); Acceptance Criteria AC-26 (line 1119)
+EVIDENCE: "A Waiting or Queued job shows `Queued <duration> ago`, its queue position, and `Starts in about <duration>`: the running job's remaining typical time plus the typical times of the jobs ahead of it." A Waiting (`pending`) job has no queue position: the API gives one only for submitted jobs (line 644; app/server/tracker.ts:80-82 returns a position only for prompts in ComfyUI's queue). Queue positions also count Comfy Desktop prompts the app has no typical time for (line 508-510), and the running prompt may not be an app job. Nothing says what "remaining typical time" is once the running job is past its typical time (negative, zero or no estimate), nor which jobs are "ahead" of a Waiting job. Implementers will compute different estimates and the unit tests in the AC-26 row cannot pin them.
+PROPOSAL: Define the estimate for Waiting jobs (no position shown; ahead means every submitted job plus earlier pending ones), what happens with foreign ComfyUI prompts in the queue or running, and clamp the running job's remainder at zero past its typical time. Add those cases to the AC-26 unit tests.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (summary strip, lines 731-733; job rows, lines 744-746); Design > Glossary (lines 666-668); Acceptance Criteria AC-18 (line 1111)
+EVIDENCE: The Glossary defines Queued as "Job state `submitted`, not yet running in ComfyUI" and Waiting as `pending`. The summary strip shows "Queued (counting Waiting jobs too)" with "its Glossary term", and a Waiting job row shows `Queued <duration> ago` next to its Waiting badge. The page then uses the term Queued with two meanings, which the standard's glossary rule ("User-facing terms ... are held to it by a criterion") is meant to prevent; the AC-18 test only reads the badge and field labels.
+PROPOSAL: Either count Waiting and Queued separately in the strip and use a neutral word in the row text (for example `Added <duration> ago`), or raise the merged count as an Open Question and widen the Glossary row.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (batch groups, lines 734-737); Acceptance Criteria AC-26 (line 1119); Test Plan row AC-26 (line 1152)
+EVIDENCE: `Cancel all` and `Retry failed` "send the per-job cancel or retry for each matching job", so one click is up to 25 separate requests across the network. Retry is refused at the unfinished-job limit (app/server/jobs.ts:121-124, 409), so `Retry failed` can succeed for some jobs and fail for others. Design does not say what the page shows on a partial failure, whether requests are sent one at a time or together, or whether the button can be clicked again meanwhile. It also leaves open whether a batch whose jobs are all `done` (no rows in a queue that "shows unfinished, failed and cancelled jobs") still gets a group, and whether a group that becomes finished while the user has it open collapses on the next refresh.
+PROPOSAL: State that the actions run in order, stop or continue on a refusal, and show one error naming how many jobs were not cancelled or retried, using the failed-job-action error style. State that groups appear only for batches with at least one queue row and that a group's open state is kept across refreshes. Add a partial-failure case to the AC-26 Playwright row.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (job rows, line 739); Design > HTTP API (source-preview row, line 651)
+EVIDENCE: Each queue row shows a 64-pixel image "from `source-preview`", which serves "the upload of an image job" (up to 20 MiB each, line 656) or the 1024 by 1024 PNG of a prompt job. A 25-image batch at the 200 MiB cap then makes every browser viewing the queue download about 200 MiB, over the tailnet and possibly on a phone, to draw 64-pixel images. conventions/react.md:131 says "Size images for their rendered dimensions and pixel density". The combined graph already writes a 256 by 256 thumbnail from the same source image (line 312-314) under `<attempt id>/` in the same output folder.
+PROPOSAL: Serve the 256-pixel thumbnail (`<attempt id>/thumb_*.png`) for prompt jobs once it exists, and for image jobs either a size cap or `loading="lazy"` with a stated bound; or raise the trade-off as an Open Question.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (job rows, lines 742-746; cards, lines 754-755; preview, lines 760-763); Acceptance Criteria AC-26 and AC-27 (lines 1119-1120)
+EVIDENCE: All times derive from `createdAt`, `startedAt` and `finishedAt`. In the tree, `started_at` is set only when a tick sees the prompt running (app/server/tracker.ts:279-280), so a job that ran entirely while the app was down ends `done` with `startedAt` null; `finished_at` is the app's collection time (tracker.ts:354), which after an outage can be hours after ComfyUI finished. Retry keeps `created_at` (jobs.ts:125-127 resets only started and finished), so a retried job shows `Queued 3 h ago` and a "time waited" that includes earlier attempts. Design does not say what a card, the dialog or the median shows or skips in these cases.
+PROPOSAL: Define the display when `startedAt` is null (omit the generation and waited times, exclude the job from the median), and whether `Queued ... ago` and time waited count from creation or from the current attempt (for example a stored attempt start time). Add one case of each to the AC-26 unit tests or AC-27 row.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (Shared style paragraph, lines 392-397); Design > Submission, concurrency and idempotency (lines 423-427); Test Plan row AC-28 (line 1154)
+EVIDENCE: The content hash is `JSON.stringify({ kind, presets, items })` over the parsed presets (app/server/batches.ts:72-73) and is stored per batch (batches.ts:290). Adding `sharedStyle` to the presets object changes the encoding: if absent is encoded as `sharedStyle: null`, a genuine retry of a batch created before the upgrade, sent by a page loaded before it, gets 409 instead of 200. Design also does not say whether null, absent and an empty string after trimming are the same value for the hash, for storage, and for the image-batch refusal ("An image batch that sends a Shared style is refused"); the page's multipart `presets` field (app/web/api.ts:102) may carry an empty or null value.
+PROPOSAL: State that null, absent and empty-after-trim are one value (no Shared style), stored as null, left out of the hash encoding so pre-upgrade hashes still match, and accepted on image batches; refuse only a non-empty value there. Add the pre-upgrade replay case to the AC-28 row.
+
+FINDING: F-12
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Page (composer, lines 722-727); Acceptance Criteria AC-28 (line 1121); Test Plan row AC-28 (line 1154)
+EVIDENCE: Design says the field "starts with the last value used in this browser", which reads as saved on submit. The AC-28 row checks that "a changed value survives a reload", which needs saving on every change. It is also not said whether Reset writes the default to the store, or what the page does with more than 300 characters (limit the input, or let the server refuse the batch). Two implementers build different behaviour, and one of them fails the row.
+PROPOSAL: Pick one: save on change (and on Reset), or save on a successful submit; align the AC-28 row with it. Say whether the field has `maxLength` 300.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (Playwright projects, lines 1041-1050); Test Plan row AC-26 (line 1152)
+EVIDENCE: The AC-26 row runs "Playwright `queue.spec.ts` on its own stack" and has it use Cancel all and Retry failed on "a seeded batch" on a faked clock. Design lists the projects that get their own container (sign-in, offline and incompatible, glossary, style, empty profile) and says the remaining journeys "share one seeded container; those that change data ... act only on jobs they created in the same test". `queue.spec.ts` is not in that list, so as Design reads, Cancel all on a seeded batch on the shared container breaks the rule and other specs' fixtures.
+PROPOSAL: Add the queue scenario to the list of projects with their own container in Design.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-26 (line 1152); Acceptance Criteria AC-26 (line 1119)
+EVIDENCE: AC-26 includes "the summary strip with counts and the queue-clear estimate". The row's unit tests cover the median, the fallback, the queued start sum, the 95 percent cap and the formatter; its Playwright part checks "the summary counts and terms". Nothing computes or shows `Queue clear in about <duration>`, its rule that it appears only "when every unfinished job has an estimate", or `about <duration> left`. A page without the queue-clear estimate passes the row.
+PROPOSAL: Add the queue-clear sum and its hidden case to the unit tests, and assert `Queue clear in about` and `about ... left` in `queue.spec.ts`.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-25 (line 1118); Test Plan row AC-25 (line 1151)
+EVIDENCE: AC-25 says "The page's controls are shadcn/ui components from `app/web/components/ui/`". The row checks that the component files exist, that `vite.config.ts` uses `@tailwindcss/vite`, and that `styles.css` maps six variables. A page that keeps its current native controls while the files sit unused passes. The row also says "`bun test ./app/docs` (or a new `app/web/ui.test.ts`)", leaving the check's place open.
+PROPOSAL: Add a rendered check, for example `style.spec.ts` asserting that Generate, the Detail group, the switch, the Select checkboxes and the dialog carry shadcn's `data-slot` attributes, and name one test file.
+
+FINDING: F-16
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after capture list, lines 1067-1077); Acceptance Criteria AC-22 (line 1115)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request) requires "an after image of each state the change adds or alters" and asks to "Name any changed state left uncaptured and say why". This revision adds the summary strip, batch groups (open and collapsed), Cancel all and Retry failed, a row with a source image and a Generating progress bar, the Shared style field and its disabled note, timing on cards and the dialog. The capture list was not changed and names none of them, and the AC-22 row checks the record against "the before-and-after record Design lists".
+PROPOSAL: Add the new states to the capture list (or name each left out and why).
+
+FINDING: F-17
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1082-1090); Test Plan rows AC-26 (line 1152) and AC-27 (line 1153); Tasks T52 (line 1254)
+EVIDENCE: The fixture paragraph is unchanged: no batch with several unfinished jobs to group, no running prompt job whose source PNG exists in the fake output folder, and no times. The rows rely on "the fixture's done jobs carry fixed start and finish times" and "fixture jobs with known times on a faked clock", but unfinished fixture jobs get `started_at` from the tracker at real time (tracker.ts:279-280) while the page's clock is faked, so `Generating for` is not deterministic. conventions/frontend-testing.md says "Time-dependent screens need a documented date anchor" and the fixture should "Cover the states the feature renders".
+PROPOSAL: Describe the new fixture in Design: a multi-job batch, a running prompt job with its source PNG written by the seed or fake, fixed `createdAt` and `startedAt` for unfinished fixture jobs relative to a stated anchor (the tracker keeps an existing `started_at`), and fixed durations for done jobs.
+
+FINDING: F-18
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (composer, lines 718-729); Test Plan row AC-02 (line 1128)
+EVIDENCE: R-17 F-01 asked for the rule when prompts and images are both present; the owner's answer was built in T48 ("images win; the composer shows `Images are added; the prompts above are ignored.` and the Generate label counts only the images") but never folded into Design or the AC-02 row, which still says the page submits "each invalid case" although an empty form now only disables Generate (R-17 F-02). T55 rebuilds the composer from Design, so an implementer following Design can drop the rule, and this revision's Shared style rule ("disabled ... while images are chosen") depends on it.
+PROPOSAL: Add the images-win rule and its note to the composer paragraph, and update the AC-02 row with that case and the disabled empty Generate.
+
+FINDING: F-19
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-11 (line 1104); Test Plan row AC-11 (line 1137)
+EVIDENCE: AC-11 says "No script, command or check in the repository submits generations to a deployed app". The row only checks that `app/cli/verify-live.ts` is gone and that the name `verify:live` appears in neither `package.json`, `README.md` nor `AGENTS.md`. The same live check under another file or script name passes. Today only app/memory/memory.test.ts:110 and the e2e specs post to `/api/batches`, all against a local container.
+PROPOSAL: Have the docs test also assert that no file outside `app/server`, `app/web`, `app/e2e` and `app/memory` posts to `/api/batches`, and that no `package.json` script targets a deployed URL.
+
+FINDING: F-20
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 84-86)
+EVIDENCE: "at every start the server on every tick with a compatible ComfyUI, cancels unfinished Hunyuan3D jobs" is still garbled. R-17 F-04 raised it; this revision edited the same paragraph (lines 87-88) without fixing it.
+PROPOSAL: Write "on every tick with a compatible ComfyUI the server cancels unfinished Hunyuan3D jobs".
+
+FINDING: F-21
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, line 767)
+EVIDENCE: "Selecting an asset loads the `<model-viewer>` module on demand." Cards keep a Select checkbox for export, and the thumbnail is now the Preview button. R-17 F-06 raised the wording; this revision edited the same line ("Preview control") and kept it.
+PROPOSAL: Write "Opening the preview loads the `<model-viewer>` module on demand."
+
+FINDING: F-22
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Page (component list, lines 684-686; preview, lines 760-764)
+EVIDENCE: Tooltip is listed but no Page text uses a tooltip; it adds `@radix-ui/react-tooltip` and its positioning code to a 150 KiB initial budget that stood at about 82 KiB. shadcn's `DialogContent` renders its own corner close button named "Close" by default, next to Design's Close button, so the page has two controls with that name.
+PROPOSAL: Drop Tooltip from the list or say where it is used, and say that the dialog's built-in close button is turned off (`showCloseButton={false}`).
+
+FINDING: F-23
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Page (preview paragraph, lines 760-763); Test Plan row AC-27 (line 1153)
+EVIDENCE: The dialog shows "time waited", "generation time" and "total time", but the visible labels are not given, unlike the card's `Generated in <duration>`. The AC-27 row checks "the waited, generation and total times" without labels.
+PROPOSAL: Give the three labels (for example `Waited`, `Generated in`, `Total`).
+
+FINDING: F-24
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan row AC-15 (line 1141)
+EVIDENCE: The row tests "a test migration from schema 1 to 2" with a `schema-1-*` backup. app/server/store.test.ts:38 builds it as `[...MIGRATIONS, extra]`; once MIGRATIONS holds the real migration to 2, that becomes 2 to 3 and writes `schema-2-*`. The AC-28 row already covers the real 1 to 2 migration and its backup.
+PROPOSAL: Say "a test migration one past the current schema" and assert the backup of the current version.
+
+FINDING: F-25
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > HTTP API (source-preview row, line 651; `sourceReady`, lines 634-636)
+EVIDENCE: `sourceReady` is true once the file exists, but ComfyUI writes the PNG in place, so a fetch can catch a partly written file. The image URL never changes, so a broken image stays.
+PROPOSAL: Count the PNG ready only when its size is stable across two ticks, or add a cache-busting query with the file size.
+
+### R-19
+
+TARGET: 2420d68447d2f73e0cf0cb474aecaaa1f1706c43
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Jobs and batches (Shared style paragraph, lines 392-399); Design > Submission, concurrency and idempotency (content hash, lines 425-427); Test Plan row AC-28 (line 1189)
+EVIDENCE: Design says a missing Shared style "is left out of the hash encoding, so a batch created before this revision still matches when its request is replayed". The previous version's batches were hashed over presets that include the engine. `git show v0.1.0:app/server/batches.ts` line 72 returns `{ engine, faces, tex, variants, style, seed }`, and line 76 hashes `JSON.stringify({ kind, presets, items })`. This revision drops `engine` from presets, and the branch already does (app/server/batches.ts:69 returns `{ faces, tex, variants, style, seed }`, commit a2c9432, which is not in v0.1.0). So a pre-upgrade request replayed with `engine: "trellis"` hashes differently and gets 409, whatever is done with Shared style. Design describes the hash only as "the kind, the preset values, then each prompt line", so it never says the engine stays in the encoding. One implementer keeps the current encoding and the replay promise fails. Another adds `engine: "trellis"` back in v0.1.0's key order. The AC-28 replay test can be written either way, for example by building the "pre-upgrade" batch with the new code, and still pass. This traces to this revision's engine removal together with the R-18 F-11 change.
+PROPOSAL: State the exact canonical encoding: presets encoded as v0.1.0 did, with `engine: "trellis"` first and the same key order, and `sharedStyle` added only when non-empty. Make the AC-28 replay case use a hash recorded from v0.1.0's encoding, not one computed by the new code.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (theme paragraph, lines 690-708; colour paragraph, lines 710-726); Acceptance Criteria AC-22 (line 1150); Test Plan row AC-22 (line 1183)
+EVIDENCE: Lines 690-691 say the VH Midnight tokens are "copied with a `vh-` prefix (`--vh-bg-0`, `--vh-card`, `--vh-ink`, `--vh-accent`, `--vh-ok` and so on) so they never collide with shadcn's names". Lines 701-705 then say the page follows guides/vh-midnight.md "with its token block copied into `app/web/styles.css` as written there: ... `--card` surfaces, `--ink` text, `--accent` for links". The colour rules at lines 712-724 and AC-22 still use the unprefixed names (`--accent`, `--ok`, `--on-ok`, `--control-bg`, `--control-bg-hover`, `--ink-dim`). The guide's block (vh-midnight.md Tokens) defines `--card` and `--accent`, the same names shadcn uses for its card surface and its hover and selected surface. If the block is copied as written, the collision the prefix was meant to remove comes back. This traces to the R-18 F-04 change, which added the prefix without updating the sentences that follow it.
+PROPOSAL: Replace "as written there" with "with every name prefixed `vh-`". Use the prefixed names throughout the colour paragraph and AC-22, or state once that the unprefixed names there mean the `--vh-` tokens.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (shadcn mapping, lines 693-701); Acceptance Criteria AC-25 (line 1153); Test Plan rows AC-22 (line 1183) and AC-25 (line 1186)
+EVIDENCE: The mapping says `--primary` is used by "the Switch's on state, checked Checkboxes, Progress indicators and the selected ToggleGroup item". shadcn's new-york-v4 sources (`gh api repos/shadcn-ui/ui/contents/apps/v4/registry/new-york-v4/ui/<name>.tsx`) show otherwise. toggle.tsx selects with `data-[state=on]:bg-accent data-[state=on]:text-accent-foreground` and hovers with `hover:bg-muted`. With the stated mapping (`--accent` to `--vh-control-bg-hover`, `--muted` to `--vh-control-bg`), a selected Detail or Texture segment looks the same as a hovered one, not like `--vh-accent`. Other mapped classes also miss Design's button rule. button.tsx's default variant is `bg-primary text-primary-foreground`, so any Button left on the default variant is solid `--vh-accent`, while Design says "every other button is translucent". The outline variant uses `dark:bg-input/30 dark:hover:bg-input/50`, and switch.tsx uses `bg-input` for the off state. So `--input` acts as a surface colour, but Design gives it only "the strong control border", which is not a token in the guide. The guide's `--control-line` "measures under 2:1" (vh-midnight.md Contrast notes), and Design requires 3:1. Design also does not say whether the `.dark` class is set, which decides whether those `dark:` classes apply. Two implementers will build differently coloured toggles and buttons, and the AC-25 row checks only six variables and `data-slot` attributes.
+PROPOSAL: State which component edits or variants carry Design's rules: ToggleGroup items selected with `bg-primary` (or `--accent` mapped so that selected and hover differ), the translucent Button variant used everywhere except Generate, a concrete value for `--input` that meets 3:1, and whether `.dark` is set. Add a style.spec assertion for the selected Detail segment's colour and a translucent non-Generate button.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (summary strip, lines 745-747; estimates, lines 766-776); Acceptance Criteria AC-26 (line 1154); Test Plan row AC-26 (line 1187)
+EVIDENCE: "The estimate is the running app job's remaining typical time ... plus the typical times of the app's jobs ahead: ... for a Waiting job, every submitted app job and the earlier Waiting jobs." A running app job is in state `submitted` (Glossary line 671: Generating is `submitted`, running), so "every submitted app job" includes the running job, which is then counted twice: its remainder plus its full typical time. The Queued case avoids this only because the API gives the running job no position (app/server/tracker.ts:80 returns `position: null` for running). The AC-26 row repeats the ambiguity ("a Waiting job's estimate over all submitted and earlier Waiting jobs"). Design never defines the `Queue clear in about <duration>` value. Only the row calls it "the queue-clear sum". Design also does not say whether a Generating job without a typical time counts as "has an estimate" for the strip's visibility rule.
+PROPOSAL: Say that a Waiting job's estimate covers the running app job's remainder plus every queued (not running) submitted app job and the earlier Waiting jobs. Define queue clear as the running app job's remainder plus the typical times of every other unfinished app job, hidden when any of those has no typical time. Add the no-double-count case to the unit tests.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Restart, upgrade and rollback (queued_at, lines 585-587); Design > Submission, concurrency and idempotency (tick step 5, lines 478-482); Design > Page (times, line 766; preview, lines 787-790); Test Plan row AC-28 (line 1189)
+EVIDENCE: `queued_at` is "the time the current attempt was queued, set at creation and again when a retry starts", and `Added <duration> ago` counts "from `queuedAt` (the current attempt)". Step 5 also starts a new attempt for a job ComfyUI lost: it clears the attempt ID and the started and finished times, returns the job to `pending` and gives it a new prompt ID (also app/server/tracker.ts:295). Design does not say whether `queued_at` resets there. If it does not, a resubmitted job's `Waited` (`startedAt - queuedAt`) and `Total` include the lost attempt, and `Added ... ago` is not counted from the current attempt as the page text claims. If it does, the definition at line 587 is wrong. Two implementers will differ, and no test row covers the lost-job case for times.
+PROPOSAL: Decide whether a lost-job resubmission resets `queued_at` and state it in step 5 and the schema 2 sentence. Add the case to the AC-06 restart tests or the AC-28 row.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1112-1125; queue project, lines 1068-1071); Test Plan row AC-26 (line 1187); Tasks T52 (line 1289)
+EVIDENCE: The fixture lists "a batch of four jobs (one done, one Generating, one Queued, one failed)", then separately "a running prompt job whose 256-pixel source thumbnail the seed writes", and then "`submitted` jobs whose prompt IDs the fake serves as queued and running prompts". The fake serves only one fixture prompt as running, the first by `created_at, position`, and none while any real prompt is running (app/fake-comfy/fake.ts:137 orders fixture IDs; lines 152-155 push the first into `queue_running` only when `running.length === 0`). The current fixture already has its own running and queued jobs (app/server/seed.ts:43-44). So Design does not say which fixture job is Generating, and when the AC-26 queue spec submits "a running fake job whose image step the fake writes early" on the same stack, the fixture's Generating row turns Queued and the fixed `Generating for` and `about ... left` assertions change. The row's partial-failure case expects `1 of 2 jobs could not be retried.`, but the four-job batch has only one failed or cancelled job. "Unfinished fixture jobs get a fixed `started_at`" also gives a Queued job a start time, although `started_at` means first seen running (lines 473-475).
+PROPOSAL: Name the one fixture job that runs (for example, the four-job batch's Generating job, which is also the one with the seeded thumbnail), give a fixed `started_at` only to that job, say how the queue spec keeps it running while it submits its own jobs (a separate stack or a fake control), and give the batch used for the partial-failure case two failed or cancelled jobs.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-27 (line 1188); Design > Verification commands (fixture paragraph, lines 1115-1117); Design > Page (times, lines 764-766)
+EVIDENCE: The AC-27 row asserts "a fixture job with null `startedAt` shows neither waited nor generation time". The fixture paragraph says "done jobs have fixed start and finish times (their generation times known)", so as Design reads, no done fixture job has a null `startedAt`. `library.spec.ts` runs on the shared seeded container (lines 1075-1077), where such a job can only come from the seed. As specified, that proof cannot be executed.
+PROPOSAL: Add one done fixture job with `started_at` null (as if it ran while the app was down) to the fixture paragraph and T52.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-22 (line 1183); Tasks T43 (line 1285) and T56 (line 1293); Acceptance Criteria AC-22 (line 1150)
+EVIDENCE: AC-22 requires that "the rendered page passed the design review Design names". The row says "The design review is recorded in T43's evidence". T43 is the ticked review of the previous VH Midnight page (its evidence names screenshots 1280x720-submitted and 320x568-preview from before shadcn). This revision adds T56, "the design review of the rebuilt page". Read literally, the proof is met by T43's old evidence, which can pass on a shadcn page that was never reviewed.
+PROPOSAL: Change the row to "recorded in T56's evidence", reviewing the rebuilt page at this revision.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T30 line 1249, T56 line 1293); Test Plan row AC-09 (line 1170)
+EVIDENCE: The AC-09 row includes "A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots". That check was done in T30 on the page before this revision. Criterion ticks and evidence reset on a normative revision, and T55 rebuilds every journey on new components. No unchecked task reruns the zoom check: T56 covers the design review and screenshots at the viewport matrix only. conventions/frontend-testing.md (Responsive visual quality) asks to "Record the actual zoom method and effective viewport" for affected flows.
+PROPOSAL: Add the 200 percent zoom manual check of the rebuilt page to T56 or a new task, recording the method and effective viewport.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1102-1105); Acceptance Criteria AC-22 (line 1150)
+EVIDENCE: conventions/frontend-testing.md (Visual record in the pull request): "Take both sides with the same fixture data, viewport and theme ... so the only difference is the change." Design instead has each side seed with its own executable, and the fixtures differ (a four-job batch, the running thumbnail, fixed times, and the base's Hunyuan3D-era rows), with the differences named. The same fixture data can be had: the base's `seed` writes a schema-1 directory, and head's executable migrates schema 1 to 2 on start (lines 580-587), so both sides can serve copies of one directory. The new states then get after-only captures from head's fixture. Design settles this deviation from a convention without an Open Question. This traces to the R-18 F-01 fix.
+PROPOSAL: Take the before-and-after pairs from one base-seeded directory, migrated by head for the after side, and capture the added states from head's own fixture. Otherwise, raise the deviation as an Open Question.
+
+FINDING: F-11
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-11 (line 1172); Acceptance Criteria AC-11 (line 1139)
+EVIDENCE: The row asserts "that no file outside `app/server`, `app/web`, `app/e2e` and `app/memory` posts to `/api/batches`". It does not say how "posts to" is detected, and it lists no must-pass or must-fail examples, although the standard (Test plan) requires them for a proof that judges free text with a pattern. The test itself lives in `app/docs/docs.test.ts`, outside the allowed folders, and must contain the string it looks for, so a plain search for `/api/batches` fails a correct tree unless the test skips its own file. Today `git grep '/api/batches'` outside those folders finds only app/cli/verify-live.ts:46, which T50 removes. This row was added in this revision (R-18 F-19), so it has not passed review.
+PROPOSAL: Define the match (for example, a `fetch` or `curl` call whose URL contains `/api/batches`, searched in tracked source and script files, excluding app/docs), and list must-fail examples (a fetch to `${base}/api/batches`, `curl -X POST .../api/batches`) and must-pass examples (the docs test itself, a README sentence naming the route).
+
+FINDING: F-12
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 101-111 and 96-99)
+EVIDENCE: Lines 105-106 say "library cards and the preview show how long a job waited and generated". Design gives cards only `Generated in <duration>` (line 781); waited time is only in the preview (lines 787-790). The summary says schema 2 adds a column but not that a rollback to v0.1.0 now restores the pre-upgrade `schema-1` backup, so jobs created after the upgrade disappear from the app (lines 594-600). That is a recovery effect the owner accepts with "no rollback check across the revision".
+PROPOSAL: Say cards show the generation time and the preview shows all three times, and add one sentence that rolling back to v0.1.0 restores the pre-upgrade backup and drops jobs created since.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-28 (line 1156); Test Plan row AC-22 (line 1183); Design > HTTP API (lines 635-639)
+EVIDENCE: AC-28 says "schema version 2 adds the column with null for existing rows", but schema 2 adds two columns, `shared_style` and `queued_at` (lines 585-587). Its "last value used in that browser" reads as saved on submit, while Design saves on every change (line 738). The AC-22 row still calls `hold-accept` the fake's "new" control, though T40 added it. The HTTP API sentence lists `queuedAt` after the `sourceReady` clause ("... `sourceReady`, which is true when ... and `queuedAt`; the server decides ..."), which reads as part of the `sourceReady` definition.
+PROPOSAL: Write "adds the `shared_style` and `queued_at` columns" and "the last value entered in that browser" in AC-28, drop "new" in the AC-22 row, and move `queuedAt` next to the other times in the HTTP API sentence.
+
+### R-20
+
+TARGET: 05f83e45606b6e4fb3700652dd71ecbadb81c03b
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan row AC-15 (line 1217, last sentence); Tasks T44 (line 1360); Context > Owner summary (lines 96-99 and 122-126); Acceptance Criteria AC-15 (line 1183)
+EVIDENCE: The AC-15 row now says the owner accepted the 2026-11-22 production upgrade from `0.2.0-feat-asset-studio.1` (schema 1) to `.3` (schema 2) "in place of rerunning the manual procedure, which needs a database at the older schema". T44 replaces `check-upgrade.sh` with that record. The summary says the check "no longer runs between the two prereleases of this revision, because production already holds the newer schema". That reason is false for the procedure as the row writes it. `scripts/deploy/check-upgrade.sh` at 05f83e4 deploys FIRST, deploys SECOND, reruns SECOND, removes FIRST's image, runs rollback.sh and then runs the logon test. None of these steps needs an older schema. `scripts/deploy/remote/rollback.ps1:13-15` restores a backup only when the two images' schemas differ. Two schema-2 prereleases, for example `.3` and this revision's Ultra prerelease, pass the new step 4 guard ("proceeds when it is equal or higher") and run the whole procedure on production as it is. Rollback across the schema change is already out of scope (Scope, line 285). The substitute only shows the migration, its backup and that the data was kept. It does not show these AC-15 clauses for this revision's code: a rerun keeps the previous-version record, rollback reloads a missing image and returns the previous version serving again, and the logon task brings the app back. The only checks left for those clauses are stubbed bats tests. AC-15 is composite and "a passing subset never upgrades a composite criterion", so an implementation review cannot find AC-15 met. A past production event is also not one of the proof kinds the standard allows ("a test, a scenario with a pass condition, or a written manual procedure"). The document records no evidence for it either: no job counts, IDs or backup file name. The owner accepted the substitution on this false premise. This traces to the change this revision made.
+PROPOSAL: Run `check-upgrade.sh` between two schema-2 prereleases (for example `.3` and the Ultra prerelease) and record the result under AC-15. Keep the production 1 to 2 upgrade as extra evidence for the migration and backup, with its observed job counts and backup name. If the owner still wants to skip the procedure, raise that as an Open Question with the corrected premise and name the AC-15 clauses that would stay unproven.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-15 (line 1183, last clause); Design > Deployment and exposure (deploy.sh steps 1, 3 and 4, lines 943-963); Context > Owner summary (lines 122-123); Test Plan row AC-15 (line 1217, bats sentence); Tasks T63 and T64 (lines 1355-1356)
+EVIDENCE: AC-15 requires that `deploy.sh` refuse an older-schema image "before changing anything on `win-main`". Design puts the comparison at step 4, "before anything below changes". By then, step 1 may already have registered `AssetStudio-Docker` and started Docker Desktop, and step 3 has already run `docker load` and tagged the image on `win-main`. Asking the image for its `schema-version` also needs the image loaded there. The bats row and T63 check only that no `docker compose`, file copy or `current.json` write happens. The criterion therefore cannot be met as worded, and the proof checks something weaker than the criterion states. The summary says "before it changes anything". This traces to the change this revision made.
+PROPOSAL: Word AC-15 and the summary as Design does: before it writes any file, `current.json` or `.env`, or touches the Compose project on `win-main`. Alternatively, move the comparison before step 3 by running `schema-version` on `fedora-43` against the verified image.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (step 4, lines 960-963); Context > Owner summary (lines 122-126); Test Plan row AC-15 (bats sentence, line 1217); Tasks T63 (line 1355)
+EVIDENCE: The summary says `deploy.sh` "refuses a version that cannot read the deployed database". Step 4 compares the new image with "the currently deployed image" named by `current.json`, not with the database. The two differ in exactly the incident this revision describes. After an older prerelease was deployed over the upgraded database, `current.json` named a schema-1 image while the database was at schema 2. In that state the guard lets another schema-1 image through, and that image cannot start. Step 4 also does not define what happens when the image `current.json` names is no longer loaded on `win-main`. The AC-15 procedure itself removes images with `docker image rm`, and `rollback.sh` reloads a missing image from its Release record, but deploy has no such rule. Nor does step 4 say what happens when the `schema-version` call fails (SSH drop, Docker error): stop, or proceed as for a first deploy. The bats row covers only lower, equal, higher and nothing deployed. This traces to the change this revision made.
+PROPOSAL: Compare against the schema the database actually holds. Read `meta.schema_version` from the data volume in a throwaway container, as `rollback.ps1` already reads the backup folder with `alpine:3.22`. Otherwise, state that the guard compares images, and say what happens when the deployed image is missing or the query fails (stop with a failure is the safe choice). Add those cases to the bats row and T63.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Scope > Out of scope (line 283); Design > Pipeline port and combined graphs (lines 356-363, 369-371); Context > Owner summary (lines 119-120); Acceptance Criteria AC-29 (line 1197); Test Plan row AC-29 (line 1231); Tasks T65 (line 1357)
+EVIDENCE: Scope still lists "Removing or changing `scripts/generate_3d.py`; it stays as the reference, Hunyuan3D path included" as out of scope. This revision changes that file: it adds `trellis_graph(..., ultra=True)` and a `--ultra` flag (Design lines 360-361, T65). AC-29 also requires the app's graph to match "exactly as the reference script's Ultra setting does". One implementer following Scope leaves the script alone and has nothing to compare the Ultra graph with. Another follows T65. This traces to the change this revision made.
+PROPOSAL: Change the Scope line to allow the one addition: changing `scripts/generate_3d.py` beyond adding the Ultra setting and its `--ultra` flag stays out of scope, and the Hunyuan3D path is kept.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Page (preview dialog, lines 822-827; job row chips, lines 793-796); Design > Verification commands (fixture paragraph, lines 1155-1163); Tasks T67 (line 1359); Test Plan row AC-29 (line 1231)
+EVIDENCE: T67 changes `app/web/Viewer.tsx` for "the preview's Detail fact". Design only says the preview shows "its detail, texture, seed" and gives the `Ultra` wording to the queue chip alone. `app/web/Viewer.tsx:120` today renders `${faces / 1000}k triangles`, so one implementer shows `30k triangles` and another shows `Ultra`, and no proof checks either. T67 also adds "an Ultra fixture job", which the fixture paragraph does not list. Its state is not given either. The `queue-board.spec.ts` chip check needs a queue row (unfinished, failed or cancelled), because library cards have no chips. A new unfinished fixture job also changes the summary counts, the queue-clear estimate and which fixture prompt the fake serves as running, all of which existing specs assert on fixed values (the R-19 F-06 concern). This traces to the change this revision made.
+PROPOSAL: State what the preview shows for an Ultra job (for example `Ultra (30k triangles)`) and add it to the AC-29 row. Add the Ultra fixture job to the fixture paragraph with its state, for example a `failed` or `cancelled` job outside the four-job batch so counts that are asserted elsewhere stay put. Name it in T67.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (before-and-after paragraph, lines 1142-1145); Tasks T44 (line 1360)
+EVIDENCE: Design still says "Each side seeds its own data directory with its own executable's `seed` command, because head's schema 2 is newer than the base executable accepts; the base fixture lacks the new multi-job batch ... and the record names those differences." T44 says the opposite: "pairs taken from one base-seeded directory that head's executable migrates, new states after-only from head's fixture (owner answer to R-19 F-10)". The owner's answer was put into the task but never into Design, so the normative text and the task contradict each other about how the T44 record is made. This predates this revision. It is unchanged since the accepted R-19 baseline.
+PROPOSAL: Replace the Design sentence with the owner's answer: both sides serve copies of one directory seeded by the base executable, head migrates its copy, and the states this revision adds are captured after-only from head's fixture.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (no task updates `README.md`); README.md:9 at 05f83e4; Design > Deployment and exposure (step 4, lines 960-963)
+EVIDENCE: `README.md` is in `covers` and says the mesh is "decimated to 5k, 10k or 20k triangles" (README.md:9). Its `deploy.sh` row does not mention the new refusal (README.md:37). No task in T63 to T67 or T44 touches `README.md`, and every task names the files it changes. So an implementer following the tasks leaves the README contradicting the shipped Detail options and deploy behaviour. This traces to the change this revision made.
+PROPOSAL: Add `README.md` to T67 (Ultra in the presets sentence) and T64 (deploy.sh refuses an image with an older schema than the deployed one).
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Submission, concurrency and idempotency (tick step 6, lines 515-521)
+EVIDENCE: Step 6 says a timed-out job "becomes `failed` with a timeout message" and does not give the text. The current text is `Stopped after running longer than 15 minutes.` (app/server/tracker.ts:349 and 353). Unless it changes, an Ultra job stopped after 30 minutes would report 15. This traces to the change this revision made.
+PROPOSAL: Say the message names the limit that applied, 15 or 30 minutes.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 362-363); Design > Restart, upgrade and rollback (lines 592-633)
+EVIDENCE: Design says Ultra "needs no schema change" but not what a rollback to the R-19 version does with Ultra rows. That version has the same schema, so `rollback.sh` restores nothing. It shows the job as `30k` (app/web/App.tsx:412 at 05f83e4). It posts pending or retried Ultra jobs with the standard steps and remesh 768, and times them out at 15 minutes. That is harmless, but it is a recovery effect the owner may want stated. This traces to the change this revision made.
+PROPOSAL: Add one sentence: after a rollback, the older version keeps Ultra jobs, labels them 30k and runs any it submits at the standard steps.
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 337-344); Context > Owner summary (lines 63-64 and 122-124)
+EVIDENCE: The Ultra measurement and the five-minute outage are stated without the command and output or log the standard asks Context and Design claims to cite ("a `file:line`, or a command and its output"). Background's earlier measurements name their commands. "The 15.3 GB VRAM peak" does not say which of the three runs it belongs to. The summary's preset list reads "1024 or 2048 textures" and leaves out 4096, although Ultra uses it. This traces to the change this revision made.
+PROPOSAL: Name how the Ultra runs were timed and sampled (for example the history timestamps and the VRAM sampler used) and which run reached 15.3 GB. Write "1024 or 2048 textures, or 4096 with Ultra" in the summary.
+
+### R-21
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 969-976); Test Plan row AC-15 (line 1231, the bats sentence and the last sentence); Tasks T44 (line 1374), T63 (line 1369) and T64 (line 1370); Acceptance Criteria AC-15 (line 1197, last clause); Context > Owner summary (lines 122-128)
+EVIDENCE: Step 4 runs `database-schema-version` in "the loaded image", the image being deployed, and "When either command fails, it stops with a failure too." Only images built from this revision will have that command. `v0.2.0-feat-asset-studio.3` points at 13a725f (`git ls-remote --tags origin`), and `git diff --stat 13a725f cc73fb2` changes only the plan, so .3's executable is the current app/server/main.ts. Its switch knows `schema-version`, `restore-backup`, `serve` and `seed`, and its `default:` branch prints `unknown command` and returns 2. scripts/deploy/check-upgrade.sh starts with `deploy "$FIRST"` and exits 1 with `deploy.sh ${1} failed` when deploy.sh fails. So `scripts/deploy/check-upgrade.sh 0.2.0-feat-asset-studio.3 <Ultra prerelease>`, which the AC-15 row and T44 now require, stops at its first step once T64 lands, and T44 runs it after the Ultra deploy, with the guard in place. The guard also refuses every pre-revision image at the same schema, not only older-schema ones, which the summary and AC-15 do not say. The T63 bats cases stub `database-schema-version` with a number or a plain failure, so they never model an older image that lacks the command. R-20 F-01 asked for exactly this run, and cc73fb2 adds it, so R-20 F-01 is still unresolved in effect. This traces to the change cc73fb2 made for R-20 F-03 and the owner's answer that the guard stops when the schema cannot be read.
+PROPOSAL: Read the database's schema with a reader that does not depend on the image being deployed, for example the newest loaded image that has the command or a pinned SQLite helper container, and compare it with the new image's `schema-version`, which every release has. Add a bats case for an image that answers `unknown command` at the same schema (it proceeds), and keep the check-upgrade run between .3 and the Ultra prerelease executable. If the owner instead accepts that pre-revision images can no longer be deployed, pick two schema-2 versions that both have the command for check-upgrade, and say so in the summary.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (fixture paragraph, lines 1173-1177); Test Plan rows AC-29 (line 1245) and AC-26 (line 1242); Tasks T67 (line 1373)
+EVIDENCE: Design puts the cancelled Ultra fixture job "in the first prompt batch, outside the four-job batch, so the asserted summary counts, estimates and running prompt stay as they are". The first prompt batch (app/server/seed.ts:47-54, headed `a wooden treasure chest`) is the batch the partial-failure test retries. It now holds failed id 5, cancelled id 6 and failed id 11, and app/e2e/queue-board.spec.ts:84-87 asserts `2 of 3 jobs could not be retried.` with the unfinished limit at 3. Another cancelled job there makes that `3 of 4`, so an asserted value does change. The AC-26 row still names `queue.spec.ts` and expects `1 of 2 jobs could not be retried.`. The AC-29 row and T67 name `queue-board.spec.ts`, which Design never mentions (Design line 1123 says "the queue scenario"). The AC-29 row also submits "an Ultra batch through the page on that spec's stack". The fake runs the fixture's Generating job only while no real prompt runs (the R-19 F-06 point), so on a stack whose summary and `Generating for` values are asserted, that submission changes them. This traces to the R-20 F-05 fix.
+PROPOSAL: Put the cancelled Ultra job in a batch that no asserted count or retry result covers, or state the new `3 of 4` value. Name `queue-board.spec.ts` in Design and in the AC-26 row with its current assertion. Say the Ultra submission runs on its own stack.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Submission, concurrency and idempotency (content hash, lines 465-467; tick step 5, lines 518-520); Design > Restart, upgrade and rollback (queued_at, lines 628-629); Design > Page (token copy, lines 743-746; `--input`, lines 740-741; colour paragraph, lines 752-766; summary strip, line 792; estimates, lines 813-816); Design > Verification commands (fixture paragraph, lines 1167-1173); Acceptance Criteria AC-22 (line 1204) and AC-28 (line 1210); Test Plan rows AC-11 (line 1227), AC-22 (line 1238), AC-26 (line 1242) and AC-27 (line 1243)
+EVIDENCE: The R-19 should-fix findings were built through T57 to T62, but the normative text still says what R-19 found wrong. (1) The hash is still "the kind, the preset values, then each prompt line" with no `engine: "trellis"`, while T57 and app/server/batches.ts:78-82 keep v0.1.0's encoding (R-19 F-01). (2) The token block is still "copied into `app/web/styles.css` as written there", and the colour rules and AC-22 use unprefixed `--accent`, `--ok`, `--control-bg`. `--input` is still "the strong control border", and Design does not mention the ToggleGroup `bg-primary` edit, the translucent Button variant or `.dark` on `<html>` that T61 built (R-19 F-02, F-03). (3) A Waiting job's estimate still counts "every submitted app job", which double-counts the running job, and `Queue clear` is still undefined. The AC-26 row repeats "over all submitted" (R-19 F-04). (4) Step 5 and the schema 2 sentence still do not reset `queued_at` on a lost-job resubmission, while T58 and app/server/tracker.ts:333 do (R-19 F-05). (5) The fixture paragraph still says "unfinished fixture jobs get a fixed `started_at`" and lists the running thumbnail job apart from the four-job batch. It also gives every done job a start time, while seed.ts:49 seeds 木箱 with `startedAgo: null`, which the AC-27 row needs (R-19 F-06, F-07). (6) The AC-22 row still says "The design review is recorded in T43's evidence", the pre-shadcn review, not T56 (R-19 F-08), and still calls `hold-accept` "new". (7) The AC-11 row still says "posts to `/api/batches`" with no match rule or examples, while T62 defines both (R-19 F-11). Because no clean pass has followed that finding, the row has not passed review. (8) AC-28 still says "adds the column". This predates this revision and is unchanged since the R-19 acceptance at 2420d68. R-20 raised only the before-and-after item of this group (R-20 F-06, now fixed).
+PROPOSAL: Fold each implemented R-19 answer into the Design sentences and Test Plan rows listed above, in the wording T57 to T62 record. Point the AC-22 row at the review of the page as it stands after T67.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Scope > Out of scope (line 288); Context > Owner summary (lines 96-97 and 126-128)
+EVIDENCE: Scope excludes "any rollback check across this revision", and the summary says "no check covers that". But this revision's T44 and AC-15 row run `check-upgrade.sh`, which rolls back from the Ultra prerelease to .3. The phrase meant the Hunyuan3D and schema 2 revision, but the document now has three revisions under that name.
+PROPOSAL: Write "any rollback check across the Hunyuan3D removal and schema 2 change" in Scope and the summary.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Pipeline port and combined graphs (lines 345-349); Context > Background (lines 192-193)
+EVIDENCE: Background writes the card as "15.99 GB", which is 16376 MiB in GiB, so "GB" there means GiB. Design calls the Ultra peak "15.3 GB VRAM peak (15272 MiB ...)". 15272 MiB is 14.9 GiB, or 16.0 decimal GB, and neither is 15.3. The claim "about 4 GB of the 32 GB system memory stayed free" cites no command or output.
+PROPOSAL: Write the peak as 14.9 GB in the document's unit (15272 MiB), and name the command that showed the free system memory.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 969-975)
+EVIDENCE: On a first deploy, `docker run` with the data volume mounted creates `asset-studio_data` before Compose does, so the volume has no Compose labels. That is a write on `win-main` before step 5, and Compose later warns that the volume "was not created by Docker Compose". Step 4 treats a first deploy only as `none`.
+PROPOSAL: Check that the volume exists with `docker volume inspect` first, and treat a missing volume as `none` without running a container.
+
+### R-22
+
+TARGET: d8ba0620c20c69cd5c260d2ea07f5f4b5bd21557
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 979-992); Acceptance Criteria AC-15 (line 1215, last clause); Test Plan row AC-15 (line 1249, the `bun test app/server` sentence); Tasks T63 (line 1387) and T64 (line 1388)
+EVIDENCE: Step 4 runs `database-schema-version` "in a throwaway container with the data volume mounted, which opens `/data/asset-studio.sqlite` read-only", and does not say whether the volume is mounted read-only. The existing precedent mounts it `:ro` (scripts/deploy/remote/rollback.ps1:17, `-v "${volume}:/data:ro"`). A WAL database closed cleanly has no `-wal` or `-shm` file, and a read-only open then needs to create them. I observed this with bun 1.4.3 and with Python's sqlite3. I made a WAL database, closed it, and opened it read-only in a read-only directory. Both failed with `attempt to write a readonly database`. In a writable directory the same read-only open printed the value and left `x.sqlite-wal` and `x.sqlite-shm` behind. So an implementer who mounts `:ro` builds a guard that stops every deploy while the app is stopped, for example after `docker compose down` or when the container exits at start as in the 2026-11-22 incident, because the guard reports that the schema could not be read. An implementer who mounts read-write leaves files on the volume, and a unit test that checks "without writing to it" by listing the directory would fail that correct build. The unit test as written can pass on either build if it opens a database whose `-wal` and `-shm` already exist. This traces to the step 4 reader that cc73fb2 added and HEAD kept.
+PROPOSAL: State that the volume is mounted read-write, the database is opened read-only, and `-wal` and `-shm` files may be created. Add a unit case for a cleanly closed WAL database with no `-wal` or `-shm`, and a bats assertion that the reader's mount is not `:ro`.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan rows AC-28 (line 1262, the replay case), AC-06 (line 1240) and AC-22 (line 1256), AC-25 (line 1259); Tasks T57, T58 and T61 (lines 1375, 1377, 1383)
+EVIDENCE: HEAD folds the built R-19 answers into Design, and most R-21 F-03 items are now resolved. The Test Plan rows still leave out three proof changes that R-19 asked for and T57, T58 and T61 built. (1) R-19 F-01 asked that the AC-28 replay case "use a hash recorded from v0.1.0's encoding, not one computed by the new code". The row still says only "a pre-upgrade batch's request replayed without the field still matches its stored hash". That passes on an encoding without `engine` if the test computes the stored hash with the new code. T57's evidence records the literal v0.1.0 hash, but the row does not require it. (2) Design step 5 (line 525) now resets `queued_at` on a lost-job resubmission. R-19 F-05 asked to add that case to the AC-06 restart tests or the AC-28 row. Neither row mentions it, although T58 added the test. (3) Design (lines 748-750) now requires ToggleGroup selection with `bg-primary` and a translucent default Button. R-19 F-03 asked for a style.spec assertion of the selected Detail segment's colour and of a translucent non-Generate button, and T61's evidence says they exist. Neither the AC-22 row nor the AC-25 row names them, so the proof as written passes when the selected segment looks like the hovered one. This traces to the R-21 F-03 fix, which changed Design but not these rows.
+PROPOSAL: Add to the AC-28 row that the replay case uses a hash recorded from v0.1.0's literal encoding. Add the `queued_at` reset on a lost-job resubmission to the AC-06 row. Add to the AC-22 row (or AC-25) the selected Detail segment's background `rgb(79, 140, 255)` and a translucent non-Generate button.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-26 (line 1260, "a running fake job whose image step the fake writes early showing its source image"); Design > Verification commands (fixture paragraph, lines 1189-1191)
+EVIDENCE: The row expects the source image of "a running fake job whose image step the fake writes early". Design's fixture paragraph says something else: the four-job batch's Generating job "is the one fixture prompt the fake serves as running" and its "256-pixel source thumbnail the seed writes into the fake's output folder". The built test checks the seeded thumbnail (app/e2e/queue-board.spec.ts:50, `Source of a glowing crystal`; app/server/seed.ts writes `thumb_00001_.png` for the running fixture job). No test in queue-board.spec.ts submits a job whose thumbnail the fake writes early (app/fake-comfy/fake.ts:199). Design never describes that early write. Read literally, an implementation reviewer finds no check for the row's case, while the seeded case Design describes is not named. This row predates this revision. It is unchanged since the R-19 acceptance, and R-21 F-02 changed other parts of it.
+PROPOSAL: Write "the fixture's Generating job, whose thumbnail the seed writes, shows its source image". Alternatively, name and add the early-write case on its own stack.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-29 (line 1263, "the tracker cancels a running Ultra job past 30 minutes but not at 20"); Acceptance Criteria AC-29 (line 1229, "timed out only after 30 minutes of running"); Design > Submission, concurrency and idempotency (tick step 6, lines 528-531)
+EVIDENCE: AC-29 says an Ultra job is timed out only after 30 minutes. The row checks only that the job is not cancelled at 20 minutes and is cancelled past 30. A tracker with any Ultra limit from 20 to 30 minutes, for example 25, passes the row. The row was added in this revision.
+PROPOSAL: Check that the tracker leaves a running Ultra job alone just before 30 minutes (for example at 29 minutes 58 seconds on the faked clock) and cancels it just after.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-11 (line 1245); Acceptance Criteria AC-11 (line 1211); Tasks T62 (line 1385)
+EVIDENCE: The row now scans tracked `.ts`, `.tsx`, `.js`, `.mjs`, `.sh`, `.ps1` and `.py` files for "a line with a `fetch(` or `curl` call containing `/api/batches`". It still misses the usual clients in three of the languages it scans. In Python, the repository's own pipeline sends requests with `urllib.request` (scripts/generate_3d.py:27-30). PowerShell uses `Invoke-WebRequest` or `Invoke-RestMethod`, and shell scripts can use `wget`. The row also misses a fetch whose URL is built on an earlier line, as in `const url = `${base}/api/batches`; await fetch(url, { method: "POST" })`. Each of these submits generations to a deployed app and passes the check. I ran `git grep` with the row's pattern outside the excluded folders and it finds nothing today, so a wider match would still pass the current tree. HEAD changed this row, so it has not passed review, and the widening rule for nits does not apply yet.
+PROPOSAL: Match any line containing `/api/batches` in those files outside the excluded folders, or any of `fetch`, `curl`, `wget`, `urllib`, `requests`, `Invoke-WebRequest` and `Invoke-RestMethod` within a few lines of it. Add must-fail examples: a Python `urllib.request.Request(base + "/api/batches", ...)`, an `Invoke-RestMethod -Method Post .../api/batches`, and a URL assigned on the line before the `fetch`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-15 (line 1215, "refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read"); Context > Owner summary (lines 122-124)
+EVIDENCE: Grammatically, "whose schema it cannot read" refers to the image. Every release answers `schema-version` (main.ts case `schema-version`), so read that way the clause never applies. Design step 4 (lines 989-991) and the summary refuse the deploy when the database's schema cannot be read, that is, when neither image has `database-schema-version` or the command fails. Design and the bats row agree with each other. Only the criterion's wording differs.
+PROPOSAL: Write "or any image when the database's schema cannot be read".
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: nit
+WHERE: Test Plan row AC-15 (line 1249, last sentence); Tasks T44 (line 1392)
+EVIDENCE: `check-upgrade.sh` starts with `deploy "$FIRST"` and exits on failure (scripts/deploy/check-upgrade.sh, `deploy` function). With the new step 4, `deploy.sh 0.2.0-feat-asset-studio.3` proceeds only when `current.json` names an image that has `database-schema-version`, because .3 answers `unknown command` (app/server/main.ts:54-56 at 13a725f's tree). T44 deploys the Ultra prerelease first, so the run works. The AC-15 row states the procedure without that precondition, so someone who runs it while production is on .3 stops at the first step.
+PROPOSAL: Add to the AC-15 row that the procedure starts with the Ultra prerelease deployed, as T44 orders.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 981-983); Test Plan row AC-15 (line 1249, "runs no container at all, proceeding, when `docker volume inspect` finds no volume")
+EVIDENCE: `docker volume inspect` exits non-zero both for a missing volume and for an engine or SSH error. Step 4 says a missing volume means `none` and the deploy proceeds. It does not say how other failures of that call are told apart, so the simplest build fails open and skips the guard on any error. Steps 1 to 3 have just reached the engine, so the risk is small. This traces to the R-21 F-06 fix.
+PROPOSAL: Proceed only when the call reports that no such volume exists. Stop with the could-not-read failure for any other error, and add that bats case.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Verification commands (fixture paragraph, lines 1184-1187)
+EVIDENCE: The sentence says "done jobs have fixed start and finish times ... except one, `木箱`, ... and the four-job batch's Generating job is the only one with a fixed `started_at`". Read literally, "the only one" contradicts the done jobs' start times stated just before. The intended meaning, the only unfinished fixture job with a start time, matches app/server/seed.ts.
+PROPOSAL: Write "the only unfinished fixture job with a fixed `started_at`".
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 124-127); Design > Pipeline port and combined graphs (lines 351-352)
+EVIDENCE: R-20 F-10 asked for citations for the Ultra measurements and the outage. HEAD names the sampler and `/system_stats` for the Ultra run, but two claims are still uncited. The five-minute outage on 2026-11-22 and the quoted container message have no log or command. The bf16 run "staged 9854 MB in system memory" names no command either. The standard asks Context and Design claims for "a `file:line`, or a command and its output".
+PROPOSAL: Name where the outage duration and message came from (for example `docker logs` of the container, or the Compose events with their timestamps) and the command that reported the 9854 MB.
+
+### R-23
+
+TARGET: 357b5275097c63612ad6bbe3fd41b1b285d3bb9d
+
+CRITERION: AC-01 For every input in the golden set, the TypeScript image and TRELLIS.2 graph builders return the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering, rewiring, prefix and thumbnail rules in Design.
+VERDICT: met
+EVIDENCE: `bun test app/server app/pipeline app/web app/docs app/cli app/fake-comfy ./.github` and `bun run golden:check`, 357b527, 186 pass 0 fail including app/pipeline/graphs.test.ts (golden cases and combiner rules), golden check `golden graphs match scripts/generate_3d.py`, none
+
+CRITERION: AC-02 Submitting a batch through the page creates one pending job per prompt line and variant, or per image; a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, more than 200 MiB of images, a malformed batch ID, or would exceed 100 unfinished jobs is rejected with a message that names the problem and creates no job and leaves no file; concurrent batches never take the unfinished count above 100; and a repeated batch ID, sequential or concurrent and with any multipart boundary, returns the existing batch, or a conflict when its content differs, without creating anything and without touching the first batch's uploads.
+VERDICT: met
+EVIDENCE: the unit run above (app/server API tests, 186 pass) and `E2E_TARGET=source npx playwright test --project=chromium --project=firefox --project=signin-chromium --project=signin-firefox`, 357b527 (dist/web byte-identical to a fresh scratch build of the commit), 53 passed 1 skipped including submit.spec.ts in Chromium and Firefox; CI run 45042346062 at b4c366e (differs only in the document) 54 passed, none
+
+CRITERION: AC-03 Each job is submitted to ComfyUI as one prompt with its own attempt ID and output prefix, jobs run in submission order, and each ends `done` with its GLB, source image and thumbnail stored, or `failed` with ComfyUI's error message, including when ComfyUI rejects the prompt or the upload, or answers one job with three server errors in a row while later jobs still run.
+VERDICT: met
+EVIDENCE: unit run above (tracker tests against the fake, 186 pass) and local Playwright queue.spec.ts passed, 357b527, all pass, none
+
+CRITERION: AC-04 While ComfyUI is unreachable the page shows it offline, and while it reports a version older than 0.46.2 or none the page shows it incompatible and the app neither submits, reconciles, cancels nor times out anything, whether or not jobs are unfinished; every job keeps its state, and jobs continue once a compatible ComfyUI answers again.
+VERDICT: met
+EVIDENCE: unit run above (offline and incompatible tracker tests) and local Playwright offline.spec.ts passed, 357b527, all pass, none
+
+CRITERION: AC-05 A pending job can be cancelled, and ComfyUI receives a per-job cancel only when the job has an attempt ID; a submitted job is cancelled through ComfyUI's per-job cancel for its own prompt ID, unless it already finished, in which case it ends `done`; a failed or cancelled job can be retried and runs again as a new ComfyUI prompt with the same settings and seed; and a retry over the unfinished-job limit is refused with a message.
+VERDICT: met
+EVIDENCE: unit run above (cancel, race and retry tracker tests) and local Playwright queue.spec.ts cancel and retry passed, 357b527, all pass, none
+
+CRITERION: AC-06 After an app restart, a timeout or a ComfyUI restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted as a new prompt with a new output prefix up to twice and fails on the third loss; a prompt ComfyUI accepted before the app recorded it, or after the app's request timed out, is adopted rather than submitted twice; no asset directory is left half written; and the sweep removes orphaned uploads and the app's leftover files in ComfyUI's `asset-studio` folders.
+VERDICT: met
+EVIDENCE: unit run above (restart, fault-injection, timeout and sweep tests in app/server/tracker.test.ts, including the queued_at reset at lines 371 to 377), 357b527, all pass, none
+
+CRITERION: AC-07 The library lists done assets with thumbnails, shows an empty state when there are none, renders the selected GLB in a 3D viewer in Chromium and Firefox, and recovers from a failed viewer load through its retry button.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts at 357b527 passed in Chromium and Firefox except the Firefox render, skipped without local WebGL; CI run 45042346062 log at b4c366e (code identical) shows `E2E_REQUIRE_WEBGL: 1` and `[firefox] library.spec.ts:28 thumbnails load and the selected GLB renders in the viewer` passed, Firefox render observed through the CI log only
+
+CRITERION: AC-08 In Chromium and Firefox, a single asset downloads as a GLB, a selection of up to 100 assets and 2 GiB downloads as one zip holding each GLB, its source image and a `manifest.json` describing them, and a larger selection is refused with a message.
+VERDICT: met
+EVIDENCE: local Playwright export.spec.ts in Chromium and Firefox and app/server export tests in the unit run, 357b527, all pass, none
+
+CRITERION: AC-09 The page's sign-in, submit, queue and library journeys meet the layout and contrast rules in Design at every size in the project viewport matrix and at 200 percent zoom, including the open preview dialog with Close and Download visible and through a resize while it is open, are usable by keyboard with labelled controls, and the library and viewer journey works with reduced motion.
+VERDICT: met
+EVIDENCE: local Playwright layout.spec.ts (matrix, 640x450 reflow, dialog resize, keyboard, reduced motion) passed at 357b527; in addition I loaded the dev page (dist/web identical to the commit's build) at a 640x360 CSS viewport with device scale 2, chose Ultra 30k, observed 0 px horizontal overflow and no clipped button or label, and reviewed the screenshot; limitation: the document's manual 200 percent check (T56) predates the T67 composer change and my check is an emulation covering the composer and queue only (see F-02)
+
+CRITERION: AC-10 The deployed app answers over HTTPS at `win-main`'s tailnet name from another device in the owner's tailnet with the deployed version and commit, while port 8790 and ComfyUI's port 8188 are not reachable on `win-main`'s tailnet address.
+VERDICT: met
+EVIDENCE: from fedora-43, `curl https://win-main.tail6948f.ts.net/api/health`, deployed 0.2.0-feat-asset-studio.4, answered version 0.2.0-feat-asset-studio.4 and commit b4c366e7503a5bb16250d59aaf52c62d11e77d63; `curl --connect-timeout 5` to the tailnet address on 8790 and 8188 both timed out (exit 28); /api/jobs without credentials 401; the release deploy from main after merge (T45) is still to come
+
+CRITERION: AC-11 No script, command or check in the repository submits generations to a deployed app; generation is verified only against the fake ComfyUI, and the README, `AGENTS.md` and `package.json` name no live generation check.
+VERDICT: met
+EVIDENCE: unit run above includes app/docs/docs.test.ts (11 pass: verify-live.ts absent, no verify:live script or mention, tree scan with its must-fail and must-pass examples); `git grep api/batches` finds only excluded test or app folders and the document; scripts/deploy only calls /api/health and /api/jobs on localhost, 357b527, none
+
+CRITERION: AC-12 Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
+VERDICT: not verified
+EVIDENCE: unit auth tests in the unit run and local Playwright signin.spec.ts in signin-chromium and signin-firefox passed at 357b527; the deployed two-device rate-limit step was not run by me, because sending wrong tokens changes production limiter state and the dispatch forbids that; T44 records it, but its execution was not observed in this review
+
+CRITERION: AC-13 The production page's initial JavaScript stays within 150 KiB after gzip at level 9, and the 3D viewer loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
+VERDICT: met
+EVIDENCE: `bunx vite build --outDir <scratch>` then app/cli/size.ts checkSize on it, 357b527, initial 120210 bytes (117.4 KiB), viewer 287283 bytes (280.5 KiB), ok true; size fixture tests in the unit run passed, none
+
+CRITERION: AC-14 The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows calling the organisation's reusable workflows with a completed run of each on the default branch, a Renovate configuration, and the dependency graph, Dependabot alerts, secret scanning, push protection and automatic branch deletion turned on.
+VERDICT: not met
+EVIDENCE: `bash scripts/deploy/check-repo.sh`, vhco-pro/3d-assets-gen, 13 checks passed (visibility, licence, settings, dependency graph, Dependabot, workflows at a commit, runs and analyses on main, renovate.json) and `Renovate is active (Dependency Dashboard or a Renovate PR)` failed, exit 1; no renovate-runner run is recorded; waits on owner action #4 and T45
+
+CRITERION: AC-15 Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
+VERDICT: not verified
+EVIDENCE: `bunx bats scripts/deploy/tests` 38 ok 0 not ok (schema guard cases 20 to 27, rollback cases 32 to 36, check-upgrade cases) and app/server/store.test.ts in the unit run passed at 357b527; I read schema_guard in scripts/deploy/lib/common.sh:74-101 and found it matches the criterion; the win-main procedure (`check-upgrade.sh 0.2.0-feat-asset-studio.3 0.2.0-feat-asset-studio.4`) is recorded in T44, but I did not observe it run, because the dispatch forbids deploying
+
+CRITERION: AC-16 The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
+VERDICT: met
+EVIDENCE: seed and config tests in the unit run passed at 357b527; CI run 45042346062 log at b4c366e shows `Passed: ready at http://127.0.0.1:8790` and `Passed: dev readiness`, readiness observed through the CI log
+
+CRITERION: AC-17 The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
+VERDICT: met
+EVIDENCE: `bash scripts/deploy/check-image.sh 0.2.0-feat-asset-studio.4`, image sha256:cecf5b5c2bc6a5cf81811c4e8f3f2b570eaf15741b80ee8c4496cb403163e32d built from b4c366e, exit 0: release record, anonymous pull, cosign and attestations verified, starts as UID 65532 read-only with a fresh volume reporting its version; `bun test ./.github` (in the unit run) passed the Release step ordering tests, the image is from b4c366e, which differs from 357b527 only in the document
+
+CRITERION: AC-18 The page labels job states, the preset fields (Detail, Texture, Variants, Game-asset style, Seed, Shared style), the two banners and the library heading with exactly the terms in the Glossary.
+VERDICT: met
+EVIDENCE: local Playwright glossary.spec.ts passed, 357b527, pass, none
+
+CRITERION: AC-19 The command-line tools print labelled status lines, add no colour or cursor control when `NO_COLOR` is nonempty or the stream is not a terminal, offer an ASCII mode, and exit non-zero whenever a step failed.
+VERDICT: met
+EVIDENCE: `bun test app/cli` (in the unit run) and `bunx bats scripts/deploy/tests` report cases 19 and 28 to 31, 357b527, all pass, none
+
+CRITERION: AC-20 A 25-image batch at the 200 MiB cap, two such batches at once, and an export of 100 assets each complete without the container being killed for memory under its 1 GiB limit, and the server's anonymous memory stays below 512 MiB.
+VERDICT: met
+EVIDENCE: CI run 45042346062 at b4c366e (code identical to 357b527), `bun run verify` log `Passed: image build`, `Passed: memory check`; observed through the CI log, not run locally
+
+CRITERION: AC-21 The README names `bun run bootstrap`, `bun run dev`, `bun run seed`, `bun run verify`, `scripts/deploy/deploy.sh`, `scripts/deploy/rollback.sh` and `bun run clean`, how readiness is detected, the dependencies, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
+VERDICT: met
+EVIDENCE: app/docs/docs.test.ts in the unit run passed, and AGENTS.md at 357b527 contains the commands and the terminal-output route, none
+
+CRITERION: AC-22 The page uses the VH Midnight tokens and recipes Design names: the gradient body background, `color-scheme: dark`, solid `--ok` only on Generate, the two-column composer layout from 1024 pixels and one column below it, the exact badge colours, semantic colours on nothing but job states, banners, error messages, Generate and the Delete hover, long prompts clipped to two lines with their full text reachable (in the dialog for a library asset, through `More` in the queue), and a preview in a modal dialog (role dialog, aria-modal) that shows the full prompt and that Escape closes with focus returned to its opener in Chromium and Firefox; the rendered page passed the design review Design names; and the pull request carries the before-and-after record Design lists.
+VERDICT: not met
+EVIDENCE: local Playwright style.spec.ts passed in Chromium and Firefox at 357b527, and the T67 design review is recorded; but in PR #5 the final-page records (comments 7080862670 at 13a725f and 7082597436 at b4c366e) carry no clipped long-prompt card and no long-prompt queue row expanded through `More`, two states Design lists; `refs/pr-visuals/5` (5cb2915) has `pr-5-rework/` without them, and they exist only as `pr-5/long-prompt-card-*.png` and `pr-5/queue-row-expanded-after.png` from the superseded pre-shadcn page (comment 7079483290 at 2d9065d) (see F-01)
+
+CRITERION: AC-23 The app offers no engine choice and submits only TRELLIS.2 graphs; a batch that sends an engine other than `trellis` is refused with the Hunyuan3D message; the tracker cancels every unfinished Hunyuan3D job through the cancel path and deletes every finished one through the delete path, with its batch when no job is left and its files, never submits or retries a Hunyuan3D job, and leaves TRELLIS.2 rows and their files untouched; and the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+VERDICT: met
+EVIDENCE: unit run above (API and tracker Hunyuan3D removal tests, docs README test) and local Playwright glossary.spec.ts (no Engine field), 357b527, all pass, none
+
+CRITERION: AC-24 Every workflow sets `permissions: {}` at the top, a bash default shell and a timeout on every job that runs steps, and passes the pinned `actionlint` in `bun run verify`; `check-repo.sh` reports a failed API call as a failed check with its error; and the README records the security analysis coverage per language.
+VERDICT: met
+EVIDENCE: `bun test ./.github` and app/docs tests in the unit run, and `bunx bats scripts/deploy/tests` cases 5, 6, 37 and 38, 357b527, all pass; CI log shows `Passed: actionlint`, none
+
+CRITERION: AC-25 The page's controls are shadcn/ui components from `app/web/components/ui/` on Tailwind CSS v4, with shadcn's theme variables mapped to the VH Midnight tokens, and the bundle budgets of AC-13 still hold.
+VERDICT: met
+EVIDENCE: app/web/ui.test.ts in the unit run, local Playwright style.spec.ts data-slot assertions, and the scratch-build size check (117.4 KiB and 280.5 KiB), 357b527, all pass, none
+
+CRITERION: AC-26 The queue shows the summary strip with counts and the queue-clear estimate, groups jobs by batch with progress and working Cancel all and Retry failed, and shows per job the source image once it exists, the settings chips, queued and generating times, a progress bar and the start and remaining estimates computed from the typical duration as Design defines it.
+VERDICT: met
+EVIDENCE: app/web/queue.test.ts and app/server source-preview tests in the unit run, and local Playwright queue-board.spec.ts, 357b527, all pass, none
+
+CRITERION: AC-27 Library cards show the generation time, and the preview shows the time waited, the generation time and the total time.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts timing cases, 357b527, pass, none
+
+CRITERION: AC-28 A prompt batch's Shared style is stored on each job, joined into the graph's prompt text before the game-asset suffix, counted in the batch hash, kept by a retry, returned by the API and written to the manifest; an image batch with a Shared style is refused; the composer prefills the default or the last value used in that browser and resets to the default; and schema version 2 adds the `shared_style` column with null for existing rows.
+VERDICT: met
+EVIDENCE: app/server API, store migration and v0.1.0 replay-hash tests in the unit run and local Playwright submit.spec.ts Shared style cases, 357b527, all pass, none
+
+CRITERION: AC-29 Detail offers Ultra, which locks Texture to 4096 and shows its time note; an Ultra job's graph uses steps 20, 30, 20 and 20 and remesh 1024 exactly as the reference script's Ultra setting does, every other preset's graph is unchanged, the batch API refuses 30000 triangles without 4096 textures and 4096 textures without 30000 triangles, an Ultra job is timed out only after 30 minutes of running, and its chip reads `Ultra`.
+VERDICT: met
+EVIDENCE: `bun run golden:check` passed and the unit run (graphs.test.ts Ultra golden case, api.test.ts:144-146 pairing refusals, tracker.test.ts AC-29 timeout cases) passed; local Playwright submit.spec.ts and queue-board.spec.ts Ultra cases passed; on the dev page, choosing Ultra 30k left 1024 and 2048 disabled, selected 4096 and showed the note, 357b527, none
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Tasks (T44 evidence); Design, Verification commands (the before-and-after record list); Acceptance Criteria AC-22; Test Plan AC-22
+EVIDENCE: Design lists `the clipped long-prompt card, the long-prompt queue row expanded through More` among the states the delivering PR's record carries. `gh pr view 5 --json comments`: the shadcn rework record (comment 7080862670, head 13a725f) and the Ultra addendum (7082597436, b4c366e) have no long-prompt card and no expanded queue row, and `git/trees/5cb2915?recursive=1` shows `pr-5-rework/` without either. Those states exist only in the first record (7079483290, head 2d9065d, `pr-5/long-prompt-card-*.png`, `pr-5/queue-row-expanded-after.png`), which shows the pre-shadcn page this revision replaced. T44's evidence says `the full before-and-after record at 13a725f`, which is not what the PR shows.
+PROPOSAL: Capture the clipped long-prompt card (before and after) and the long-prompt queue row expanded through `More` from the final page using the same base-seeded method, push them to `refs/pr-visuals/5`, link them in a PR comment, then correct T44's evidence.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Tasks (T56 and T67 evidence); Test Plan AC-09
+EVIDENCE: The AC-09 row asks for a manual check at 200 percent browser zoom in Chromium on a 1280x720 window. T56 recorded it before T67 changed the composer, and T67's review covered only 1280x900, 390x844 and 320x568. My own 640x360 CSS-viewport emulation of the Ultra composer showed 0 px overflow and no clipped controls, so nothing appears broken, but the recorded manual check predates the final page.
+PROPOSAL: Rerun the 200 percent zoom check on the final page and record it under T45 or the next evidence pass.
+
+### R-24
+
+TARGET: a77bdf74d6e83696ac15b9b0600515fa5eec6f24
+
+CRITERION: AC-01 For every input in the golden set, the TypeScript image and TRELLIS.2 graph builders return the graph the matching Python builder in `scripts/generate_3d.py` returns, and each combined graph follows the node renumbering, rewiring, prefix and thumbnail rules in Design.
+VERDICT: met
+EVIDENCE: `bun test app/server app/pipeline app/web app/docs app/cli app/fake-comfy ./.github` and `bun run golden:check`, a77bdf7, 186 pass 0 fail including app/pipeline/graphs.test.ts (golden cases and combiner rules), golden check printed `golden graphs match scripts/generate_3d.py`, none
+
+CRITERION: AC-02 Submitting a batch through the page creates one pending job per prompt line and variant, or per image; a batch that is empty, has an over-long prompt, a wrong or oversized file, more than 25 jobs, more than 200 MiB of images, a malformed batch ID, or would exceed 100 unfinished jobs is rejected with a message that names the problem and creates no job and leaves no file; concurrent batches never take the unfinished count above 100; and a repeated batch ID, sequential or concurrent and with any multipart boundary, returns the existing batch, or a conflict when its content differs, without creating anything and without touching the first batch's uploads.
+VERDICT: met
+EVIDENCE: the unit run above (app/server API tests) and `E2E_TARGET=source npx playwright test --project=chromium --project=firefox --project=signin-chromium --project=signin-firefox`, a77bdf7 (dist/web byte-identical to a fresh scratch `vite build` of the commit), 53 passed 1 skipped exit 0 including submit.spec.ts in Chromium and Firefox; CI run 45047746705 at 357b527 (code identical) checks job 54 passed, none
+
+CRITERION: AC-03 Each job is submitted to ComfyUI as one prompt with its own attempt ID and output prefix, jobs run in submission order, and each ends `done` with its GLB, source image and thumbnail stored, or `failed` with ComfyUI's error message, including when ComfyUI rejects the prompt or the upload, or answers one job with three server errors in a row while later jobs still run.
+VERDICT: met
+EVIDENCE: unit run above (tracker tests against the fake) and local Playwright queue.spec.ts, a77bdf7, all pass, none
+
+CRITERION: AC-04 While ComfyUI is unreachable the page shows it offline, and while it reports a version older than 0.46.2 or none the page shows it incompatible and the app neither submits, reconciles, cancels nor times out anything, whether or not jobs are unfinished; every job keeps its state, and jobs continue once a compatible ComfyUI answers again.
+VERDICT: met
+EVIDENCE: unit run above (offline and incompatible tracker tests) and local Playwright offline.spec.ts, a77bdf7, all pass, none
+
+CRITERION: AC-05 A pending job can be cancelled, and ComfyUI receives a per-job cancel only when the job has an attempt ID; a submitted job is cancelled through ComfyUI's per-job cancel for its own prompt ID, unless it already finished, in which case it ends `done`; a failed or cancelled job can be retried and runs again as a new ComfyUI prompt with the same settings and seed; and a retry over the unfinished-job limit is refused with a message.
+VERDICT: met
+EVIDENCE: unit run above (cancel, race and retry tracker tests) and local Playwright queue.spec.ts cancel and retry, a77bdf7, all pass, none
+
+CRITERION: AC-06 After an app restart, a timeout or a ComfyUI restart, every job ends in the state ComfyUI's queue and history imply; a job ComfyUI lost is resubmitted as a new prompt with a new output prefix up to twice and fails on the third loss; a prompt ComfyUI accepted before the app recorded it, or after the app's request timed out, is adopted rather than submitted twice; no asset directory is left half written; and the sweep removes orphaned uploads and the app's leftover files in ComfyUI's `asset-studio` folders.
+VERDICT: met
+EVIDENCE: unit run above (restart, fault-injection, timeout and sweep tests in app/server/tracker.test.ts), a77bdf7, all pass, none
+
+CRITERION: AC-07 The library lists done assets with thumbnails, shows an empty state when there are none, renders the selected GLB in a 3D viewer in Chromium and Firefox, and recovers from a failed viewer load through its retry button.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts at a77bdf7 passed in Chromium, the Firefox render test skipped locally without WebGL (the one skip); CI run 45047746705 checks job log at 357b527 (code identical) shows `E2E_REQUIRE_WEBGL: 1` and `[firefox] library.spec.ts:28 thumbnails load and the selected GLB renders in the viewer` passed, Firefox render observed through the CI log only
+
+CRITERION: AC-08 In Chromium and Firefox, a single asset downloads as a GLB, a selection of up to 100 assets and 2 GiB downloads as one zip holding each GLB, its source image and a `manifest.json` describing them, and a larger selection is refused with a message.
+VERDICT: met
+EVIDENCE: local Playwright export.spec.ts in Chromium and Firefox and app/server export tests in the unit run, a77bdf7, all pass, none
+
+CRITERION: AC-09 The page's sign-in, submit, queue and library journeys meet the layout and contrast rules in Design at every size in the project viewport matrix and at 200 percent zoom, including the open preview dialog with Close and Download visible and through a resize while it is open, are usable by keyboard with labelled controls, and the library and viewer journey works with reduced motion.
+VERDICT: met
+EVIDENCE: local Playwright layout.spec.ts (matrix, 640x450 reflow, dialog resize, keyboard, reduced motion) passed at a77bdf7; I also drove Chromium at a 640x360 CSS viewport with device scale 2 against the dev page (its assets match the commit's build): sign-in, the main view, Ultra 30k chosen and the open preview dialog each had 0 px horizontal overflow and no button or label with scrollWidth over clientWidth, Close and Download GLB inside the viewport, no console errors, screenshots reviewed; limitation: this is device-scale emulation, not browser zoom, the same method T70 records (see F-01)
+
+CRITERION: AC-10 The deployed app answers over HTTPS at `win-main`'s tailnet name from another device in the owner's tailnet with the deployed version and commit, while port 8790 and ComfyUI's port 8188 are not reachable on `win-main`'s tailnet address.
+VERDICT: met
+EVIDENCE: from fedora-43, `curl https://win-main.tail6948f.ts.net/api/health` answered version 0.2.0-feat-asset-studio.4, commit b4c366e7503a5bb16250d59aaf52c62d11e77d63, ComfyUI reachable 0.46.2; `curl --connect-timeout 5` to 100.123.74.118 on 8790 and 8188 both exit 28; /api/jobs without credentials 401; the release deploy from main after merge (T45) is still to come
+
+CRITERION: AC-11 No script, command or check in the repository submits generations to a deployed app; generation is verified only against the fake ComfyUI, and the README, `AGENTS.md` and `package.json` name no live generation check.
+VERDICT: met
+EVIDENCE: app/docs/docs.test.ts in the unit run passed; `git grep api/batches a77bdf7` outside app/server, app/web, app/e2e, app/memory, app/docs and docs finds nothing; `verify:live` occurs 0 times in package.json, README.md and AGENTS.md, a77bdf7, none
+
+CRITERION: AC-12 Every API route except health and sign-in refuses a request without a valid token or session cookie; wrong tokens and cookies, on sign-in or any protected route, are rate limited per client address, with clients behind `tailscale serve` and Docker's published port counted separately; a page that receives a 401 stops polling and shows sign-in; and sign-in works in Chromium and Firefox and survives a reload.
+VERDICT: not verified
+EVIDENCE: unit auth tests in the unit run and local Playwright signin.spec.ts in signin-chromium and signin-firefox passed at a77bdf7; production /api/jobs without credentials answered 401; the deployed two-device rate-limit step was not run, because sending wrong tokens changes production limiter state and the dispatch forbids it; T44 records it, but its execution was not observed in this review
+
+CRITERION: AC-13 The production page's initial JavaScript stays within 150 KiB after gzip at level 9, and the 3D viewer loads only when an asset is opened and stays within 350 KiB after gzip at level 9.
+VERDICT: met
+EVIDENCE: `bunx vite build --outDir <scratch>` then app/cli/size.ts checkSize on it, a77bdf7, `{"ok":true,"initial":120210,"viewer":287283,"problems":[]}` (117.4 KiB and 280.5 KiB); size fixture tests in the unit run passed, none
+
+CRITERION: AC-14 The public repository has an Apache-2.0 licence, CodeQL and Scorecard workflows calling the organisation's reusable workflows with a completed run of each on the default branch, a Renovate configuration, and the dependency graph, Dependabot alerts, secret scanning, push protection and automatic branch deletion turned on.
+VERDICT: not met
+EVIDENCE: `bash scripts/deploy/check-repo.sh`, vhco-pro/3d-assets-gen, 13 checks passed (visibility, licence, branch deletion, secret scanning, push protection, dependency graph, Dependabot, workflows at a commit, CodeQL and Scorecard runs and analyses on main, renovate.json) and `Renovate is active (Dependency Dashboard or a Renovate PR)` failed, exit 1; no renovate-runner run is recorded; waits on owner action #4 and T45
+
+CRITERION: AC-15 Deploying a second time keeps the access token and the data, records the previous version only when the version changes, and a rerun of the same version keeps that record; rolling back stops the app, reloads the previous image when it is missing, restores the matching backup across a schema change, and returns the app to the previous version serving again; the logon task brings the app back after its image was removed; a backup taken while writes are still in the WAL restores completely; an executable refuses to start on a database with a newer schema version; and `deploy.sh` refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read, before it writes any file, `current.json` or `.env` or touches the Compose project there.
+VERDICT: not verified
+EVIDENCE: `bunx bats scripts/deploy/tests` 1..38, 38 ok, 0 not ok (schema guard, rollback and check-upgrade cases) and app/server/store.test.ts in the unit run passed at a77bdf7; the win-main procedure (`check-upgrade.sh 0.2.0-feat-asset-studio.3 0.2.0-feat-asset-studio.4`) is recorded in T44 and .artifacts/check-upgrade.log, but I did not observe it run, because the dispatch forbids deploying
+
+CRITERION: AC-16 The seed command is repeatable without duplicating rows, leaves non-fixture rows untouched, refuses a ComfyUI that is not the fake, and its fixture jobs keep their states while the app runs, including past the 15-minute timeout; `bun run dev` starts the fake and the server and reports ready, and the development token is refused against a ComfyUI that is not the fake.
+VERDICT: met
+EVIDENCE: seed and config tests in the unit run passed at a77bdf7; CI run 45047746705 checks job log at 357b527 (code identical) shows `Passed: ready at http://127.0.0.1:8790` and `Passed: dev readiness`, readiness observed through the CI log
+
+CRITERION: AC-17 The published image at its recorded digest runs as the non-root user with a read-only root filesystem and a fresh data volume and serves the page with its version and commit; its signature and its provenance and SBOM attestations verify; and its GitHub Release record exists only for a version whose scan passed.
+VERDICT: met
+EVIDENCE: `bash scripts/deploy/check-image.sh 0.2.0-feat-asset-studio.4`, image sha256:cecf5b5c2bc6a5cf81811c4e8f3f2b570eaf15741b80ee8c4496cb403163e32d from b4c366e (no non-document change between b4c366e and a77bdf7), exit 0: release record, anonymous pull, signature, provenance and SBOM verified, starts as UID 65532 read-only with a fresh volume and reports its version; `bun test ./.github` in the unit run passed the Release step ordering tests, none
+
+CRITERION: AC-18 The page labels job states, the preset fields (Detail, Texture, Variants, Game-asset style, Seed, Shared style), the two banners and the library heading with exactly the terms in the Glossary.
+VERDICT: met
+EVIDENCE: local Playwright glossary.spec.ts, a77bdf7, pass, none
+
+CRITERION: AC-19 The command-line tools print labelled status lines, add no colour or cursor control when `NO_COLOR` is nonempty or the stream is not a terminal, offer an ASCII mode, and exit non-zero whenever a step failed.
+VERDICT: met
+EVIDENCE: app/cli tests in the unit run and `bunx bats scripts/deploy/tests` (38 ok), a77bdf7, all pass, none
+
+CRITERION: AC-20 A 25-image batch at the 200 MiB cap, two such batches at once, and an export of 100 assets each complete without the container being killed for memory under its 1 GiB limit, and the server's anonymous memory stays below 512 MiB.
+VERDICT: met
+EVIDENCE: CI run 45047746705 at 357b527 (code identical to a77bdf7), `bun run verify` log `Passed: image build`, `Passed: memory check`; observed through the CI log, not run locally
+
+CRITERION: AC-21 The README names `bun run bootstrap`, `bun run dev`, `bun run seed`, `bun run verify`, `scripts/deploy/deploy.sh`, `scripts/deploy/rollback.sh` and `bun run clean`, how readiness is detected, the dependencies, and the owner's checklist (share the node, limit `autogroup:shared` to port 443); `AGENTS.md` names the same commands and routes to `conventions/terminal-output.md`, and no longer says that no commands exist.
+VERDICT: met
+EVIDENCE: app/docs/docs.test.ts in the unit run passed, and AGENTS.md at a77bdf7 lists the commands and the terminal-output route, none
+
+CRITERION: AC-22 The page uses the VH Midnight tokens and recipes Design names: the gradient body background, `color-scheme: dark`, solid `--ok` only on Generate, the two-column composer layout from 1024 pixels and one column below it, the exact badge colours, semantic colours on nothing but job states, banners, error messages, Generate and the Delete hover, long prompts clipped to two lines with their full text reachable (in the dialog for a library asset, through `More` in the queue), and a preview in a modal dialog (role dialog, aria-modal) that shows the full prompt and that Escape closes with focus returned to its opener in Chromium and Firefox; the rendered page passed the design review Design names; and the pull request carries the before-and-after record Design lists.
+VERDICT: met
+EVIDENCE: local Playwright style.spec.ts passed in Chromium and Firefox at a77bdf7, and the T67 design review is recorded; PR #5 comment 7082743665 links `refs/pr-visuals/5` at 7fef04c (`git ls-remote` confirms the ref), whose `pr-5-long/` holds the long-prompt card at 1280 and 390 and the long-prompt queue row before and after plus the row expanded through More after; I downloaded and viewed them: before shows the whole prompt, after clips to two lines with an ellipsis and More, expanded shows the full text with Less; together with `pr-5-rework/` (comment 7080862670) and `pr-5-ultra/` (7082597436) every state in Design's list is present; base 25328bc is the merge base with main and head 357b527 differs from a77bdf7 only in the document; limitation: base has no long-prompt fixture, so the long rows were inserted into the base-seeded directory at schema 1, as T70 states
+
+CRITERION: AC-23 The app offers no engine choice and submits only TRELLIS.2 graphs; a batch that sends an engine other than `trellis` is refused with the Hunyuan3D message; the tracker cancels every unfinished Hunyuan3D job through the cancel path and deletes every finished one through the delete path, with its batch when no job is left and its files, never submits or retries a Hunyuan3D job, and leaves TRELLIS.2 rows and their files untouched; and the README offers no engine choice and names TRELLIS.2 as the only mesh model.
+VERDICT: met
+EVIDENCE: unit run above (API and tracker Hunyuan3D removal tests, docs README test) and local Playwright glossary.spec.ts (no Engine field), a77bdf7, all pass, none
+
+CRITERION: AC-24 Every workflow sets `permissions: {}` at the top, a bash default shell and a timeout on every job that runs steps, and passes the pinned `actionlint` in `bun run verify`; `check-repo.sh` reports a failed API call as a failed check with its error; and the README records the security analysis coverage per language.
+VERDICT: met
+EVIDENCE: `bun test ./.github` and app/docs tests in the unit run, and `bunx bats scripts/deploy/tests` (38 ok, including the check-repo error cases 5 and 6 and the verify actionlint cases), a77bdf7, all pass; CI log at 357b527 shows `Passed: actionlint`, none
+
+CRITERION: AC-25 The page's controls are shadcn/ui components from `app/web/components/ui/` on Tailwind CSS v4, with shadcn's theme variables mapped to the VH Midnight tokens, and the bundle budgets of AC-13 still hold.
+VERDICT: met
+EVIDENCE: app/web/ui.test.ts in the unit run, local Playwright style.spec.ts data-slot assertions, and the scratch-build size check (117.4 KiB and 280.5 KiB), a77bdf7, all pass, none
+
+CRITERION: AC-26 The queue shows the summary strip with counts and the queue-clear estimate, groups jobs by batch with progress and working Cancel all and Retry failed, and shows per job the source image once it exists, the settings chips, queued and generating times, a progress bar and the start and remaining estimates computed from the typical duration as Design defines it.
+VERDICT: met
+EVIDENCE: app/web queue estimate tests and app/server source-preview tests in the unit run, and local Playwright queue-board.spec.ts, a77bdf7, all pass, none
+
+CRITERION: AC-27 Library cards show the generation time, and the preview shows the time waited, the generation time and the total time.
+VERDICT: met
+EVIDENCE: local Playwright library.spec.ts timing cases, a77bdf7, pass, none
+
+CRITERION: AC-28 A prompt batch's Shared style is stored on each job, joined into the graph's prompt text before the game-asset suffix, counted in the batch hash, kept by a retry, returned by the API and written to the manifest; an image batch with a Shared style is refused; the composer prefills the default or the last value used in that browser and resets to the default; and schema version 2 adds the `shared_style` column with null for existing rows.
+VERDICT: met
+EVIDENCE: app/server API, store migration and v0.1.0 replay-hash tests in the unit run and local Playwright submit.spec.ts Shared style cases, a77bdf7, all pass, none
+
+CRITERION: AC-29 Detail offers Ultra, which locks Texture to 4096 and shows its time note; an Ultra job's graph uses steps 20, 30, 20 and 20 and remesh 1024 exactly as the reference script's Ultra setting does, every other preset's graph is unchanged, the batch API refuses 30000 triangles without 4096 textures and 4096 textures without 30000 triangles, an Ultra job is timed out only after 30 minutes of running, and its chip reads `Ultra`.
+VERDICT: met
+EVIDENCE: `bun run golden:check` passed and the unit run (graphs Ultra golden case, API pairing refusals, tracker Ultra timeout cases) passed; local Playwright submit.spec.ts and queue-board.spec.ts Ultra cases passed; on the dev page choosing Ultra 30k left 1024 and 2048 disabled, selected 4096 and showed `Ultra: best quality, about 10 min per job.`, a77bdf7, none
+
+FINDING: F-01
+KIND: factual
+SEVERITY: nit
+WHERE: Tasks (T70 evidence); Test Plan AC-09
+EVIDENCE: The AC-09 row asks for "A manual check at 200 percent browser zoom in Chromium on a 1280x720 window ... with screenshots. All screenshots are reviewed". T70 records "Chromium with a 640x360 CSS viewport at device scale factor 2 (a 1280x720 window at 200 percent)". That is an emulation rather than browser zoom, and T70 names no screenshots or where they are kept. My own run of the same emulation showed no overflow or clipping, so nothing is broken; only the record differs from the row's wording.
+PROPOSAL: In the next evidence pass, say the check used device-scale emulation as the zoom equivalent and name where its screenshots are, or run it once with real browser zoom.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria (the Evidence lines under AC-12, AC-14, AC-15 and AC-22)
+EVIDENCE: Commits after 357b527 added `Evidence: R-23: ...` lines under four unticked criteria. The standard has evidence beneath a ticked criterion and a residual beneath an unticked one. The AC-22 line still says "R-23: not met (F-01 ...)" although T70 has since added the missing captures. `vh-adlc lint` passes, so the binary does not object.
+PROPOSAL: When the criteria are ticked from this review, replace these R-23 status lines with real evidence or a residual, so AC-22 does not keep a stale not-met note.
+
 ## Sources
 
+- [VH Midnight](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/guides/vh-midnight.md): the token block, button and badge recipes, contrast notes and theme rules the restyled page follows.
+- [Use frontend design skills](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/guides/use-frontend-design-skills.md): the design, critique and review procedure, with the pinned Vercel interface rules.
+- [Colour in interfaces](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/conventions/interface-colour.md): colour only for status, state and identity, never as the only signal.
+- [Frontend testing, visual record](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/conventions/frontend-testing.md): the before-and-after record at `refs/pr-visuals/<number>`, and dialogs reachable at short heights and through resizes.
+- [HTTP API](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/conventions/http-api.md): 422 for well-formed requests with invalid values and RFC 3339 timestamps, deferred to #3.
+- [GitHub Actions](https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/conventions/github-actions.md): `permissions: {}`, a bash default shell, job timeouts and actionlint, adopted here; exact-tag dispatch and repeat-safe publication, deferred to #3.
 - [Open WebUI ComfyUI image generation](https://docs.openwebui.com/features/image-generation-and-editing/comfyui): ComfyUI support covers image workflows mapped onto Open WebUI's controls.
 - [ViewComfy](https://github.com/viewcomfy/viewcomfy): turns ComfyUI workflows into web forms for image, video and text outputs, AGPL-3.0.
 - [ComfyUI Mini](https://github.com/ImDarkTom/ComfyUIMini): a lightweight mobile web UI that runs ComfyUI workflows over its API.

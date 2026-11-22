@@ -58,6 +58,8 @@ export class FakeComfy {
   /** Delay the HTTP answer to /prompt by this many ms; the prompt is queued after `acceptAfterMs`. */
   promptAnswerDelayMs = 0;
   acceptAfterMs = 0;
+  /** While set, /prompt calls wait unanswered and nothing is queued, so jobs stay Waiting (`hold-accept`). */
+  acceptHeld = false;
   /** Hold prompts running until released (for timeout and cancel tests). */
   holdRunning = false;
   /** Prompt IDs that finish successfully at the moment a cancel arrives, so the cancel answers false. */
@@ -178,6 +180,7 @@ export class FakeComfy {
       },
     };
     const run = async (): Promise<void> => {
+      this.writeEarlyThumbnail(next);
       await Bun.sleep(this.runMs);
       const text = JSON.stringify(next.prompt);
       const held = (): boolean => [...this.holdMatching].some((m) => text.includes(m));
@@ -191,6 +194,18 @@ export class FakeComfy {
       this.pump();
     };
     void run();
+  }
+
+  /** Like real ComfyUI, the source thumbnail lands early, while the mesh stages are still running. */
+  private writeEarlyThumbnail(item: QueueItem): void {
+    for (const node of Object.values(item.prompt)) {
+      const raw = node.inputs.filename_prefix;
+      const prefix = typeof raw === "string" ? raw : "";
+      if (node.class_type !== "SaveImage" || !prefix.endsWith("/thumb")) continue;
+      const path = join(this.opts.outputDir, dirname(prefix), "thumb_00000_.png");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, solidPng(64, 64, [90, 140, 200]));
+    }
   }
 
   private complete(item: QueueItem, error: string | null, interrupted: boolean): void {
@@ -273,6 +288,7 @@ export class FakeComfy {
       return Response.json({ error: { type: "prompt_outputs_failed_validation", message }, node_errors: { "1": { errors: [message] } } }, { status: 400 });
     }
     if (this.serverErrorFor.has(id)) return new Response("internal error", { status: 500 });
+    while (this.acceptHeld) await Bun.sleep(20);
     const item: QueueItem = { number: ++this.counter, id, prompt: b?.prompt ?? {}, extra: { client_id: b?.client_id } };
     if (this.acceptAfterMs > 0) {
       const after = this.acceptAfterMs;
@@ -354,6 +370,12 @@ export class FakeComfy {
         break;
       case "release":
         this.release();
+        break;
+      case "hold-accept":
+        this.acceptHeld = true;
+        break;
+      case "release-accept":
+        this.acceptHeld = false;
         break;
       case "hold-matching":
         this.holdMatching.add(b.value ?? "");

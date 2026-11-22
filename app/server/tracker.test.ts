@@ -7,6 +7,7 @@ import { ComfyClient } from "./comfy.ts";
 import { createBatch } from "./batches.ts";
 import { solidPng } from "../fake-comfy/assets.ts";
 import { getJob, requestCancel, retryJob, type JobRow } from "./jobs.ts";
+import { readFileSync } from "node:fs";
 import { openStore, type Store } from "./store.ts";
 import { testDirs, type TestDirs } from "./testkit.ts";
 import { Tracker, type Faults } from "./tracker.ts";
@@ -42,7 +43,7 @@ function tracker(opts: { timeoutMs?: number; faults?: Faults } = {}): Tracker {
 
 let batchSeq = 0;
 /** Inserts a batch of prompt jobs (or image jobs with small PNG uploads) directly; returns job IDs in order. */
-function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "trellis" | "hunyuan"; fixture?: boolean } = {}): string[] {
+function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "trellis" | "hunyuan"; fixture?: boolean; ultra?: boolean } = {}): string[] {
   const kind = opts.kind ?? "prompt";
   const batch = crypto.randomUUID();
   const created = clock.t + batchSeq++;
@@ -57,10 +58,10 @@ function addBatch(items: string[], opts: { kind?: "prompt" | "image"; engine?: "
       writeFileSync(join(dir, `${String(position)}.png`), new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]));
     }
     store.db.run(
-      `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, fixture, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 10000, ?, 1, ?, 'pending', ?, ?)`,
+      `INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, fixture, created_at, queued_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'pending', ?, ?, ?)`,
       [id, batch, position, kind, kind === "prompt" ? item : null, kind === "image" ? item : null, kind === "image" ? "png" : null,
-        opts.engine ?? "trellis", (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created],
+        opts.engine ?? "trellis", opts.ultra ? 30000 : 10000, opts.ultra ? 4096 : (opts.engine ?? "trellis") === "trellis" ? 2048 : null, 1000 + position, opts.fixture ? 1 : 0, created, created],
     );
   });
   return ids;
@@ -100,7 +101,7 @@ describe("AC-03 submission and completion", () => {
     const body = bodies[0];
     expect(body?.prompt_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const expected = combineGraph(
-      { kind: "prompt", prompt: "a crate", style: true, seed: 1000, engine: "trellis", faces: 10000, tex: 2048 },
+      { kind: "prompt", prompt: "a crate", style: true, seed: 1000, faces: 10000, tex: 2048 },
       `asset-studio/${id ?? ""}/${body?.prompt_id ?? ""}`,
     );
     expect(body?.prompt).toEqual(expected as unknown as Record<string, unknown>);
@@ -362,6 +363,21 @@ describe("AC-06 restarts, losses and replay", () => {
     expect(fake.promptCalls()).toHaveLength(2);
   });
 
+  test("a lost job's resubmission restarts its queued time, like a retry (AC-26)", async () => {
+    const [a] = addBatch(["a"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a ?? "").state === "submitted");
+    const before = (store.db.query("SELECT queued_at FROM jobs WHERE id = ?").get(a ?? "") as { queued_at: number }).queued_at;
+    fake.restart();
+    clock.t += 60_000;
+    await t.tick();
+    const row = store.db.query("SELECT queued_at, losses FROM jobs WHERE id = ?").get(a ?? "") as { queued_at: number; losses: number };
+    expect(row.losses).toBe(1);
+    expect(row.queued_at).toBeGreaterThan(before);
+    expect(row.queued_at).toBe(clock.t);
+  });
+
   test("a job ComfyUI lost is resubmitted with a new prompt and prefix, and fails on the third loss", async () => {
     const [a] = addBatch(["a"]);
     fake.holdRunning = true;
@@ -382,7 +398,7 @@ describe("AC-06 restarts, losses and replay", () => {
     const [a] = addBatch(["a"]);
     const promptId = crypto.randomUUID();
     store.db.run("UPDATE jobs SET prompt_id = ?, posted_at = ? WHERE id = ?", [promptId, clock.t, a ?? ""]);
-    const graph = combineGraph({ kind: "prompt", prompt: "a", style: true, seed: 1000, engine: "trellis", faces: 10000, tex: 2048 }, `asset-studio/${a ?? ""}/${promptId}`);
+    const graph = combineGraph({ kind: "prompt", prompt: "a", style: true, seed: 1000, faces: 10000, tex: 2048 }, `asset-studio/${a ?? ""}/${promptId}`);
     fake.holdRunning = true;
     await fetch(`${fake.url}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: graph, prompt_id: promptId }) });
     await tracker().tick();
@@ -515,5 +531,202 @@ describe("AC-06 restarts, losses and replay", () => {
     } finally {
       fixtureFake.stop();
     }
+  });
+});
+
+describe("AC-23 Hunyuan3D jobs are cancelled and deleted", () => {
+  type St = "pending" | "submitted" | "done" | "failed" | "cancelled";
+  /** One job of `engine` in `state`, with an asset directory and ComfyUI output and input files. */
+  function makeJob(engine: "trellis" | "hunyuan", state: St, opts: { promptId?: string; postedAt?: number } = {}): string {
+    const [id = ""] = addBatch([`${engine} ${state}`], { engine });
+    store.db.run("UPDATE jobs SET state = ?, prompt_id = ?, posted_at = ? WHERE id = ?", [state, opts.promptId ?? null, opts.postedAt ?? null, id]);
+    const assets = join(dirs.config.dataDir, "assets", id);
+    mkdirSync(assets, { recursive: true });
+    writeFileSync(join(assets, "model.glb"), `glb ${id}`);
+    if (engine === "hunyuan") {
+      mkdirSync(join(dirs.config.comfyOutputDir, id), { recursive: true });
+      writeFileSync(join(dirs.config.comfyOutputDir, id, "x_00001_.glb"), "x");
+      mkdirSync(dirs.config.comfyInputDir, { recursive: true });
+      writeFileSync(join(dirs.config.comfyInputDir, `${id}.png`), "x");
+    }
+    return id;
+  }
+  const exists = (id: string): boolean => getJob(store, id) !== null;
+  const cancelCalls = (): string[] => fake.calls.filter((c) => c.method === "POST" && c.path.endsWith("/cancel")).map((c) => c.path.split("/")[3] ?? "");
+
+  async function queueOnFake(promptId: string): Promise<void> {
+    fake.holdRunning = true;
+    const res = await fetch(`${fake.url}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: { "1": { class_type: "Hunyuan3Dv2Conditioning", inputs: {} } }, prompt_id: promptId }) });
+    expect(res.ok).toBe(true);
+  }
+
+  test("one tick cancels the unfinished ones, deletes every finished one with its files, and posts no Hunyuan3D graph", async () => {
+    const submittedPrompt = crypto.randomUUID();
+    await queueOnFake(submittedPrompt);
+    const h = {
+      pendingNoAttempt: makeJob("hunyuan", "pending"),
+      submitted: makeJob("hunyuan", "submitted", { promptId: submittedPrompt, postedAt: clock.t - 60_000 }),
+      done: makeJob("hunyuan", "done"),
+      failed: makeJob("hunyuan", "failed"),
+      cancelled: makeJob("hunyuan", "cancelled"),
+    };
+    const t = { done: makeJob("trellis", "done"), failed: makeJob("trellis", "failed"), cancelled: makeJob("trellis", "cancelled") };
+    const before = Object.fromEntries(Object.values(t).map((id) => [id, { row: JSON.stringify(job(id)), glb: readFileSync(join(dirs.config.dataDir, "assets", id, "model.glb"), "utf8") }]));
+    fake.calls.length = 0;
+    await tracker().tick();
+    for (const id of Object.values(h)) {
+      expect(exists(id)).toBe(false);
+      expect(existsSync(join(dirs.config.dataDir, "assets", id))).toBe(false);
+      expect(existsSync(join(dirs.config.comfyOutputDir, id))).toBe(false);
+      expect(existsSync(join(dirs.config.comfyInputDir, `${id}.png`))).toBe(false);
+    }
+    expect(cancelCalls()).toContain(submittedPrompt);
+    expect(promptBodies().filter((b) => JSON.stringify(b.prompt).toLowerCase().includes("hunyuan"))).toEqual([]);
+    const batches = (store.db.query("SELECT COUNT(*) AS n FROM batches b WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.batch_id = b.id)").get() as { n: number }).n;
+    expect(batches).toBe(0);
+    for (const id of Object.values(t)) {
+      expect(JSON.stringify(job(id))).toBe(before[id]?.row ?? "");
+      expect(readFileSync(join(dirs.config.dataDir, "assets", id, "model.glb"), "utf8")).toBe(before[id]?.glb ?? "");
+    }
+  });
+
+  test("a pending one posted 10 seconds ago waits out the 30 seconds, then is cancelled and deleted", async () => {
+    const id = makeJob("hunyuan", "pending", { promptId: crypto.randomUUID(), postedAt: clock.t - 10_000 });
+    const t = tracker();
+    await t.tick();
+    expect(job(id).state).toBe("pending");
+    clock.t += 25_000;
+    await t.tick();
+    await t.tick();
+    expect(exists(id)).toBe(false);
+    expect(promptBodies()).toEqual([]);
+  });
+
+  test("a failing cancel keeps the row until a later tick succeeds, and the tick never submits it", async () => {
+    const promptId = crypto.randomUUID();
+    await queueOnFake(promptId);
+    const id = makeJob("hunyuan", "submitted", { promptId, postedAt: clock.t - 60_000 });
+    fake.calls.length = 0;
+    fake.cancelStatus = 500;
+    const t = tracker();
+    await t.tick();
+    await t.tick();
+    expect(exists(id)).toBe(true);
+    fake.cancelStatus = null;
+    await t.tick();
+    expect(exists(id)).toBe(false);
+    expect(promptBodies()).toEqual([]);
+  });
+
+  test("retrying a Hunyuan3D job is refused with the Hunyuan3D message", () => {
+    const id = makeJob("hunyuan", "failed");
+    const res = retryJob(store, dirs.config, id);
+    expect(res).toEqual({ ok: false, status: 400, error: "Hunyuan3D is no longer available; use TRELLIS.2." });
+  });
+
+  test("a second tick with nothing left to remove cancels and deletes nothing", async () => {
+    const keep = makeJob("trellis", "done");
+    const t = tracker();
+    await t.tick();
+    fake.calls.length = 0;
+    await t.tick();
+    expect(cancelCalls()).toEqual([]);
+    expect(exists(keep)).toBe(true);
+  });
+});
+
+describe("AC-28 Shared style in graphs and retries", () => {
+  function sharedJob(shared: string | null, style: boolean): string {
+    const [id = ""] = addBatch(["a crate"]);
+    store.db.run("UPDATE jobs SET shared_style = ?, style = ? WHERE id = ?", [shared, style ? 1 : 0, id]);
+    return id;
+  }
+  const promptText = (): string => {
+    const body = promptBodies().at(-1);
+    const node = body?.prompt["5"] as { inputs: { text?: string } } | undefined;
+    return node?.inputs.text ?? JSON.stringify(body?.prompt ?? {});
+  };
+  test("the prompt text is the prompt, then the Shared style, then the game-asset suffix", async () => {
+    sharedJob("low-poly, flat shaded", true);
+    await tracker().tick();
+    expect(promptText()).toStartWith("a crate, low-poly, flat shaded, single object");
+  });
+  test("with the style off the suffix is left out", async () => {
+    sharedJob("low-poly", false);
+    await tracker().tick();
+    expect(promptText()).toBe("a crate, low-poly");
+  });
+  test("a retry posts the same text and resets queued_at", async () => {
+    const id = sharedJob("hand-painted", true);
+    store.db.run("UPDATE jobs SET state = 'failed', queued_at = 1 WHERE id = ?", [id]);
+    clock.t += 60_000;
+    expect(retryJob(store, dirs.config, id, clock.t)).toEqual({ ok: true });
+    expect((store.db.query("SELECT queued_at FROM jobs WHERE id = ?").get(id) as { queued_at: number }).queued_at).toBe(clock.t);
+    await tracker().tick();
+    expect(promptText()).toStartWith("a crate, hand-painted, single object");
+  });
+});
+
+describe("AC-26 source previews", () => {
+  test("a running prompt job's thumbnail is ready only after its size held for two ticks", async () => {
+    const [a = ""] = addBatch(["a crate"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).state === "submitted" && existsSync(join(dirs.config.comfyOutputDir, a, job(a).prompt_id ?? "")));
+    expect(t.sourcePreview(job(a))).toBeNull();
+    await t.tick();
+    await t.tick();
+    expect(t.sourcePreview(job(a)) ?? "").toMatch(/thumb_\d+_\.png$/);
+    fake.release();
+    await runUntil(t, () => job(a).state === "done");
+    expect(t.sourcePreview(job(a))).toBeNull();
+  });
+  test("an image job's upload is its preview from the start", () => {
+    const [b = ""] = addBatch(["chest.png"], { kind: "image" });
+    expect(tracker().sourcePreview(job(b)) ?? "").toMatch(/uploads\/.+\/0\.png$/);
+  });
+});
+
+describe("AC-29 Ultra jobs", () => {
+  const sampler = (body: { prompt: Record<string, unknown> } | undefined, id: string): unknown =>
+    (body?.prompt[id] as { inputs: Record<string, unknown> } | undefined)?.inputs;
+  test("an Ultra job posts the Ultra steps and remesh; a 10k job keeps the standard ones", async () => {
+    addBatch(["an ultra crate"], { ultra: true });
+    await tracker().tick();
+    const ultra = promptBodies().at(-1);
+    expect(["114", "119", "121", "124"].map((n) => (sampler(ultra, n) as { steps: number }).steps)).toEqual([20, 30, 20, 20]);
+    expect((sampler(ultra, "126") as { resolution: number }).resolution).toBe(1024);
+    expect((sampler(ultra, "127") as { target_face_count: number }).target_face_count).toBe(30000);
+    expect((sampler(ultra, "130") as { texture_size: number }).texture_size).toBe(4096);
+    addBatch(["a crate"]);
+    await tracker().tick();
+    const standard = promptBodies().at(-1);
+    expect(["114", "119", "121", "124"].map((n) => (sampler(standard, n) as { steps: number }).steps)).toEqual([12, 20, 12, 12]);
+    expect((sampler(standard, "126") as { resolution: number }).resolution).toBe(768);
+  });
+
+  test("a running Ultra job is left alone at 29 min 58 s and cancelled at 30 min 2 s, naming 30 minutes", async () => {
+    const [a = ""] = addBatch(["an ultra crate"], { ultra: true });
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).started_at !== null);
+    const started = job(a).started_at ?? 0;
+    clock.t = started + 29 * 60_000 + 58_000;
+    await t.tick();
+    expect(job(a).state).toBe("submitted");
+    clock.t = started + 30 * 60_000 + 2000;
+    await t.tick();
+    expect(job(a).state).toBe("failed");
+    expect(job(a).error).toBe("Stopped after running longer than 30 minutes.");
+  });
+
+  test("a 10k job is still cancelled past 15 minutes", async () => {
+    const [a = ""] = addBatch(["a crate"]);
+    fake.holdRunning = true;
+    const t = tracker();
+    await runUntil(t, () => job(a).started_at !== null);
+    clock.t = (job(a).started_at ?? 0) + 15 * 60_000 + 2000;
+    await t.tick();
+    expect(job(a).error).toBe("Stopped after running longer than 15 minutes.");
   });
 });

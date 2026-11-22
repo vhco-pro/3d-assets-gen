@@ -98,7 +98,7 @@ afterAll(() => {
 });
 
 const auth = { authorization: `Bearer ${TOKEN}` };
-const presets = { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+const presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
 const eight = new Uint8Array(8 * MiB).fill(3);
 eight.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 

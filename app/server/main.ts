@@ -1,11 +1,12 @@
 // Entry point of the asset-studio executable.
 //   asset-studio [serve] [--config /config/config.yaml]
 //   asset-studio schema-version
+//   asset-studio database-schema-version [--data /data]
 //   asset-studio restore-backup <file> [--config ...]
 //   asset-studio seed [--profile default|empty] [--reset] [--config ...]
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.ts";
-import { restoreBackup, SCHEMA_VERSION } from "./store.ts";
+import { databaseSchemaVersion, restoreBackup, SCHEMA_VERSION } from "./store.ts";
 import { createReporter } from "../cli/report.ts";
 
 const report = createReporter();
@@ -16,6 +17,7 @@ const { positionals, values } = parseArgs({
     config: { type: "string", default: "/config/config.yaml" },
     profile: { type: "string", default: "default" },
     reset: { type: "boolean", default: false },
+    data: { type: "string", default: "/data" },
   },
 });
 const command = positionals[0] ?? "serve";
@@ -24,6 +26,10 @@ async function main(): Promise<number> {
   switch (command) {
     case "schema-version":
       console.log(String(SCHEMA_VERSION));
+      return 0;
+    case "database-schema-version":
+      // The schema the data volume's database holds, for deploy.sh's guard; "none" without a database.
+      console.log(String(databaseSchemaVersion(values.data)));
       return 0;
     case "restore-backup": {
       const file = positionals[1];

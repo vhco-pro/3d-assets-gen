@@ -1,58 +1,144 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* VH Midnight (guides/vh-midnight.md at the pinned docs revision): the guide's token block, every name
+   prefixed vh- so it never collides with shadcn/ui's variables, which are mapped onto it below. */
 :root {
-  color-scheme: light;
-  --ink: #1d232b;
-  --muted: #5b6672;
-  --line: #d6dbe1;
-  --panel: #ffffff;
-  --bg: #f4f6f8;
-  --accent: #2357c6;
-  --bad: #b3261e;
-  --good: #1e7a3c;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--ink);
-  background: var(--bg);
+  color-scheme: dark;
+  /* Page gradient stops */
+  --vh-bg-0: #020814; --vh-bg-1: #061229; --vh-bg-2: #0b1f45;
+  /* Grouped content over the gradient */
+  --vh-card: rgba(255,255,255,.045); --vh-card-line: rgba(255,255,255,.10);
+  /* Text: main, secondary, faint (see contrast notes) */
+  --vh-ink: #eaf0ff; --vh-ink-dim: #9fb2d8; --vh-ink-faint: #7487ae;
+  /* Links, focus and selection; semantic states */
+  --vh-accent: #4f8cff; --vh-ok: #34d39c; --vh-warn: #f5b544; --vh-danger: #ff6b6b;
+  /* Buttons and inputs */
+  --vh-control-bg: rgba(255,255,255,.07); --vh-control-bg-hover: rgba(255,255,255,.13);
+  --vh-control-line: rgba(255,255,255,.18); --vh-input-bg: rgba(0,0,0,.22);
+  --vh-on-ok: #04241a; --vh-on-accent: #04122e;
+  --vh-radius-card: 12px; --vh-radius-control: 8px; --vh-radius-badge: 6px;
+  --vh-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  /* Local additions: a control border strong enough for 3:1 against cards (the guide's contrast notes),
+     and the light text tints for coloured badges and messages. */
+  --vh-control-line-strong: rgba(255,255,255,.4);
+  --vh-tint-accent: #b9d1ff; --vh-tint-ok: #a7f0d2; --vh-tint-warn: #ffdd9e; --vh-tint-danger: #ffc4c4;
+  --vh-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+/* shadcn/ui's theme variables, mapped onto the VH Midnight tokens (Design > Page). The page sets .dark on
+   <html>, so the components' dark: variants apply. */
+:root {
+  --radius: var(--vh-radius-control);
+  --background: var(--vh-bg-0);
+  --foreground: var(--vh-ink);
+  --card: var(--vh-card);
+  --card-foreground: var(--vh-ink);
+  --popover: var(--vh-card);
+  --popover-foreground: var(--vh-ink);
+  --primary: var(--vh-accent);
+  --primary-foreground: var(--vh-on-accent);
+  --secondary: var(--vh-control-bg);
+  --secondary-foreground: var(--vh-ink);
+  --muted: var(--vh-control-bg);
+  --muted-foreground: var(--vh-ink-dim);
+  --accent: var(--vh-control-bg-hover);
+  --accent-foreground: var(--vh-ink);
+  --destructive: var(--vh-danger);
+  --border: var(--vh-card-line);
+  /* Control borders need 3:1 against cards; the guide's --control-line measures under 2:1. */
+  --input: var(--vh-control-line-strong);
+  --ring: var(--vh-accent);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-vh-ok: var(--vh-ok);
+  --color-vh-on-ok: var(--vh-on-ok);
+  --color-vh-ink-dim: var(--vh-ink-dim);
+  --color-vh-control-bg: var(--vh-control-bg);
+  --color-vh-control-bg-hover: var(--vh-control-bg-hover);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--vh-radius-card);
+  --font-sans: var(--vh-font-sans);
+  --font-mono: var(--vh-font-mono);
+}
+body {
+  min-height: 100vh; margin: 0; color: var(--vh-ink);
+  font: 15px/1.55 var(--vh-font-sans);
+  background: linear-gradient(160deg, var(--vh-bg-0) 0%, var(--vh-bg-1) 48%, var(--vh-bg-2) 100%);
+  background-attachment: fixed;
+  -webkit-tap-highlight-color: transparent;
 }
 * { box-sizing: border-box; }
-body { margin: 0; }
-h1 { font-size: 1.5rem; margin: 0; }
-h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
-button {
-  font: inherit; padding: 0.45rem 0.9rem; border-radius: 6px; border: 1px solid var(--accent);
-  background: var(--accent); color: #fff; cursor: pointer; white-space: normal; max-width: 100%;
+#library-heading { scroll-margin-top: 1rem; }
+h1, h2, h3 { margin: 0; font-weight: 650; line-height: 1.25; text-wrap: balance; }
+h2 { font-size: 1.05rem; }
+p { margin: 0; }
+::selection { background: rgba(79,140,255,.35); }
+
+/* ---- base ------------------------------------------------------------------------------------- */
+:focus-visible { outline: 2px solid var(--vh-accent); outline-offset: 2px; }
+::selection { background: rgba(79,140,255,.35); }
+.mono { font-family: var(--vh-font-mono); }
+.skip { position: absolute; left: 1rem; top: -3rem; z-index: 60; padding: .5rem .8rem; border-radius: var(--vh-radius-control); background: var(--vh-bg-2); color: var(--vh-ink); border: 1px solid var(--vh-control-line-strong); }
+.skip:focus { top: .75rem; }
+#library-heading { scroll-margin-top: 1rem; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.prompt { max-width: 80ch; overflow-wrap: anywhere; }
+
+/* ---- badges, banners and messages (exact recipes, Design > Page) --------------------------------- */
+[data-badge] {
+  display: inline-flex; align-items: center; padding: .05rem .5rem; border-radius: var(--vh-radius-badge);
+  border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.09); color: var(--vh-ink-dim);
+  font-size: .875rem; font-weight: 600; line-height: 1.4; white-space: nowrap;
 }
-button:disabled { opacity: 0.55; cursor: not-allowed; }
-.actions button, .library-head button { background: #fff; color: var(--accent); }
-input, select, textarea { font: inherit; padding: 0.4rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
-textarea { width: 100%; resize: vertical; }
-input[type="file"] { width: 100%; }
-label { font-weight: 600; }
-.check { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 400; }
-.error { color: var(--bad); }
-.ok { color: var(--good); }
-.muted { color: var(--muted); }
-.signin { max-width: 26rem; margin: 10vh auto; padding: 1.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-.signin form { display: grid; gap: 0.6rem; margin-top: 1rem; }
-.studio header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; padding: 0.9rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line); }
-.banner { padding: 0.4rem 0.75rem; border-radius: 6px; background: #fff4e5; border: 1px solid #f0b86e; }
-.columns { display: grid; gap: 1rem; padding: 1rem; grid-template-columns: minmax(0, 1fr); max-width: 90rem; margin: 0 auto; }
-@media (min-width: 900px) { .columns { grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr); } .library, .viewer { grid-column: 2; } .submit { grid-row: span 3; } }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; min-width: 0; }
-.submit form { display: grid; gap: 0.5rem; }
-.grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.4rem 0.75rem; align-items: center; }
-.jobs, .assets { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
-.jobs li { display: grid; gap: 0.25rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 8px; }
-.prompt { max-width: 60ch; overflow-wrap: anywhere; }
-.meta { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.state { font-weight: 600; }
-.state-failed { color: var(--bad); }
-.state-done { color: var(--good); }
-.job-error { color: var(--bad); overflow-wrap: anywhere; }
-.actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.library-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; }
-.library-head h2 { margin: 0; }
-.assets { grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); }
-.assets li { display: grid; gap: 0.35rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 8px; align-content: start; }
-.assets img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #e8ebef; }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+[data-badge="generating"] { background: rgba(79,140,255,.15); border-color: rgba(79,140,255,.4); color: var(--vh-tint-accent); }
+[data-badge="done"] { background: rgba(52,211,156,.15); border-color: rgba(52,211,156,.4); color: var(--vh-tint-ok); }
+[data-badge="failed"] { background: rgba(255,107,107,.15); border-color: rgba(255,107,107,.4); color: var(--vh-tint-danger); }
+[data-banner] { display: flex; flex-wrap: wrap; gap: .25rem .6rem; align-items: baseline; padding: .55rem .8rem; border-radius: var(--vh-radius-control); border: 1px solid; }
+[data-banner="offline"] { background: rgba(255,107,107,.15); border-color: rgba(255,107,107,.4); color: var(--vh-tint-danger); }
+[data-banner="incompatible"] { background: rgba(245,181,68,.15); border-color: rgba(245,181,68,.4); color: var(--vh-tint-warn); }
+[data-error] { display: flex; gap: .45rem; align-items: flex-start; color: var(--vh-tint-danger); overflow-wrap: anywhere; }
+[data-error] svg { flex: none; margin-top: .2rem; }
+
+/* ---- layout ------------------------------------------------------------------------------------ */
+.layout { display: grid; gap: 1.25rem; padding: 1rem; max-width: 90rem; margin: 0 auto; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 1024px) {
+  .layout { grid-template-columns: minmax(18rem, 380px) minmax(0, 1fr); padding: 1.5rem; gap: 1.5rem; }
+  /* The limit leaves room for the header above it before the page scrolls, so Generate is always reachable. */
+  .composer { position: sticky; top: 1rem; max-height: calc(100dvh - 6rem); overflow-y: auto; overscroll-behavior: contain; }
+}
+.assets { display: grid; gap: .9rem; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 390px) { .assets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .assets { grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr)); } }
+.asset { content-visibility: auto; contain-intrinsic-size: auto 22rem; }
+/* The stage: each asset sits under a soft overhead light, like a model on a turntable. */
+.stage { background: radial-gradient(120% 90% at 50% 18%, rgba(159,178,216,.22), rgba(6,18,41,.4) 55%, rgba(2,8,20,.85)); }
+.stage:hover { box-shadow: inset 0 0 0 1px var(--vh-accent); }
+.preview-stage { background: radial-gradient(120% 90% at 50% 18%, rgba(159,178,216,.2), rgba(6,18,41,.5) 60%, rgba(2,8,20,.9)); }
+.preview-stage model-viewer { width: 100%; height: 100%; background: transparent; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (pointer: fine) { html { overscroll-behavior: none; } }

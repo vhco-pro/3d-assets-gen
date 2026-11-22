@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync, renameSync, rmSync, type WriteStream } fr
 import { basename, join } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
-import { DETAILS, ENGINES, MAX_SEED, MAX_VARIANTS, planJobs, TEXTURES, type Presets } from "../pipeline/presets.ts";
+import { DETAILS, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, planJobs, TEXTURES, ULTRA_MESSAGE, validPairing, type Presets } from "../pipeline/presets.ts";
 import type { Config } from "./config.ts";
 import { jobView, type JobRow } from "./jobs.ts";
 import type { Store } from "./store.ts";
@@ -13,7 +13,8 @@ import type { Store } from "./store.ts";
 const MiB = 1024 * 1024;
 export const JSON_BATCH_LIMIT = MiB;
 export const MAX_IMAGE_BYTES = 20 * MiB;
-export const MAX_PROMPT_CHARS = 500;
+export { MAX_PROMPT_CHARS };
+export const HUNYUAN_GONE = "Hunyuan3D is no longer available; use TRELLIS.2.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface BatchContext {
@@ -49,16 +50,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export function parsePresets(raw: unknown): Presets {
   if (!isRecord(raw)) return fail(400, "presets are missing.");
-  const engine = raw.engine;
-  if (typeof engine !== "string" || !(ENGINES as readonly string[]).includes(engine)) return fail(400, "engine must be trellis or hunyuan.");
+  // A page loaded before the upgrade may still send an engine; only TRELLIS.2 remains.
+  if (raw.engine !== undefined && raw.engine !== "trellis") return fail(400, HUNYUAN_GONE);
   const faces = raw.faces;
-  if (typeof faces !== "number" || !(DETAILS as readonly number[]).includes(faces)) return fail(400, "detail must be 5000, 10000 or 20000 triangles.");
-  let tex: Presets["tex"] = null;
-  if (engine === "trellis") {
-    const t = raw.tex;
-    if (typeof t !== "number" || !(TEXTURES as readonly number[]).includes(t)) return fail(400, "texture must be 1024 or 2048.");
-    tex = t as Presets["tex"];
-  }
+  if (typeof faces !== "number" || !(DETAILS as readonly number[]).includes(faces)) return fail(400, "detail must be 5000, 10000, 20000 or 30000 triangles.");
+  const tex = raw.tex;
+  if (typeof tex !== "number" || !(TEXTURES as readonly number[]).includes(tex)) return fail(400, "texture must be 1024, 2048 or 4096.");
+  if (!validPairing(faces, tex)) return fail(400, ULTRA_MESSAGE);
   const variants = raw.variants;
   if (typeof variants !== "number" || !Number.isInteger(variants) || variants < 1 || variants > MAX_VARIANTS) {
     return fail(400, `variants must be between 1 and ${String(MAX_VARIANTS)}.`);
@@ -69,11 +67,22 @@ export function parsePresets(raw: unknown): Presets {
   if (seed !== null && (typeof seed !== "number" || !Number.isInteger(seed) || seed < 0 || seed > MAX_SEED)) {
     return fail(400, `seed must be empty or a whole number from 0 to ${String(MAX_SEED)}.`);
   }
-  return { engine: engine as Presets["engine"], faces: faces as Presets["faces"], tex, variants, style, seed: seed };
+  // Null, absent and empty after trimming all mean no Shared style.
+  const rawShared = raw.sharedStyle;
+  if (rawShared !== undefined && rawShared !== null && typeof rawShared !== "string") return fail(400, "Shared style must be text.");
+  const shared = typeof rawShared === "string" ? rawShared.trim() : "";
+  if (shared.length > MAX_SHARED_STYLE_CHARS) return fail(400, `Shared style can be at most ${String(MAX_SHARED_STYLE_CHARS)} characters.`);
+  return { faces: faces as Presets["faces"], tex: tex as Presets["tex"], variants, style, seed: seed, sharedStyle: shared === "" ? null : shared };
 }
 
+/**
+ * The batch content hash keeps v0.1.0's canonical encoding (the engine first, then the presets in the same
+ * key order), so a request replayed across the upgrade still matches; a Shared style is added only when set.
+ */
 function canonicalHash(kind: "prompt" | "image", presets: Presets, items: string[]): string {
-  return createHash("sha256").update(JSON.stringify({ kind, presets, items })).digest("hex");
+  const encoded: Record<string, unknown> = { engine: "trellis", faces: presets.faces, tex: presets.tex, variants: presets.variants, style: presets.style, seed: presets.seed };
+  if (presets.sharedStyle !== null) encoded.sharedStyle = presets.sharedStyle;
+  return createHash("sha256").update(JSON.stringify({ kind, presets: encoded, items })).digest("hex");
 }
 
 async function readLimited(req: Request, limit: number): Promise<string> {
@@ -254,7 +263,7 @@ export async function createBatch(req: Request, ctx: BatchContext): Promise<Resp
       items = raw.prompts.map((p) => (typeof p === "string" ? p.trim() : "")).filter((p) => p.length > 0);
       if (items.length === 0) fail(400, "Add at least one prompt or image.");
       items.forEach((p, i) => {
-        if (p.length > MAX_PROMPT_CHARS) fail(400, `Prompt ${String(i + 1)} is longer than 500 characters.`);
+        if (p.length > MAX_PROMPT_CHARS) fail(400, `Prompt ${String(i + 1)} is longer than ${String(MAX_PROMPT_CHARS)} characters.`);
       });
     } else if (type.includes("multipart/form-data")) {
       if (length > config.limits.batchImageBytes + MiB) {
@@ -264,6 +273,7 @@ export async function createBatch(req: Request, ctx: BatchContext): Promise<Resp
       if (!existingBatch(store, id)) stagingDir = join(config.dataDir, "staging", `${id}-${crypto.randomUUID()}`);
       const parsed = await parseMultipart(req, stagingDir, config.limits.batchImageBytes);
       presets = parsePresets(parsed.presets);
+      if (presets.sharedStyle !== null) fail(400, "Shared style applies to prompts only.");
       images = parsed.images;
       if (images.length === 0) fail(400, "Add at least one prompt or image.");
       items = images.map((im) => `${im.name}\u0000${im.sha256}`);
@@ -291,15 +301,16 @@ export async function createBatch(req: Request, ctx: BatchContext): Promise<Resp
         fail(409, `There can be at most ${String(config.limits.unfinishedJobs)} unfinished jobs; this batch would make ${String(unfinished + planned.length)}.`);
       }
       store.db.run("INSERT INTO batches (id, kind, presets, hash, created_at) VALUES (?, ?, ?, ?, ?)", [id, kind, JSON.stringify(presets), hash, now]);
-      const stmt = store.db.prepare(`INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`);
+      const stmt = store.db.prepare(`INSERT INTO jobs (id, batch_id, position, kind, prompt, upload_name, upload_ext, engine, faces, tex, style, seed, state, created_at, shared_style, queued_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`);
       for (const job of planned) {
         const image = kind === "image" ? images[job.line] : undefined;
         stmt.run(
           crypto.randomUUID(), id, job.position, kind,
           kind === "prompt" ? (items[job.line] ?? "") : null,
           image?.name ?? null, image?.ext ?? null,
-          presets.engine, presets.faces, presets.tex, presets.style ? 1 : 0, job.seed, now,
+          "trellis", presets.faces, presets.tex, presets.style ? 1 : 0, job.seed, now,
+          kind === "prompt" ? presets.sharedStyle : null, now,
         );
       }
       if (stagingDir) {

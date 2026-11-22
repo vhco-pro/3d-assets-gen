@@ -6,6 +6,7 @@ Usage:
   python generate_3d.py "a wooden treasure chest"           # text -> image -> textured GLB
   python generate_3d.py --image chest.png                    # existing image -> GLB
   python generate_3d.py "a sword" --faces 5000 --tex 1024    # lighter game asset
+  python generate_3d.py "a sword" --ultra                    # best quality, about 10 minutes
   python generate_3d.py "a sword" --engine hunyuan           # untextured Hunyuan3D mesh
 
 Requires a running ComfyUI server (Comfy Desktop, or start_headless.ps1).
@@ -133,8 +134,16 @@ def mesh_graph(image_name, seed, octree, prefix, faces):
     return graph
 
 
-def trellis_graph(image_name, seed, prefix, faces, tex):
+# Ultra: more sampler steps (structure, shape, upsampled shape, texture) and a finer remesh. Measured on a
+# 16 GB card at 30k triangles and 4096 textures: about 10.5 minutes instead of 7 at the default steps.
+ULTRA_STEPS = (20, 30, 20, 20)
+STANDARD_STEPS = (12, 20, 12, 12)
+
+
+def trellis_graph(image_name, seed, prefix, faces, tex, ultra=False):
     # Mirrors the TRELLIS.2 path of ComfyUI's "Pixal3D / TRELLIS.2 image to model" template.
+    s1, s2, s3, s4 = ULTRA_STEPS if ultra else STANDARD_STEPS
+    remesh = 1024 if ultra else 768
     return {
         "1": {"class_type": "LoadImage", "inputs": {"image": image_name}},
         "2": {"class_type": "LoadBackgroundRemovalModel", "inputs": {"bg_removal_name": "birefnet.safetensors"}},
@@ -152,27 +161,27 @@ def trellis_graph(image_name, seed, prefix, faces, tex):
         "12": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["11", 0], "shift": 5.0}},
         "13": {"class_type": "EmptyTrellis2LatentStructure", "inputs": {"batch_size": 1}},
         "14": {"class_type": "KSampler", "inputs": {"model": ["12", 0], "positive": ["6", 0], "negative": ["6", 1], "latent_image": ["13", 0],
-                                                     "seed": seed, "steps": 12, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
+                                                     "seed": seed, "steps": s1, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
         "15": {"class_type": "VaeDecodeStructureTrellis2", "inputs": {"samples": ["14", 0], "vae": ["8", 0], "resolution": "32"}},
         # stage 2: shape, then upsampled shape
         "16": {"class_type": "CFGOverride", "inputs": {"model": ["7", 0], "cfg": 1.0, "start_percent": 0.769, "end_percent": 1.0}},
         "17": {"class_type": "RescaleCFG", "inputs": {"model": ["16", 0], "multiplier": 0.5}},
         "18": {"class_type": "Trellis2ShapeStage", "inputs": {"positive": ["6", 0], "negative": ["6", 1], "voxel": ["15", 0]}},
         "19": {"class_type": "KSampler", "inputs": {"model": ["17", 0], "positive": ["18", 0], "negative": ["18", 1], "latent_image": ["18", 2],
-                                                     "seed": seed, "steps": 20, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
+                                                     "seed": seed, "steps": s2, "cfg": 7.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
         "20": {"class_type": "Trellis2UpsampleStage", "inputs": {"positive": ["18", 0], "negative": ["18", 1], "shape_latent": ["19", 0],
                                                                   "vae": ["8", 0], "target_resolution": 1536}},
         "21": {"class_type": "KSampler", "inputs": {"model": ["17", 0], "positive": ["20", 0], "negative": ["20", 1], "latent_image": ["20", 2],
-                                                     "seed": seed, "steps": 12, "cfg": 7.5, "sampler_name": "euler", "scheduler": "simple", "denoise": 1}},
+                                                     "seed": seed, "steps": s3, "cfg": 7.5, "sampler_name": "euler", "scheduler": "simple", "denoise": 1}},
         "22": {"class_type": "VaeDecodeShapeTrellis", "inputs": {"samples": ["21", 0], "vae": ["8", 0]}},
         # stage 3: texture voxels
         "23": {"class_type": "Trellis2TextureStage", "inputs": {"positive": ["20", 0], "negative": ["20", 1], "shape_latent": ["21", 0]}},
         "24": {"class_type": "KSampler", "inputs": {"model": ["7", 0], "positive": ["23", 0], "negative": ["23", 1], "latent_image": ["23", 2],
-                                                     "seed": seed, "steps": 12, "cfg": 1.0, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
+                                                     "seed": seed, "steps": s4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "normal", "denoise": 1}},
         "25": {"class_type": "VaeDecodeTextureTrellis", "inputs": {"samples": ["24", 0], "vae": ["9", 0], "shape_subdivides": ["22", 1]}},
         # game mesh: clean high-poly, decimate to target, unwrap, bake textures + normal/AO from the high-poly
         "26": {"class_type": "RemeshMesh", "inputs": {
-            "mesh": ["22", 0], "resolution": 768, "sign_mode": "solid", "sign_mode.fill": 20.0, "sign_mode.qef": False,
+            "mesh": ["22", 0], "resolution": remesh, "sign_mode": "solid", "sign_mode.fill": 20.0, "sign_mode.qef": False,
             "band": 1.0, "project_back": 0.0, "fix_poles": False, "smooth_iters": 20,
             "drop_small_components": 0.01, "precluster_max_verts": 20000000}},
         "27": {"class_type": "DecimateMesh", "inputs": {"mesh": ["26", 0], "target_face_count": faces, "placement_mode": "midpoint"}},
@@ -203,6 +212,8 @@ def main():
     p.add_argument("--faces", type=int, default=10000,
                    help="target triangle count after cleanup (default 10000); 0 keeps the raw dense mesh (hunyuan only)")
     p.add_argument("--tex", type=int, default=2048, help="texture size for trellis (default 2048)")
+    p.add_argument("--ultra", action="store_true",
+                   help="trellis: best quality (30k triangles, 4096 textures, more steps, finer remesh; ~10 min)")
     p.add_argument("--no-style", action="store_true", help="don't append the game-asset prompt suffix")
     p.add_argument("--out", default=os.path.join(os.getcwd(), "output"))
     p.add_argument("--server", default="http://127.0.0.1:8188")
@@ -230,7 +241,10 @@ def main():
     print(f"[2/2] Generating 3D mesh with {a.engine}...")
     image_name = upload(a.server, image_path)
     if a.engine == "trellis":
-        graph = trellis_graph(image_name, seed, f"comfy3d/{name}", a.faces or 10000, a.tex)
+        if a.ultra:
+            graph = trellis_graph(image_name, seed, f"comfy3d/{name}", 30000, 4096, ultra=True)
+        else:
+            graph = trellis_graph(image_name, seed, f"comfy3d/{name}", a.faces or 10000, a.tex)
     else:
         graph = mesh_graph(image_name, seed, a.octree, f"comfy3d/{name}", a.faces)
     outs = wait(a.server, queue(a.server, graph), "Mesh")

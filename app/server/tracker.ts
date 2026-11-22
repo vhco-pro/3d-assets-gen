@@ -4,9 +4,11 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { combineGraph, type JobGraphInput } from "../pipeline/combine.ts";
+import { isUltra } from "../pipeline/presets.ts";
 import { ComfyError, type ComfyClient, type HistoryEntry, type QueueSnapshot } from "./comfy.ts";
 import type { Config } from "./config.ts";
 import { assetDir, completeAsset, MIME, removeComfyFiles, uploadPath } from "./files.ts";
+import { deleteJob } from "./assets.ts";
 import type { ComfyState, TrackerView } from "./http.ts";
 import type { JobRow, QueueInfo } from "./jobs.ts";
 import type { Store } from "./store.ts";
@@ -14,6 +16,8 @@ import type { Store } from "./store.ts";
 export const MIN_COMFY_VERSION = [0, 46, 2] as const;
 export const POST_WINDOW_MS = 30_000;
 export const RUN_TIMEOUT_MS = 15 * 60_000;
+/** Ultra jobs take about 10.5 minutes on win-main, so they get twice the usual run limit. */
+export const ULTRA_RUN_TIMEOUT_MS = 30 * 60_000;
 const MAX_LOSSES = 3;
 const MAX_SERVER_ERRORS = 3;
 const TICK_MS = 2000;
@@ -74,6 +78,42 @@ export class Tracker implements TrackerView {
     return { comfyui: this.state, version: this.version };
   }
 
+  /**
+   * A small source image for an unfinished job: an image job's upload, or the 256-pixel thumbnail a prompt
+   * job's graph writes, counted ready once its size held on two consecutive ticks (never half written).
+   */
+  sourcePreview(job: JobRow): string | null {
+    if (job.state !== "pending" && job.state !== "submitted") return null;
+    if (job.kind === "image") {
+      const upload = uploadPath(this.config, job);
+      return existsSync(upload) ? upload : null;
+    }
+    const seen = this.thumbs.get(job.id);
+    return seen && seen.stable && seen.attempt === job.prompt_id ? seen.path : null;
+  }
+
+  private readonly thumbs = new Map<string, { attempt: string; path: string; size: number; stable: boolean }>();
+
+  /** Records each running prompt job's thumbnail size; called on every tick. */
+  private watchThumbnails(): void {
+    const live = new Set<string>();
+    for (const job of this.jobs("state = 'submitted' AND kind = 'prompt' AND prompt_id IS NOT NULL")) {
+      live.add(job.id);
+      const dir = join(this.config.comfyOutputDir, job.id, job.prompt_id ?? "");
+      const name = existsSync(dir) ? readdirSync(dir).filter((n) => /^thumb_\d+_\.png$/.test(n)).sort()[0] : undefined;
+      if (!name) {
+        this.thumbs.delete(job.id);
+        continue;
+      }
+      const path = join(dir, name);
+      const size = statSync(path).size;
+      const before = this.thumbs.get(job.id);
+      const stable = before?.attempt === job.prompt_id && before.path === path && before.size === size && size > 0;
+      this.thumbs.set(job.id, { attempt: job.prompt_id ?? "", path, size, stable });
+    }
+    for (const id of this.thumbs.keys()) if (!live.has(id)) this.thumbs.delete(id);
+  }
+
   queueInfo(promptId: string | null): QueueInfo | null {
     if (!promptId || !this.snapshot) return null;
     if (this.snapshot.running.includes(promptId)) return { running: true, position: null };
@@ -129,10 +169,13 @@ export class Tracker implements TrackerView {
     this.state = "reachable";
     try {
       this.snapshot = await this.comfy.queue();
+      this.flagHunyuan();
       await this.handleCancels();
+      this.removeHunyuan();
       await this.submitPending();
       this.snapshot = await this.comfy.queue();
       await this.reconcile();
+      this.watchThumbnails();
       await this.timeouts();
     } catch (e) {
       if (e instanceof ComfyError && e.kind === "unreachable") {
@@ -213,8 +256,20 @@ export class Tracker implements TrackerView {
   }
 
   // Step 2: submission.
+  // Hunyuan3D removal (Design, Restart, upgrade and rollback): unfinished Hunyuan3D jobs get the cancel flag
+  // before step 1 handles cancels, and finished ones go through the delete path before step 2 submits.
+  private flagHunyuan(): void {
+    this.store.db.run("UPDATE jobs SET cancel_requested = 1 WHERE engine = 'hunyuan' AND state IN ('pending', 'submitted') AND cancel_requested = 0");
+  }
+
+  private removeHunyuan(): void {
+    for (const job of this.jobs("engine = 'hunyuan' AND state IN ('done', 'failed', 'cancelled')")) {
+      void deleteJob(this.store, this.config, job.id);
+    }
+  }
+
   private async submitPending(): Promise<void> {
-    for (const row of this.jobs("state = 'pending' AND cancel_requested = 0")) {
+    for (const row of this.jobs("state = 'pending' AND cancel_requested = 0 AND engine = 'trellis'")) {
       let job = row;
       if (!job.prompt_id) {
         const attempt = crypto.randomUUID();
@@ -249,9 +304,10 @@ export class Tracker implements TrackerView {
   }
 
   private graphFor(job: JobRow): Record<string, unknown> {
-    const common = { seed: job.seed, engine: job.engine, faces: job.faces, tex: job.tex };
+    // Only TRELLIS.2 jobs reach this point; Hunyuan3D rows are cancelled and deleted instead (Design).
+    const common = { seed: job.seed, faces: job.faces, tex: job.tex ?? 2048 };
     const input: JobGraphInput = job.kind === "prompt"
-      ? { ...common, kind: "prompt", prompt: job.prompt ?? "", style: job.style === 1 }
+      ? { ...common, kind: "prompt", prompt: job.prompt ?? "", style: job.style === 1, sharedStyle: job.shared_style }
       : { ...common, kind: "image", upload: `asset-studio/${job.id}.${job.upload_ext ?? "png"}` };
     return combineGraph(input, `asset-studio/${job.id}/${job.prompt_id ?? ""}`);
   }
@@ -276,14 +332,18 @@ export class Tracker implements TrackerView {
       return;
     }
     this.update(job.id, job.state,
-      "state = 'pending', prompt_id = NULL, posted_at = NULL, started_at = NULL, finished_at = NULL, error = NULL, server_errors = 0, losses = ?",
-      [losses]);
+      // A resubmission is a new attempt, so its queued time restarts like a retry's.
+      "state = 'pending', prompt_id = NULL, posted_at = NULL, started_at = NULL, finished_at = NULL, error = NULL, server_errors = 0, losses = ?, queued_at = ?",
+      [losses, this.now()]);
   }
 
   // Step 6: timeouts.
   private async timeouts(): Promise<void> {
     const cutoff = this.now() - RUN_TIMEOUT_MS;
     for (const job of this.jobs("state = 'submitted' AND fixture = 0 AND started_at IS NOT NULL AND started_at < ?", cutoff)) {
+      const limit = isUltra(job.faces, job.tex) ? ULTRA_RUN_TIMEOUT_MS : RUN_TIMEOUT_MS;
+      if ((job.started_at ?? 0) >= this.now() - limit) continue;
+      const message = `Stopped after running longer than ${String(limit / 60_000)} minutes.`;
       const promptId = job.prompt_id ?? "";
       let cancelled: boolean;
       try {
@@ -293,10 +353,10 @@ export class Tracker implements TrackerView {
         throw e;
       }
       if (cancelled) {
-        this.markFailed(job, "Stopped after running longer than 15 minutes.");
+        this.markFailed(job, message);
         continue;
       }
-      if (!(await this.settle(job, await this.comfy.history(promptId)))) this.markFailed(job, "Stopped after running longer than 15 minutes.");
+      if (!(await this.settle(job, await this.comfy.history(promptId)))) this.markFailed(job, message);
     }
   }
 

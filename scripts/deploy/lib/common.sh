@@ -59,3 +59,43 @@ load_image() {
   remote_layers="$(remote layers "$tag" | tr -d '\r')"
   [[ -n "$local_layers" && "$local_layers" == "$remote_layers" ]]
 }
+
+# Step 4 of deploy.sh: compares the schema the new image knows with the schema the database on win-main
+# holds, before anything there changes. Sets GUARD_KNOWN and GUARD_DB (a number or "none"). Returns 0 to
+# proceed, 1 when the image knows an older schema, 2 when the database's schema could not be read.
+# The reader mounts the volume read-write: SQLite opens the database read-only but may need to create
+# the -wal and -shm files of a cleanly closed WAL database.
+DATA_VOLUME="asset-studio_data"
+win() { ssh -o BatchMode=yes "$WIN_HOST" "$1"; }
+read_database_schema() {
+  win "docker run --rm -v ${DATA_VOLUME}:/data $1 database-schema-version" 2>&1 | tr -d '\r'
+  return "${PIPESTATUS[0]}"
+}
+schema_guard() {
+  local tag="$1" out status current_tag
+  GUARD_KNOWN="?"
+  # No volume yet (a first deploy): nothing to compare, and no container runs, so Compose creates it.
+  if ! out="$(win "docker volume inspect ${DATA_VOLUME}" 2>&1 > /dev/null)"; then
+    [[ "$out" == *"no such volume"* ]] || return 2
+    GUARD_DB="none"
+    return 0
+  fi
+  GUARD_KNOWN="$(win "docker run --rm ${tag} schema-version" | tr -d '\r' | tail -1)" || return 2
+  [[ "$GUARD_KNOWN" =~ ^[0-9]+$ ]] || return 2
+  status=0
+  out="$(read_database_schema "$tag")" || status=$?
+  if [[ $status -ne 0 && "$out" == *"unknown command"* ]]; then
+    # A release from before the guard: read the database with the deployed image instead.
+    current_tag="$(win "type AppData\\Local\\AssetStudio\\current.json" 2> /dev/null | tr -d '\r' \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag"])' 2> /dev/null)" || return 2
+    [[ -n "$current_tag" ]] || return 2
+    status=0
+    out="$(read_database_schema "$current_tag")" || status=$?
+  fi
+  [[ $status -eq 0 ]] || return 2
+  GUARD_DB="$(tail -1 <<< "$out")"
+  [[ "$GUARD_DB" == "none" ]] && return 0
+  [[ "$GUARD_DB" =~ ^[0-9]+$ ]] || return 2
+  (( GUARD_KNOWN < GUARD_DB )) && return 1
+  return 0
+}

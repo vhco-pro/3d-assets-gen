@@ -1,11 +1,24 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode, type SyntheticEvent } from "react";
-import { DETAILS, MAX_SEED, MAX_VARIANTS } from "../pipeline/presets.ts";
+import { Box, ChevronDown, CircleAlert, Images } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
+import { DEFAULT_SHARED_STYLE, DETAILS, isUltra, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, TEXTURES, ULTRA_FACES, ULTRA_TEX } from "../pipeline/presets.ts";
 import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, startExport, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
+import { Badge } from "./components/ui/badge.tsx";
+import { Button } from "./components/ui/button.tsx";
+import { Card } from "./components/ui/card.tsx";
+import { Checkbox } from "./components/ui/checkbox.tsx";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./components/ui/collapsible.tsx";
+import { Input } from "./components/ui/input.tsx";
+import { Progress } from "./components/ui/progress.tsx";
+import { Switch } from "./components/ui/switch.tsx";
+import { Textarea } from "./components/ui/textarea.tsx";
+import { ToggleGroup, ToggleGroupItem } from "./components/ui/toggle-group.tsx";
+import { estimates, formatDuration } from "./queue.ts";
 import { Viewer } from "./Viewer.tsx";
 
 const MiB = 1024 * 1024;
 const IMAGE_CAP = 200 * MiB;
+const SHARED_KEY = "asset-studio:shared-style";
 
 /** Glossary terms for job states (feature document, Glossary). */
 export function stateTerm(job: Job): string {
@@ -23,8 +36,55 @@ export function stateTerm(job: Job): string {
   }
 }
 
-function label(job: Job): string {
+/** The badge colour key: Generating, Done and Failed are coloured; the other states are neutral (Design > Page). */
+function badgeKind(job: Job): string {
+  if (job.state === "submitted" && job.running) return "generating";
+  if (job.state === "done") return "done";
+  if (job.state === "failed") return "failed";
+  return "neutral";
+}
+
+export function label(job: Job): string {
   return job.kind === "prompt" ? (job.prompt ?? "") : (job.upload ?? "image");
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${String(n)} ${n === 1 ? one : many}`;
+}
+
+function StateBadge({ job }: { job: Job }): ReactNode {
+  return <Badge data-testid="job-state" data-badge={badgeKind(job)}>{stateTerm(job)}</Badge>;
+}
+
+/** An error message: a failed outcome, so it uses the danger tint with an icon. A job's stored error is not
+ * a live event, so it is not announced as an alert. */
+function ErrorText({ children, live = true }: { children: ReactNode; live?: boolean }): ReactNode {
+  return (
+    <p role={live ? "alert" : undefined} data-error="">
+      <CircleAlert size={16} aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+function Brand(): ReactNode {
+  return (
+    <div className="flex items-center gap-2.5">
+      <Box size={22} aria-hidden="true" strokeWidth={1.5} />
+      <h1 className="text-[1.2rem] font-semibold tracking-tight">Asset Studio</h1>
+      <span className="border-l border-border pl-2.5 text-sm text-muted-foreground" translate="no">VH &amp; Co</span>
+    </div>
+  );
+}
+
+/** Re-renders every second so elapsed times move between job-list refreshes. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => { setNow(Date.now()); }, 1000);
+    return () => { clearInterval(t); };
+  }, []);
+  return now;
 }
 
 export function App(): ReactNode {
@@ -45,7 +105,7 @@ function Gate({ client }: { client: QueryClient }): ReactNode {
     client.removeQueries({ predicate: (q) => q.queryKey[0] !== "session" });
     setOverride(false);
   };
-  if (signedIn === null) return <main className="loading">{session.isError ? "Could not reach Asset Studio." : "Loading…"}</main>;
+  if (signedIn === null) return <main className="grid min-h-screen place-items-center text-muted-foreground">{session.isError ? "Could not reach Asset Studio." : "Loading…"}</main>;
   if (!signedIn) return <SignIn onSignedIn={() => { setOverride(true); }} />;
   return <Studio onUnauthorised={signOut} />;
 }
@@ -61,19 +121,22 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }): ReactNode {
     signIn(token.trim())
       .then(() => { onSignedIn(); })
       .catch((err: unknown) => {
-        setError(err instanceof ApiError && err.status === 429 ? "Too many wrong tokens; wait a minute and try again." : "That access token is not right.");
+        setError(err instanceof ApiError && err.status === 429 ? "Too many wrong tokens. Wait a minute, then try again." : "That access token is not right. Check it and try again.");
       })
       .finally(() => { setBusy(false); });
   };
   return (
-    <main className="signin">
-      <h1>Asset Studio</h1>
-      <form onSubmit={submit}>
-        <label htmlFor="token">Access token</label>
-        <input id="token" type="password" autoComplete="current-password" value={token} onChange={(e) => { setToken(e.target.value); }} required />
-        <button type="submit" disabled={busy}>Sign in</button>
-        {error && <p role="alert" className="error">{error}</p>}
-      </form>
+    <main className="grid min-h-screen place-items-center p-4">
+      <Card className="grid w-full max-w-sm gap-4 p-6" aria-labelledby="signin-title">
+        <Brand />
+        <h2 id="signin-title" className="sr-only">Sign in</h2>
+        <form onSubmit={submit} className="grid gap-3">
+          <label className="font-semibold" htmlFor="token">Access token</label>
+          <Input id="token" name="token" type="password" autoComplete="current-password" spellCheck={false} value={token} onChange={(e) => { setToken(e.target.value); }} required />
+          <Button type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
+          {error && <ErrorText>{error}</ErrorText>}
+        </form>
+      </Card>
     </main>
   );
 }
@@ -92,79 +155,145 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     refetchInterval: (q) => (q.state.data?.some((j) => j.state === "pending" || j.state === "submitted") ? 2000 : 15000),
   });
   const health = useQuery({ queryKey: ["health"], queryFn: ({ signal }) => fetchHealth(signal), refetchInterval: 5000 });
-  const [preview, setPreview] = useState<Job | null>(null);
-  const [notice, setNotice] = useState<string | null>(() => (new URLSearchParams(window.location.search).get("export") === "gone" ? "The selection changed after the export started; select the assets again and export." : null));
+  const [preview, setPreview] = useState<{ job: Job; opener: HTMLElement | null } | null>(null);
+  const [notice, setNotice] = useState<string | null>(() => (new URLSearchParams(window.location.search).get("export") === "gone" ? "The selection changed after the export started. Select the assets again and download them." : null));
   const list = jobs.data ?? [];
-  const queue = list.filter((j) => j.state !== "done");
-  const library = list.filter((j) => j.state === "done");
+  const comfy = health.data?.comfyui;
   return (
-    <div className="studio">
-      <header>
-        <h1>Asset Studio</h1>
-        {health.data && health.data.comfyui !== "reachable" && (
-          <div className="banner" role="status">
-            <strong data-testid="comfy-banner-term">{health.data.comfyui === "offline" ? "ComfyUI offline" : "ComfyUI incompatible"}</strong>
-            <span>
-              {health.data.comfyui === "offline"
-                ? " Jobs wait until it answers again."
-                : ` Found ${health.data.comfyuiVersion ?? "no version"}; Asset Studio needs 0.46.2 or newer. Nothing is submitted until then.`}
-            </span>
-          </div>
+    <div>
+      <a className="skip" href="#library-heading">Skip to library</a>
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-3">
+        <Brand />
+        {comfy === "reachable" && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="size-2 rounded-full bg-current" aria-hidden="true" />
+            <span>{`ComfyUI ${health.data?.comfyuiVersion ?? ""} ready`}</span>
+          </p>
         )}
       </header>
-      {notice && (
-        <p role="alert" className="error">
-          {notice}{" "}
-          <button type="button" onClick={() => { setNotice(null); window.history.replaceState(null, "", "/"); }}>Dismiss</button>
-        </p>
+      {(comfy === "offline" || comfy === "incompatible" || notice) && (
+        <div className="mx-auto grid max-w-[90rem] gap-2 px-4 pt-3">
+          {comfy === "offline" && (
+            <div data-banner="offline" role="status">
+              <strong data-testid="comfy-banner-term">ComfyUI offline</strong>
+              <span>Jobs wait until it answers again.</span>
+            </div>
+          )}
+          {comfy === "incompatible" && (
+            <div data-banner="incompatible" role="status">
+              <strong data-testid="comfy-banner-term">ComfyUI incompatible</strong>
+              <span>{`Found ${health.data?.comfyuiVersion ?? "no version"}. Asset Studio needs 0.46.2 or newer and submits nothing until then.`}</span>
+            </div>
+          )}
+          {notice && (
+            <div className="flex flex-wrap items-center gap-3">
+              <ErrorText>{notice}</ErrorText>
+              <Button type="button" onClick={() => { setNotice(null); window.history.replaceState(null, "", "/"); }}>Dismiss</Button>
+            </div>
+          )}
+        </div>
       )}
-      <main className="columns">
-        <SubmitForm />
-        <Queue jobs={queue} loading={jobs.isPending} error={jobs.error} />
-        <Library jobs={library} onPreview={setPreview} />
-        {preview && <Viewer job={preview} name={label(preview)} onClose={() => { setPreview(null); }} />}
+      <main className="layout">
+        <Composer />
+        <div className="grid min-w-0 gap-5">
+          <Queue jobs={list} loading={jobs.isPending} error={jobs.error} />
+          <Library jobs={list.filter((j) => j.state === "done")} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
+        </div>
       </main>
+      {preview && <Viewer job={preview.job} name={label(preview.job)} opener={preview.opener} onClose={() => { setPreview(null); }} />}
     </div>
   );
 }
 
-function SubmitForm(): ReactNode {
+function readShared(): string {
+  try {
+    return window.localStorage.getItem(SHARED_KEY) ?? DEFAULT_SHARED_STYLE;
+  } catch {
+    return DEFAULT_SHARED_STYLE;
+  }
+}
+
+function saveShared(value: string): void {
+  try {
+    window.localStorage.setItem(SHARED_KEY, value);
+  } catch {
+    // An unavailable store only means the field starts from the default next time.
+  }
+}
+
+/** Detail's segment text: `5k`, `10k`, `20k` and `Ultra 30k`. */
+const detailLabel = (d: number): string => (d === ULTRA_FACES ? "Ultra 30k" : `${String(d / 1000)}k`);
+
+function Segments({ name, legend, values, value, format, onChange, disabled }: { name: string; legend: string; values: readonly number[]; value: number; format: (v: number) => string; onChange: (v: number) => void; disabled?: (v: number) => boolean }): ReactNode {
+  const id = `${name}-label`;
+  return (
+    // Full width so Detail's four items and Texture's three stay on one row each.
+    <div className="col-span-full grid gap-1.5">
+      <span className="font-semibold" id={id}>{legend}</span>
+      <ToggleGroup type="single" variant="outline" aria-labelledby={id} value={String(value)} onValueChange={(v) => { if (v) onChange(Number(v)); }} className="w-fit flex-wrap">
+        {values.map((v) => (
+          <ToggleGroupItem key={v} value={String(v)} disabled={disabled?.(v) ?? false} className="min-w-12 tabular-nums">{format(v)}</ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </div>
+  );
+}
+
+function Composer(): ReactNode {
   const qc = useQueryClient();
   const [prompts, setPrompts] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [engine, setEngine] = useState("trellis");
+  const [over, setOver] = useState(false);
   const [faces, setFaces] = useState(10000);
   const [tex, setTex] = useState(2048);
   const [variants, setVariants] = useState("1");
   const [style, setStyle] = useState(true);
   const [seed, setSeed] = useState("");
+  const [shared, setShared] = useState(readShared);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const ultra = faces === ULTRA_FACES;
+  // Ultra is one pairing: it selects and locks 4096; leaving it goes back to the 2048 default.
+  const chooseDetail = (d: number): void => {
+    setFaces(d);
+    if (d === ULTRA_FACES) setTex(ULTRA_TEX);
+    else if (tex === ULTRA_TEX) setTex(2048);
+  };
+  const lines = prompts.split("\n").map((l) => l.trim()).filter(Boolean);
+  const v = Number(variants);
+  const perLine = Number.isInteger(v) && v >= 1 ? Math.min(v, MAX_VARIANTS) : 1;
+  // Images win when both are present; the composer says so instead of dropping the prompts silently.
+  const count = files.length > 0 ? files.length : lines.length * perLine;
+  const updateShared = (value: string): void => {
+    setShared(value);
+    saveShared(value);
+  };
   const mutation = useMutation({
     mutationFn: async (): Promise<number> => {
-      const v = Number(variants);
       if (!Number.isInteger(v) || v < 1 || v > MAX_VARIANTS) throw new ApiError(400, `Variants must be between 1 and ${String(MAX_VARIANTS)}.`);
       const s = seed.trim() === "" ? null : Number(seed);
       if (s !== null && (!Number.isInteger(s) || s < 0 || s > MAX_SEED)) throw new ApiError(400, `Seed must be empty or a whole number from 0 to ${String(MAX_SEED)}.`);
-      const presets: PresetsInput = { engine, faces, tex: engine === "trellis" ? tex : null, variants: v, style, seed: s };
       if (files.length > 0) {
         const total = files.reduce((n, f) => n + f.size, 0);
-        if (total > IMAGE_CAP) throw new ApiError(413, "The images in a batch can add up to at most 200 MiB.");
-        return submitImages(files, presets);
+        if (total > IMAGE_CAP) throw new ApiError(413, "The images in a batch can add up to at most 200 MiB. Remove some and try again.");
+        return submitImages(files, { faces, tex, variants: v, style, seed: s });
       }
-      const lines = prompts.split("\n").map((l) => l.trim()).filter(Boolean);
-      if (lines.length === 0) throw new ApiError(400, "Add at least one prompt or image.");
+      // Lengths count UTF-16 code units, as the server does.
+      const long = lines.findIndex((l) => l.length > MAX_PROMPT_CHARS);
+      if (long >= 0) throw new ApiError(400, `Prompt ${String(long + 1)} is longer than ${String(MAX_PROMPT_CHARS)} characters. Shorten it and try again.`);
+      const presets: PresetsInput = { faces, tex, variants: v, style, seed: s, sharedStyle: shared.trim() === "" ? null : shared.trim() };
       return submitPrompts(lines, presets);
     },
     onSuccess: (n) => {
       setError(null);
-      setStatus(`${String(n)} ${n === 1 ? "job" : "jobs"} added`);
+      setStatus(`${plural(n, "job", "jobs")} added`);
       setPrompts("");
+      setFiles([]);
       void qc.invalidateQueries({ queryKey: ["jobs"] });
     },
     onError: (e) => {
       setStatus(null);
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      setError(e instanceof Error ? e.message : "Something went wrong. Try again.");
     },
   });
   const submit = (e: SyntheticEvent): void => {
@@ -172,102 +301,266 @@ function SubmitForm(): ReactNode {
     setStatus(null);
     mutation.mutate();
   };
+  const onDrop = (e: DragEvent<HTMLLabelElement>): void => {
+    e.preventDefault();
+    setOver(false);
+    const dropped = [...e.dataTransfer.files].filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
+    if (dropped.length > 0) setFiles(dropped);
+  };
+  const generateLabel = count === 0 ? "Generate" : `Generate ${plural(count, "job", "jobs")}`;
   return (
-    <section className="panel submit" aria-labelledby="new-batch">
-      <h2 id="new-batch">New batch</h2>
-      <form onSubmit={submit}>
-        <label htmlFor="prompts">Prompts</label>
-        <textarea id="prompts" rows={5} placeholder="One prompt per line" value={prompts} onChange={(e) => { setPrompts(e.target.value); }} />
-        <label htmlFor="images">Images</label>
-        <input id="images" type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(e) => { setFiles(e.target.files ? [...e.target.files] : []); }} />
-        <div className="grid">
-          <label htmlFor="engine">Engine</label>
-          <select id="engine" value={engine} onChange={(e) => { setEngine(e.target.value); }}>
-            <option value="trellis">TRELLIS.2</option>
-            <option value="hunyuan">Hunyuan3D 2.1</option>
-          </select>
-          <label htmlFor="detail">Detail</label>
-          <select id="detail" value={faces} onChange={(e) => { setFaces(Number(e.target.value)); }}>
-            {DETAILS.map((d) => (
-              <option key={d} value={d}>{`${String(d / 1000)}k triangles`}</option>
-            ))}
-          </select>
-          <label htmlFor="texture">Texture</label>
-          <select id="texture" value={tex} disabled={engine !== "trellis"} onChange={(e) => { setTex(Number(e.target.value)); }}>
-            <option value={1024}>1024</option>
-            <option value={2048}>2048</option>
-          </select>
-          <label htmlFor="variants">Variants</label>
-          <input id="variants" type="number" min={1} max={MAX_VARIANTS} value={variants} onChange={(e) => { setVariants(e.target.value); }} />
-          <label htmlFor="seed">Seed</label>
-          <input id="seed" inputMode="numeric" placeholder="random" value={seed} onChange={(e) => { setSeed(e.target.value); }} />
+    <Card className="composer gap-0 p-4" aria-labelledby="new-batch" data-testid="composer">
+      <h2 id="new-batch" className="mb-3 text-[1.05rem] font-semibold">New batch</h2>
+      <form onSubmit={submit} className="grid gap-3.5">
+        <div className="grid gap-1.5">
+          <label className="font-semibold" htmlFor="prompts">Prompts</label>
+          <Textarea id="prompts" name="prompts" rows={4} autoComplete="off" placeholder="A mossy stone well, one prompt per line…" value={prompts} onChange={(e) => { setPrompts(e.target.value); }} className="min-h-24 text-[15px]" />
         </div>
-        <label className="check">
-          <input type="checkbox" checked={style} onChange={(e) => { setStyle(e.target.checked); }} />
-          <span>Game-asset style</span>
-        </label>
-        <button type="submit" disabled={mutation.isPending}>Generate</button>
-        {error && <p role="alert" className="error">{error}</p>}
-        {status && <p role="status" className="ok">{status}</p>}
+        <div className="grid gap-1.5">
+          <span className="font-semibold">Images</span>
+          <label
+            className="relative grid cursor-pointer place-items-center gap-0.5 rounded-md border border-dashed border-input bg-black/20 p-3 text-center hover:bg-vh-control-bg-hover has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring data-[over]:border-ring"
+            data-over={over ? "" : undefined}
+            onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+            onDragLeave={() => { setOver(false); }}
+            onDrop={onDrop}
+          >
+            <input id="images" name="images" type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Images" className="sr-only" onChange={(e) => { setFiles(e.target.files ? [...e.target.files] : []); }} />
+            <span className="flex items-center gap-2 font-semibold"><Images size={16} aria-hidden="true" />{files.length > 0 ? plural(files.length, "image chosen", "images chosen") : "Drop images here or choose files"}</span>
+            <span className="text-sm text-muted-foreground">PNG, JPEG or WebP, up to 20 MiB each</span>
+          </label>
+          {files.length > 0 && (
+            <div className="grid gap-1.5">
+              <ul className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                {files.slice(0, 5).map((f) => <li key={`${f.name}-${String(f.size)}`}>{f.name}</li>)}
+                {files.length > 5 && <li>{`and ${String(files.length - 5)} more`}</li>}
+              </ul>
+              {lines.length > 0 && <p className="text-sm text-muted-foreground">Images are added; the prompts above are ignored.</p>}
+              <Button type="button" className="justify-self-start" onClick={() => { setFiles([]); }}>Clear images</Button>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-x-4 gap-y-3.5">
+          <Segments name="detail" legend="Detail" values={DETAILS} value={faces} format={detailLabel} onChange={chooseDetail} />
+          <Segments name="texture" legend="Texture" values={TEXTURES} value={tex} format={String} onChange={setTex} disabled={(t) => (ultra ? t !== ULTRA_TEX : t === ULTRA_TEX)} />
+          {ultra && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
+          <div className="grid gap-1.5">
+            <label className="font-semibold" htmlFor="variants">Variants</label>
+            <div className="flex gap-1.5">
+              <Button type="button" size="icon" aria-label="Fewer variants" disabled={perLine <= 1} onClick={() => { setVariants(String(Math.max(1, perLine - 1))); }}>−</Button>
+              <Input id="variants" name="variants" type="number" inputMode="numeric" min={1} max={MAX_VARIANTS} value={variants} onChange={(e) => { setVariants(e.target.value); }} className="w-16 text-center tabular-nums" />
+              <Button type="button" size="icon" aria-label="More variants" disabled={perLine >= MAX_VARIANTS} onClick={() => { setVariants(String(Math.min(MAX_VARIANTS, perLine + 1))); }}>+</Button>
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <label className="font-semibold" htmlFor="seed">Seed</label>
+            <Input id="seed" name="seed" className="mono" inputMode="numeric" autoComplete="off" placeholder="Random" value={seed} onChange={(e) => { setSeed(e.target.value); }} />
+          </div>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <Switch id="style" checked={style} onCheckedChange={setStyle} />
+          <label className="font-semibold" htmlFor="style">Game-asset style</label>
+        </div>
+        <div className="grid gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label className="font-semibold" htmlFor="shared-style">Shared style</label>
+            <Button type="button" size="sm" disabled={files.length > 0 || shared === DEFAULT_SHARED_STYLE} onClick={() => { updateShared(DEFAULT_SHARED_STYLE); }}>Reset</Button>
+          </div>
+          <Textarea id="shared-style" name="shared-style" rows={2} maxLength={MAX_SHARED_STYLE_CHARS} autoComplete="off" disabled={files.length > 0} value={shared} onChange={(e) => { updateShared(e.target.value); }} className="min-h-14 text-[15px]" />
+          {files.length > 0 && <p className="text-sm text-muted-foreground">Shared style applies to prompts only.</p>}
+        </div>
+        <Button type="submit" variant="generate" size="lg" data-generate="" disabled={count === 0 || mutation.isPending} className="w-full">{mutation.isPending ? "Adding…" : generateLabel}</Button>
+        <div aria-live="polite">
+          {error && <ErrorText>{error}</ErrorText>}
+          {status && <p role="status" className="text-muted-foreground">{status}</p>}
+        </div>
       </form>
-    </section>
+    </Card>
   );
 }
 
-function useJobAction(): { run: (fn: () => Promise<void>) => void; error: string | null } {
+/** Prompt text clipped to two lines; when it is clipped, More and Less expand and collapse it in place. */
+function ClampedText({ text }: { text: string }): ReactNode {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = (): void => { setClipped(el.scrollHeight > el.clientHeight + 1); };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => { ro.disconnect(); };
+  }, [text, open]);
+  return (
+    <div className="grid min-w-0 gap-1">
+      <span ref={ref} data-testid="prompt-text" className={open ? "prompt" : "prompt clamp"} title={text}>{text}</span>
+      {(clipped || open) && (
+        <Button type="button" size="sm" className="justify-self-start" aria-expanded={open} onClick={() => { setOpen((o) => !o); }}>{open ? "Less" : "More"}</Button>
+      )}
+    </div>
+  );
+}
+
+function Chip({ children }: { children: ReactNode }): ReactNode {
+  return <span className="rounded-[var(--vh-radius-badge)] border border-border px-1.5 text-sm tabular-nums text-muted-foreground">{children}</span>;
+}
+
+type Estimates = ReturnType<typeof estimates>;
+
+function JobRow({ job, est, now, onAction }: { job: Job; est: Estimates; now: number; onAction: (fn: () => Promise<void>) => void }): ReactNode {
+  const e = est.jobs.get(job.id);
+  const unfinished = job.state === "pending" || job.state === "submitted";
+  return (
+    <li data-testid="job" data-job-id={job.id} className="flex min-w-0 gap-3 rounded-md border border-border bg-white/[.02] p-3">
+      <div className="stage size-16 flex-none overflow-hidden rounded-md">
+        {job.sourceReady && <img src={`/api/jobs/${job.id}/source-preview`} alt={`Source of ${label(job)}`} width={64} height={64} loading="lazy" className="size-full object-cover" />}
+      </div>
+      <div className="grid min-w-0 flex-1 gap-1.5">
+        <ClampedText text={label(job)} />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <StateBadge job={job} />
+          <Chip>{isUltra(job.faces, job.tex) ? "Ultra" : `${String(job.faces / 1000)}k`}</Chip>
+          {job.tex !== null && <Chip>{String(job.tex)}</Chip>}
+          <Chip><span className="mono">{`seed ${String(job.seed)}`}</span></Chip>
+        </div>
+        {unfinished && (
+          <p className="flex flex-wrap gap-x-3 text-sm text-muted-foreground">
+            {job.state === "submitted" && job.running && job.startedAt !== null ? (
+              <span>{`Generating for ${formatDuration(now - job.startedAt)}`}</span>
+            ) : (
+              <span>{`Added ${formatDuration(now - job.queuedAt)} ago`}</span>
+            )}
+            {job.queuePosition !== null && <span>{`#${String(job.queuePosition)} in line`}</span>}
+            {e?.startsIn !== null && e?.startsIn !== undefined && <span>{`Starts in about ${formatDuration(e.startsIn)}`}</span>}
+            {e?.left !== null && e?.left !== undefined && <span>{e.overTypical ? "taking longer than usual" : `about ${formatDuration(e.left)} left`}</span>}
+          </p>
+        )}
+        {e?.progress !== null && e?.progress !== undefined && <Progress value={Math.round(e.progress * 100)} aria-label={`Progress of ${label(job)}`} className="h-1.5" />}
+        {job.error && <ErrorText live={false}>{job.error}</ErrorText>}
+        <div className="flex flex-wrap gap-1.5">
+          {unfinished && <Button type="button" size="sm" onClick={() => { onAction(() => jobAction(job.id, "cancel")); }}>Cancel</Button>}
+          {(job.state === "failed" || job.state === "cancelled") && (
+            <>
+              <Button type="button" size="sm" onClick={() => { onAction(() => jobAction(job.id, "retry")); }}>Retry</Button>
+              <Button type="button" size="sm" variant="delete" onClick={() => { onAction(() => deleteJob(job.id)); }}>Delete</Button>
+            </>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function BatchGroup({ jobs, all, est, now, open, onOpenChange }: { jobs: Job[]; all: Job[]; est: Estimates; now: number; open: boolean; onOpenChange: (open: boolean) => void }): ReactNode {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<void>): void => {
+  const [busy, setBusy] = useState(false);
+  const [first] = all;
+  const done = all.filter((j) => j.state === "done").length;
+  const unfinished = all.filter((j) => j.state === "pending" || j.state === "submitted");
+  const retryable = all.filter((j) => j.state === "failed" || j.state === "cancelled");
+  // Batch actions go one job at a time, continue past a refusal and report how many were refused.
+  const runEach = async (targets: Job[], fn: (id: string) => Promise<void>, verb: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    let refused = 0;
+    for (const j of targets) {
+      try {
+        await fn(j.id);
+      } catch {
+        refused += 1;
+      }
+    }
+    setBusy(false);
+    if (refused > 0) setError(`${String(refused)} of ${plural(targets.length, "job", "jobs")} could not be ${verb}.`);
+    await qc.invalidateQueries({ queryKey: ["jobs"] });
+  };
+  const action = (fn: () => Promise<void>): void => {
     setError(null);
     fn()
       .then(() => qc.invalidateQueries({ queryKey: ["jobs"] }))
-      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "Something went wrong."); });
+      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "That action failed. Try again."); });
   };
-  return { run, error };
-}
-
-function Queue({ jobs, loading, error }: { jobs: Job[]; loading: boolean; error: Error | null }): ReactNode {
-  const action = useJobAction();
   return (
-    <section className="panel" aria-labelledby="queue-heading">
-      <h2 id="queue-heading">Queue</h2>
-      {loading && <p>Loading…</p>}
-      {error && !(error instanceof ApiError && error.status === 401) && <p role="alert" className="error">{`Could not load jobs: ${error.message}`}</p>}
-      {!loading && jobs.length === 0 && <p className="muted">Nothing waiting.</p>}
-      {action.error && <p role="alert" className="error">{action.error}</p>}
-      <ul className="jobs">
-        {jobs.map((j) => (
-          <li key={j.id} data-testid="job" data-job-id={j.id}>
-            <span data-testid="prompt-text" className="prompt">{label(j)}</span>
-            <span className="meta">
-              <span data-testid="job-state" className={`state state-${j.state}`}>{stateTerm(j)}</span>
-              {j.queuePosition !== null && <span className="position">{` #${String(j.queuePosition)} in line`}</span>}
-            </span>
-            {j.error && <span className="job-error">{j.error}</span>}
-            <span className="actions">
-              {(j.state === "pending" || j.state === "submitted") && (
-                <button type="button" onClick={() => { action.run(() => jobAction(j.id, "cancel")); }}>Cancel</button>
-              )}
-              {(j.state === "failed" || j.state === "cancelled") && (
-                <>
-                  <button type="button" onClick={() => { action.run(() => jobAction(j.id, "retry")); }}>Retry</button>
-                  <button type="button" onClick={() => { action.run(() => deleteJob(j.id)); }}>Delete</button>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
+      <li data-testid="batch" className="grid gap-2 rounded-md border border-border p-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <CollapsibleTrigger asChild>
+            <Button type="button" size="icon-sm" aria-label={open ? "Collapse batch" : "Expand batch"}>
+              <ChevronDown aria-hidden="true" className={open ? "rotate-180" : undefined} />
+            </Button>
+          </CollapsibleTrigger>
+          <span className="clamp min-w-0 flex-1 font-semibold" title={first ? label(first) : ""}>{first ? label(first) : ""}</span>
+          <span className="text-sm tabular-nums text-muted-foreground">{`${String(done)} of ${String(all.length)} done`}</span>
+          {unfinished.length > 0 && <Button type="button" size="sm" disabled={busy} onClick={() => { void runEach(unfinished, (id) => jobAction(id, "cancel"), "cancelled"); }}>Cancel all</Button>}
+          {retryable.length > 0 && <Button type="button" size="sm" disabled={busy} onClick={() => { void runEach(retryable, (id) => jobAction(id, "retry"), "retried"); }}>Retry failed</Button>}
+        </div>
+        <Progress value={Math.round((done / Math.max(1, all.length)) * 100)} aria-label="Batch progress" className="h-1.5" />
+        {error && <ErrorText>{error}</ErrorText>}
+        <CollapsibleContent asChild>
+          <ul className="grid gap-2">
+            {jobs.map((j) => <JobRow key={j.id} job={j} est={est} now={now} onAction={action} />)}
+          </ul>
+        </CollapsibleContent>
+      </li>
+    </Collapsible>
   );
 }
 
-function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job) => void }): ReactNode {
+function Queue({ jobs, loading, error }: { jobs: Job[]; loading: boolean; error: Error | null }): ReactNode {
+  const now = useNow();
+  const [openState, setOpenState] = useState<Record<string, boolean>>({});
+  // A group's first state comes from whether it had unfinished jobs when it first appeared; after that the
+  // user's choice (or that first state) is kept across refreshes, so a batch finishing does not collapse it.
+  const [firstOpen, setFirstOpen] = useState<Record<string, boolean>>({});
+  const rows = jobs.filter((j) => j.state !== "done");
+  const failedLoad = error && !(error instanceof ApiError && error.status === 401);
+  if (!loading && !failedLoad && rows.length === 0) return null;
+  const est = estimates(jobs.map((j) => ({ id: j.id, state: j.state, running: j.running, queuePosition: j.queuePosition, faces: j.faces, tex: j.tex, queuedAt: j.queuedAt, startedAt: j.startedAt, finishedAt: j.finishedAt })), now);
+  const batches: string[] = [];
+  for (const j of rows) if (!batches.includes(j.batchId)) batches.push(j.batchId);
+  const unseen = batches.filter((b) => !(b in firstOpen));
+  if (unseen.length > 0) {
+    setFirstOpen((f) => ({ ...f, ...Object.fromEntries(unseen.map((b) => [b, jobs.some((j) => j.batchId === b && (j.state === "pending" || j.state === "submitted"))])) }));
+  }
+  const count = (pred: (j: Job) => boolean): number => rows.filter(pred).length;
+  const counts: [string, number][] = [
+    ["Generating", count((j) => j.state === "submitted" && j.running)],
+    ["Queued", count((j) => j.state === "submitted" && !j.running)],
+    ["Waiting", count((j) => j.state === "pending")],
+    ["Failed", count((j) => j.state === "failed")],
+  ];
+  return (
+    <Card className="gap-3 p-4" aria-labelledby="queue-heading" data-testid="queue">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="queue-heading" className="text-[1.05rem] font-semibold">Queue</h2>
+        <p data-testid="queue-summary" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          {counts.map(([term, n]) => <span key={term}><span className="tabular-nums">{String(n)}</span>{` ${term}`}</span>)}
+          {est.queueClear !== null && <span>{`Queue clear in about ${formatDuration(est.queueClear)}`}</span>}
+        </p>
+      </div>
+      {loading && <p className="text-muted-foreground">Loading…</p>}
+      {failedLoad && <ErrorText>{`Could not load jobs: ${error.message}`}</ErrorText>}
+      <ul className="grid gap-2.5">
+        {batches.map((b) => {
+          const all = jobs.filter((j) => j.batchId === b);
+          const open = openState[b] ?? firstOpen[b] ?? all.some((j) => j.state === "pending" || j.state === "submitted");
+          return <BatchGroup key={b} jobs={rows.filter((j) => j.batchId === b)} all={all} est={est} now={now} open={open} onOpenChange={(o) => { setOpenState((s) => ({ ...s, [b]: o })); }} />;
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job, opener: HTMLElement | null) => void }): ReactNode {
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const action = useJobAction();
   const live = new Set(jobs.map((j) => j.id));
   const chosen = [...selected].filter((id) => live.has(id));
+  const allChosen = jobs.length > 0 && chosen.length === jobs.length;
   const toggle = (id: string, on: boolean): void => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -280,35 +573,58 @@ function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job) => void
     setError(null);
     startExport(chosen)
       .then((url) => { window.location.assign(url); })
-      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "The export failed."); });
+      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "The download could not start. Try again."); });
+  };
+  const remove = (id: string): void => {
+    setError(null);
+    deleteJob(id)
+      .then(() => qc.invalidateQueries({ queryKey: ["jobs"] }))
+      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "That action failed. Try again."); });
   };
   return (
-    <section className="panel library" aria-labelledby="library-heading">
-      <div className="library-head">
-        <h2 id="library-heading">Library</h2>
-        <button type="button" disabled={chosen.length === 0} onClick={exportSelected}>Download selected</button>
+    <Card className="gap-3 p-4" aria-labelledby="library-heading">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="library-heading" className="text-[1.05rem] font-semibold">Library</h2>
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
+          <span className="tabular-nums text-muted-foreground">{plural(jobs.length, "asset", "assets")}</span>
+          {jobs.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Checkbox id="select-all" checked={allChosen} onCheckedChange={(c) => { setSelected(c === true ? new Set(jobs.map((j) => j.id)) : new Set()); }} />
+              <label htmlFor="select-all">Select all</label>
+            </div>
+          )}
+          <Button type="button" disabled={chosen.length === 0} onClick={exportSelected}>{chosen.length > 0 ? `Download selected (${String(chosen.length)})` : "Download selected"}</Button>
+        </div>
       </div>
-      {error && <p role="alert" className="error">{error}</p>}
-      {action.error && <p role="alert" className="error">{action.error}</p>}
-      {jobs.length === 0 && <p className="muted">No assets yet</p>}
+      {error && <ErrorText>{error}</ErrorText>}
+      {jobs.length === 0 && (
+        <div className="grid gap-1 rounded-xl border border-dashed border-border px-4 py-8 text-center text-muted-foreground">
+          <strong>No assets yet</strong>
+          <span>Finished models appear here. Add prompts or images to start a batch.</span>
+        </div>
+      )}
       <ul className="assets">
         {jobs.map((j) => (
-          <li key={j.id} data-testid="asset" data-job-id={j.id}>
-            <img src={`/api/assets/${j.id}/thumb`} alt={label(j)} width={128} height={128} />
-            <span data-testid="prompt-text" className="prompt">{label(j)}</span>
-            <span data-testid="job-state" className="state state-done">{stateTerm(j)}</span>
-            <label className="check">
-              <input type="checkbox" checked={selected.has(j.id)} onChange={(e) => { toggle(j.id, e.target.checked); }} aria-label={`Select ${label(j)}`} />
-              <span>Select</span>
-            </label>
-            <span className="actions">
-              <button type="button" aria-label={`Preview ${label(j)}`} onClick={() => { onPreview(j); }}>Preview</button>
-              <button type="button" aria-label={`Download ${label(j)}`} onClick={() => { window.location.assign(`/api/assets/${j.id}/model.glb`); }}>Download</button>
-              <button type="button" aria-label={`Delete ${label(j)}`} onClick={() => { action.run(() => deleteJob(j.id)); }}>Delete</button>
-            </span>
+          <li key={j.id} className="asset grid min-w-0 content-start gap-2 rounded-xl border border-border bg-white/[.02] p-2.5" data-testid="asset" data-job-id={j.id}>
+            <button type="button" className="stage block aspect-square w-full cursor-zoom-in overflow-hidden rounded-md" aria-label={`Preview ${label(j)}`} onClick={(e) => { onPreview(j, e.currentTarget); }}>
+              <img src={`/api/assets/${j.id}/thumb`} alt={label(j)} width={256} height={256} loading="lazy" className="size-full object-contain" />
+            </button>
+            <span data-testid="prompt-text" className="prompt clamp" title={label(j)}>{label(j)}</span>
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <StateBadge job={j} />
+              <div className="flex items-center gap-2">
+                <Checkbox id={`select-${j.id}`} checked={selected.has(j.id)} onCheckedChange={(c) => { toggle(j.id, c === true); }} aria-label={`Select ${label(j)}`} />
+                <label htmlFor={`select-${j.id}`}>Select</label>
+              </div>
+            </div>
+            {j.startedAt !== null && j.finishedAt !== null && <span className="text-sm text-muted-foreground">{`Generated in ${formatDuration(j.finishedAt - j.startedAt)}`}</span>}
+            <div className="flex flex-wrap gap-1.5">
+              <Button type="button" size="sm" aria-label={`Download ${label(j)}`} onClick={() => { window.location.assign(`/api/assets/${j.id}/model.glb`); }}>Download</Button>
+              <Button type="button" size="sm" variant="delete" aria-label={`Delete ${label(j)}`} onClick={() => { remove(j.id); }}>Delete</Button>
+            </div>
           </li>
         ))}
       </ul>
-    </section>
+    </Card>
   );
 }

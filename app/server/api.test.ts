@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,9 +17,9 @@ afterEach(async () => {
   dirs.cleanup();
 });
 
-const presets = { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
+const presets = { faces: 10000, tex: 2048, variants: 1, style: true, seed: null };
 
-async function postPrompts(prompts: string[], extra: Partial<typeof presets> = {}, id: string = crypto.randomUUID()): Promise<Response> {
+async function postPrompts(prompts: string[], extra: Record<string, unknown> = {}, id: string = crypto.randomUUID()): Promise<Response> {
   return fetch(`${srv.url}/api/batches`, {
     method: "POST",
     headers: authHeaders({ "content-type": "application/json", "x-batch-id": id }),
@@ -72,10 +73,77 @@ describe("creating batches", () => {
   });
 });
 
+describe("TRELLIS.2 is the only engine (AC-23)", () => {
+  test("a batch without an engine field, or with engine trellis, is accepted as TRELLIS.2", async () => {
+    expect((await postPrompts(["a crate"])).status).toBe(201);
+    expect((await postPrompts(["a lamp"], { engine: "trellis" })).status).toBe(201);
+    const engines = srv.store.db.query("SELECT DISTINCT engine FROM jobs").all() as { engine: string }[];
+    expect(engines).toEqual([{ engine: "trellis" }]);
+  });
+  test("a 2000-character prompt is accepted", async () => {
+    expect((await postPrompts(["y".repeat(2000)])).status).toBe(201);
+  });
+});
+
+describe("Shared style (AC-28)", () => {
+  const sharedOf = (): (string | null)[] => (srv.store.db.query("SELECT shared_style FROM jobs ORDER BY position").all() as { shared_style: string | null }[]).map((r) => r.shared_style);
+  test("a prompt batch stores its trimmed Shared style on every job, and the job view returns it", async () => {
+    const res = await postPrompts(["a crate", "a lamp"], { sharedStyle: "  low-poly, flat shaded  " });
+    expect(res.status).toBe(201);
+    expect(sharedOf()).toEqual(["low-poly, flat shaded", "low-poly, flat shaded"]);
+    const body = (await res.json()) as { batch: { jobs: { sharedStyle: string | null; queuedAt: number }[] } };
+    expect(body.batch.jobs[0]?.sharedStyle).toBe("low-poly, flat shaded");
+    expect(typeof body.batch.jobs[0]?.queuedAt).toBe("number");
+  });
+  test("null, absent and empty after trimming are no Shared style, stored as null", async () => {
+    expect((await postPrompts(["a"], { sharedStyle: null })).status).toBe(201);
+    expect((await postPrompts(["b"])).status).toBe(201);
+    expect((await postPrompts(["c"], { sharedStyle: "   " })).status).toBe(201);
+    expect(sharedOf()).toEqual([null, null, null]);
+  });
+  test("301 characters are refused", async () => {
+    const res = await postPrompts(["a"], { sharedStyle: "s".repeat(301) });
+    expect(res.status).toBe(400);
+    expect(await errorOf(res)).toMatch(/300 characters/);
+  });
+  test("an image batch refuses a non-empty Shared style and accepts an empty one", async () => {
+    const form = (shared: unknown): FormData => {
+      const f = new FormData();
+      f.set("presets", JSON.stringify({ ...presets, sharedStyle: shared }));
+      f.append("images", new Blob([imageBytes("png")]), "x.png");
+      return f;
+    };
+    const send = (f: FormData): Promise<Response> => fetch(`${srv.url}/api/batches`, { method: "POST", headers: authHeaders({ "x-batch-id": crypto.randomUUID() }), body: f });
+    const refused = await send(form("hand-painted"));
+    expect(refused.status).toBe(400);
+    expect(await errorOf(refused)).toBe("Shared style applies to prompts only.");
+    expect((await send(form(""))).status).toBe(201);
+  });
+  test("a different Shared style under a reused batch ID is a conflict", async () => {
+    const id = crypto.randomUUID();
+    expect((await postPrompts(["a"], { sharedStyle: "one" }, id)).status).toBe(201);
+    expect((await postPrompts(["a"], { sharedStyle: "two" }, id)).status).toBe(409);
+    expect((await postPrompts(["a"], { sharedStyle: "one" }, id)).status).toBe(200);
+  });
+  test("a batch created before the upgrade still matches when its request is replayed", async () => {
+    // v0.1.0 hashed JSON.stringify({ kind, presets: { engine, faces, tex, variants, style, seed }, items }).
+    const id = crypto.randomUUID();
+    const v010 = createHash("sha256").update(JSON.stringify({ kind: "prompt", presets: { engine: "trellis", faces: 10000, tex: 2048, variants: 1, style: true, seed: null }, items: ["an old crate"] })).digest("hex");
+    srv.store.db.run("INSERT INTO batches (id, kind, presets, hash, created_at) VALUES (?, 'prompt', '{}', ?, 1)", [id, v010]);
+    expect((await postPrompts(["an old crate"], { engine: "trellis" }, id)).status).toBe(200);
+  });
+});
+
 describe("rejections create nothing and name the problem", () => {
   const cases: [string, () => Promise<Response>, number, RegExp][] = [
     ["empty batch", () => postPrompts(["", " "]), 400, /prompt/i],
-    ["over-long prompt", () => postPrompts(["x".repeat(501)]), 400, /500 characters/],
+    ["over-long prompt", () => postPrompts(["x".repeat(2001)]), 400, /2000 characters/],
+    ["a Hunyuan3D engine", () => postPrompts(["a"], { engine: "hunyuan" }), 400, /^Hunyuan3D is no longer available; use TRELLIS\.2\.$/],
+    ["an unknown engine", () => postPrompts(["a"], { engine: "x" }), 400, /Hunyuan3D is no longer available/],
+    ["a missing texture", () => postPrompts(["a"], { tex: null }), 400, /texture/],
+    ["30k triangles without 4096 textures", () => postPrompts(["a"], { faces: 30000, tex: 2048 }), 400, /^Ultra uses 30k triangles with 4096 textures\.$/],
+    ["30k triangles with 1024 textures", () => postPrompts(["a"], { faces: 30000, tex: 1024 }), 400, /^Ultra uses 30k triangles with 4096 textures\.$/],
+    ["4096 textures without 30k triangles", () => postPrompts(["a"], { faces: 20000, tex: 4096 }), 400, /^Ultra uses 30k triangles with 4096 textures\.$/],
     ["more than 25 jobs", () => postPrompts(Array.from({ length: 13 }, (_, i) => `p${i}`), { variants: 2 }), 400, /25 jobs/],
     ["bad variants", () => postPrompts(["a"], { variants: 5 }), 400, /variants/i],
     ["wrong file type", () => postImages([{ name: "x.gif", bytes: imageBytes("gif") }]), 400, /PNG, JPEG or WebP/],
@@ -175,5 +243,31 @@ describe("concurrency and idempotency", () => {
     expect((await postPrompts(["a"], {}, id)).status).toBe(200);
     expect((await postPrompts(["b"], {}, id)).status).toBe(409);
     expect(jobCount()).toBe(1);
+  });
+});
+
+describe("source-preview (AC-26)", () => {
+  test("serves the tracker's preview file for an unfinished job, and the job view says when one exists", async () => {
+    await srv.stop();
+    const img = join(dirs.root, "thumb_00001_.png");
+    await Bun.write(img, imageBytes("png"));
+    let ready = false;
+    srv = createServer(dirs.config, {
+      tracker: () => ({ health: () => ({ comfyui: "reachable", version: "0.46.2" }), queueInfo: () => null, sourcePreview: () => (ready ? img : null), stop: () => Promise.resolve() }),
+    });
+    expect((await postPrompts(["a crate"])).status).toBe(201);
+    const list = async (): Promise<{ id: string; sourceReady: boolean }[]> => ((await (await fetch(`${srv.url}/api/jobs`, { headers: authHeaders() })).json()) as { jobs: { id: string; sourceReady: boolean }[] }).jobs;
+    const [first] = await list();
+    const id = first?.id ?? "";
+    expect(first?.sourceReady).toBe(false);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() })).status).toBe(404);
+    ready = true;
+    expect((await list())[0]?.sourceReady).toBe(true);
+    const res = await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    srv.store.db.run("UPDATE jobs SET state = 'done' WHERE id = ?", [id]);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`, { headers: authHeaders() })).status).toBe(404);
+    expect((await fetch(`${srv.url}/api/jobs/${id}/source-preview`)).status).toBe(401);
   });
 });

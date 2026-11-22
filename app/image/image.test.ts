@@ -5,6 +5,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { SCHEMA_VERSION } from "../server/store.ts";
 import { join } from "node:path";
 
 const IMAGE = process.env.IMAGE ?? "asset-studio:local";
@@ -76,7 +77,7 @@ test("the root filesystem is read-only: a write outside the declared paths fails
 
 test("the database is created in the fresh /data volume, owned by the app", () => {
   const listing = execFileSync("docker", ["run", "--rm", "-v", `${volume}:/data:ro`, "--entrypoint", "/usr/local/bin/asset-studio", IMAGE, "schema-version"], { encoding: "utf8" }).trim();
-  expect(listing).toBe("1");
+  expect(listing).toBe(String(SCHEMA_VERSION));
   const owner = execFileSync("docker", ["run", "--rm", "-v", `${volume}:/data:ro`, "alpine:3.22", "stat", "-c", "%u %n", "/data/asset-studio.sqlite"], { encoding: "utf8" }).trim();
   expect(owner).toBe("65532 /data/asset-studio.sqlite");
 });

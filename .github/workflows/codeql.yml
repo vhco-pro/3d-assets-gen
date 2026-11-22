@@ -10,13 +10,17 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   code:
     permissions:
       security-events: write
       contents: read
       actions: read
-    uses: vhco-pro/.github/.github/workflows/reusable-codeql-js.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main
+    uses: vhco-pro/.github/.github/workflows/reusable-codeql-js.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # v1.2.4
     with:
       # Python covers scripts/generate_3d.py and the golden dump helper.
       languages: javascript-typescript,python
@@ -26,4 +30,4 @@ jobs:
       security-events: write
       contents: read
       actions: read
-    uses: vhco-pro/.github/.github/workflows/reusable-codeql-actions.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # main
+    uses: vhco-pro/.github/.github/workflows/reusable-codeql-actions.yml@e03ad61274b2bf0738b36ed67dff1c376321fb64 # v1.2.4

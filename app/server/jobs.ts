@@ -13,6 +13,8 @@ export interface JobRow {
   upload_name: string | null;
   upload_ext: string | null;
   engine: "trellis" | "hunyuan";
+  shared_style: string | null;
+  queued_at: number | null;
   faces: number;
   tex: number | null;
   style: number;
@@ -55,10 +57,13 @@ export interface JobView {
   error: string | null;
   createdAt: number;
   startedAt: number | null;
+  queuedAt: number;
+  sharedStyle: string | null;
+  sourceReady: boolean;
   finishedAt: number | null;
 }
 
-export function jobView(row: JobRow, queue: QueueInfo | null): JobView {
+export function jobView(row: JobRow, queue: QueueInfo | null, sourceReady = false): JobView {
   return {
     id: row.id,
     batchId: row.batch_id,
@@ -76,14 +81,17 @@ export function jobView(row: JobRow, queue: QueueInfo | null): JobView {
     queuePosition: queue?.position ?? null,
     error: row.error,
     createdAt: row.created_at,
+    queuedAt: row.queued_at ?? row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    sharedStyle: row.shared_style,
+    sourceReady,
   };
 }
 
 export type QueueLookup = (promptId: string | null) => QueueInfo | null;
 
-export function listJobs(store: Store, filter: { state?: string | null; batch?: string | null }, queue: QueueLookup): JobView[] {
+export function listJobs(store: Store, filter: { state?: string | null; batch?: string | null }, queue: QueueLookup, ready: (row: JobRow) => boolean = () => false): JobView[] {
   const where: string[] = [];
   const args: string[] = [];
   if (filter.state) {
@@ -96,7 +104,7 @@ export function listJobs(store: Store, filter: { state?: string | null; batch?: 
   }
   const sql = `SELECT j.* FROM jobs j JOIN batches b ON b.id = j.batch_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY b.created_at DESC, b.id DESC, j.position ASC`;
-  return (store.db.query(sql).all(...args) as JobRow[]).map((r) => jobView(r, r.state === "submitted" ? queue(r.prompt_id) : null));
+  return (store.db.query(sql).all(...args) as JobRow[]).map((r) => jobView(r, r.state === "submitted" ? queue(r.prompt_id) : null, ready(r)));
 }
 
 export function getJob(store: Store, id: string): JobRow | null {
@@ -112,19 +120,20 @@ export function requestCancel(store: Store, id: string): ActionResult {
   return res.changes === 1 ? { ok: true } : { ok: false, status: 409, error: "Only waiting, queued or generating jobs can be cancelled." };
 }
 
-export function retryJob(store: Store, config: Config, id: string): ActionResult {
+export function retryJob(store: Store, config: Config, id: string, now: number = Date.now()): ActionResult {
   return store.db.transaction((): ActionResult => {
     const job = getJob(store, id);
     if (!job) return { ok: false, status: 404, error: "No such job." };
     if (job.state !== "failed" && job.state !== "cancelled") return { ok: false, status: 409, error: "Only failed or cancelled jobs can be retried." };
+    if (job.engine === "hunyuan") return { ok: false, status: 400, error: "Hunyuan3D is no longer available; use TRELLIS.2." };
     const unfinished = (store.db.query("SELECT COUNT(*) AS n FROM jobs WHERE state IN ('pending', 'submitted')").get() as { n: number }).n;
     if (unfinished + 1 > config.limits.unfinishedJobs) {
       return { ok: false, status: 409, error: `There can be at most ${String(config.limits.unfinishedJobs)} unfinished jobs; wait for some to finish before retrying.` };
     }
     store.db.run(
       `UPDATE jobs SET state = 'pending', prompt_id = NULL, posted_at = NULL, losses = 0, server_errors = 0, cancel_requested = 0,
-        started_at = NULL, finished_at = NULL, error = NULL, attempts = attempts + 1 WHERE id = ? AND state = ?`,
-      [id, job.state],
+        started_at = NULL, finished_at = NULL, error = NULL, attempts = attempts + 1, queued_at = ? WHERE id = ? AND state = ?`,
+      [now, id, job.state],
     );
     return { ok: true };
   }).immediate();
