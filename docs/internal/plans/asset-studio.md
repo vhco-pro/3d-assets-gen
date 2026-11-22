@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Revising: shadcn/ui page, a richer queue, timing metadata, Shared style, and no live generation check; waiting for spec review."
+status: planned
+status_description: "Accepted at R-19: shadcn/ui page, richer queue, timing, Shared style, no live generation check."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
@@ -1324,6 +1324,7 @@ None.
 | 2026-11-22 | R-17 | spec | `557c810` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-18 | spec | `8b38a87` | claude-opus-5-5 | procedural | 1 blocking, 18 should-fix, 6 nits |
 | 2026-11-22 | R-19 | spec | `2420d68` | claude-opus-5-5 | procedural | 0 blocking, 11 should-fix, 2 nits |
+| 2026-11-22 | R-19 | spec | `2420d68` | n/a | n/a | accepted by owner |
 
 ### R-1
 
