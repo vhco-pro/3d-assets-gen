@@ -1,7 +1,7 @@
 # Repository instructions
 
 Read the personal conventions at
-https://github.com/vhco-pro/docs/blob/1ccf8f314575ece1f3fcc8e48c4fd804a1ca88ff/AGENTS.md
+https://github.com/vhco-pro/docs/blob/edd4c091cd7913e5c4eeb716e6f0f13df2fe7ab7/AGENTS.md
 and follow the task routes there before implementation.
 
 For all code, read conventions/coding.md at that revision.
@@ -10,6 +10,10 @@ For Go, also read conventions/go.md; for images, conventions/containers.md;
 for CI and releases, conventions/delivery.md and knowledge/shared-delivery.md.
 For TypeScript, read conventions/typescript.md; for React, also read conventions/react.md,
 including when specifying or reviewing those parts of a feature.
+For the page, read guides/use-frontend-design-skills.md, guides/vh-midnight.md (the page's style),
+conventions/frontend-testing.md and conventions/interface-colour.md.
+For the server's routes, read conventions/http-api.md; for workflows, conventions/github-actions.md.
+Read conventions/testing.md before diagnosing a failure, changing a test or claiming a run proves a change.
 When onboarding or bootstrapping, read the matching guides/ page.
 
 Load only the relevant documents. If they are inaccessible, report it and stop.
