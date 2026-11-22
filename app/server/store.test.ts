@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { DB_FILE, MIGRATIONS, openStore, pickBackup, restoreBackup, SCHEMA_VERSION, SchemaTooNewError } from "./store.ts";
+import { databaseSchemaVersion, DB_FILE, MIGRATIONS, openStore, pickBackup, restoreBackup, SCHEMA_VERSION, SchemaTooNewError } from "./store.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -85,4 +85,27 @@ test("pickBackup chooses the newest backup of the requested schema", async () =>
   s.close();
   expect(pickBackup(dir, SCHEMA_VERSION)).toBe(newest);
   expect(pickBackup(dir, SCHEMA_VERSION + 1)).toBeNull();
+});
+
+test("database-schema-version reads a cleanly closed WAL database read-only and leaves its rows alone (AC-15)", () => {
+  const s = openStore(dir);
+  s.db.run("INSERT INTO meta (key, value) VALUES ('probe', 'kept')");
+  s.close();
+  // A clean close checkpoints and removes -wal and -shm, the case a stopped app leaves behind.
+  expect(existsSync(join(dir, `${DB_FILE}-wal`))).toBe(false);
+  expect(databaseSchemaVersion(dir)).toBe(SCHEMA_VERSION);
+  const check = new Database(join(dir, DB_FILE));
+  expect(check.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({ value: String(SCHEMA_VERSION) });
+  expect(check.query("SELECT value FROM meta WHERE key = 'probe'").get()).toEqual({ value: "kept" });
+  check.close();
+});
+
+test("database-schema-version reads a database the running app holds open, and reports none without a file", () => {
+  const s = openStore(dir);
+  s.db.run("UPDATE meta SET value = '2' WHERE key = 'schema_version'");
+  expect(databaseSchemaVersion(dir)).toBe(2);
+  s.close();
+  rmSync(join(dir, DB_FILE));
+  expect(databaseSchemaVersion(dir)).toBe("none");
+  expect(existsSync(join(dir, DB_FILE))).toBe(false);
 });

@@ -22,6 +22,24 @@ cmd="${*: -1}"
 echo "ssh $cmd" >> "$CALLS"
 case "$cmd" in
   *"docker load"*) cat > /dev/null ;;
+  *"docker volume inspect"*)
+    case "${STUB_VOLUME:-present}" in
+      missing) echo "Error response from daemon: get asset-studio_data: no such volume" >&2; exit 1 ;;
+      error) echo "error during connect: the docker engine is not reachable" >&2; exit 1 ;;
+      *) echo '[{"Name": "asset-studio_data"}]' ;;
+    esac ;;
+  *"AssetStudio\\current.json"*)
+    current='{"version": "1.2.2", "tag": "ghcr.io/vhco-pro/3d-assets-gen:1.2.2", "digest": "sha256:old"}'
+    [[ "${STUB_CURRENT_JSON-unset}" != "unset" ]] && current="$STUB_CURRENT_JSON"
+    [[ -n "$current" ]] && printf '%s\r\n' "$current" || exit 1 ;;
+  *"database-schema-version"*)
+    if [[ "$cmd" == *":1.2.3 "* ]]; then answer="${STUB_NEW_DB_SCHEMA:-2}"; else answer="${STUB_OLD_DB_SCHEMA:-2}"; fi
+    case "$answer" in
+      unknown) echo "unknown command: database-schema-version" >&2; exit 2 ;;
+      fail) echo "SQLITE_CANTOPEN" >&2; exit 1 ;;
+      *) printf '%s\r\n' "$answer" ;;
+    esac ;;
+  *" schema-version"*) printf '%s\r\n' "${STUB_NEW_SCHEMA:-2}" ;;
   *previous.json*) [[ -n "${STUB_PREVIOUS_JSON:-}" ]] && printf '%s\r\n' "$STUB_PREVIOUS_JSON" || exit 1 ;;
   *"-File asset-studio-"*)
     name="${cmd#*-File asset-studio-}"
