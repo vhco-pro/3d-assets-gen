@@ -43,7 +43,8 @@ test("tokens, the single solid Generate button and semantic colours only where D
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#020814");
   await page.getByLabel("Prompts").fill("style check crate");
   const generate = page.getByRole("button", { name: /^Generate/ });
-  expect((await colours(generate)).bg).toBe("rgb(52, 211, 156)");
+  // Generate turns from disabled to enabled when text arrives; wait for its settled colour.
+  await expect.poll(async () => (await colours(generate)).bg).toBe("rgb(52, 211, 156)");
   const offenders = await page.evaluate(() => {
     const semantic = /rgba?\((52, 211, 156|245, 181, 68|255, 107, 107|167, 240, 210|255, 221, 158|255, 196, 196)(, [\d.]+)?\)/;
     const out: string[] = [];

@@ -24,6 +24,7 @@ export interface Job {
   queuePosition: number | null;
   error: string | null;
   createdAt: number;
+  startedAt: number | null;
 }
 
 export interface Health {
