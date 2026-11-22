@@ -1,6 +1,6 @@
 ---
 status: draft
-status_description: "Revised: base-nossl runtime after the release scan, R-9 items folded in; waiting for a new independent spec review."
+status_description: "Revised: base-nossl runtime, R-9 and R-10 items folded in; waiting for a new independent spec review."
 issue: null
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
@@ -70,14 +70,22 @@ public exposure and changes to the ComfyUI install. Delivery ends at a working t
 node with the friend and limiting `autogroup:shared` to port 443 in the tailnet ACL are the owner's
 steps in the Tailscale admin console, and the README gives a checklist for them.
 
-Planned proof, none of it run yet: unit tests that compare the graphs the app builds with the Python
-builders' graphs; a fake ComfyUI server that drives queueing, cancellation, timeouts, restarts, lost
-jobs and rejections; Playwright journeys against the built container in Chromium, with sign-in, upload,
-library and download journeys also in Firefox, and a layout pass across a viewport matrix; a
-bundle-size check; output tests for the command-line tools; a start check of both the local and the
-published image as the non-root user with a read-only root filesystem; deploy and rollback checks on
-`win-main`; and after deployment, a reachability and rate-limit check from other tailnet devices and two
-real generations.
+Observed during implementation, before this revision: `bun run verify` passed end to end locally and in
+CI (graph equivalence with the Python builders, the fake ComfyUI tests of queueing, cancellation,
+timeouts, restarts, lost jobs and rejections, the Playwright journeys in Chromium and Firefox, the layout
+matrix, bundle budgets, CLI output tests, the image start check, and a memory check that found and fixed an
+out-of-memory export). The Firefox viewer render skipped in both places for lack of WebGL. Still planned:
+the Firefox render in CI with Mesa, the published image's start check, the deploy and rollback checks on
+`win-main`, the reachability and rate-limit checks from other tailnet devices, and two real generations.
+
+Changed since the accepted R-9 scope: the first release scan failed on an unfixed HIGH OpenSSL CVE in the
+distroless `cc` base, so the runtime is now `base-nossl` (the app links only glibc); CI installs Mesa so
+Firefox can render, and a missing WebGL there fails the run; a public `GET /api/session` tells the page
+whether its cookie is valid (it ignores bearer tokens, so it cannot be used to test tokens); `shellcheck`
+joins the pinned tools in `tools.env`, which the owner chose to keep as a sourced file rather than YAML;
+the manifest gains a `style` field and prompts are stored without the style suffix; image file names
+count toward a batch's content hash; and a failed release is retried with a fix commit and the next
+version.
 
 The repository becomes public `vhco-pro/3d-assets-gen` under Apache-2.0, after the local history was
 scrubbed of `win-main`'s tailnet address, its Windows user name and its Windows paths. Two stored review
@@ -176,7 +184,9 @@ output folders (`scripts/start_headless.ps1:10,20`). ComfyUI listens only on loc
   executable lists only `libc`, `libpthread`, `libdl`, `libm` and the loader, so nothing needs OpenSSL.
 - Headless Firefox (Playwright's build) could not create a WebGL context on `fedora-43` (`Exhausted GL
   driver options`) or in the CI run on `ubuntu-latest`, so the Firefox viewer render check skipped in
-  both; Chromium rendered the fixture GLB in both.
+  both; Chromium rendered the fixture GLB in both. In the `mcr.microsoft.com/playwright:v1.65.1-noble`
+  image, which ships Mesa, Playwright's Firefox 1.65.1 reported the WebGL renderer `llvmpipe, or similar`
+  both headless and headed under `xvfb-run`.
 - Docker Desktop started with `docker desktop start` from an SSH session stopped when that session
   ended. Started instead by a temporary scheduled task with an interactive principal (while the owner's
   console session was active), `docker desktop status` still reported `running` from a new SSH session
@@ -184,7 +194,7 @@ output folders (`scripts/start_headless.ps1:10,20`). ComfyUI listens only on loc
 
 The upload helper always declares `image/png` (`scripts/generate_3d.py:79`), whatever the file is. The
 handoff lists the web features discussed: prompt or image upload, progress, a 3D preview and GLB
-download (`HANDOFF.md:50-54`). `AGENTS.md:21` states that no build or test commands exist yet.
+download (`HANDOFF.md:50-54`). Before this feature, `AGENTS.md:21` stated that no build or test commands existed yet.
 
 Existing web front ends were checked before choosing to build. Open WebUI drives ComfyUI only for
 images, through one static workflow mapped onto its prompt and size controls, and has no 3D output.
@@ -536,8 +546,10 @@ reads it with `ssh win-main` from `config.yaml` and gives it to the friend out o
 `scripts/deploy/deploy.sh --rotate-token` writes a new token and restarts the app. `bun run verify:live`
 reads the token over SSH into memory for its run and never writes it to disk or logs.
 
-Every `/api` route except `GET /api/health` and `POST /api/session` requires either an
-`Authorization: Bearer <token>` header or the session cookie. `POST /api/session` compares the submitted
+Every `/api` route except `GET /api/health`, `GET /api/session` and `POST /api/session` requires either an
+`Authorization: Bearer <token>` header or the session cookie. `GET /api/session` always answers 200 with
+`{"signedIn": true}` or `{"signedIn": false}`, judged from the session cookie alone; it ignores any
+`Authorization` header, so it cannot be used to test tokens, and it never counts toward the failure limit. `POST /api/session` compares the submitted
 token in constant time and sets an `HttpOnly`, `Secure`, `SameSite=Strict` cookie with `Max-Age` of 30
 days. Its value is `<issued-at>.<mac>`, where `<issued-at>` is the sign-in time in Unix seconds and
 `<mac>` is HMAC-SHA256 keyed with the token over `asset-studio-session-v1.<issued-at>`. The server
@@ -564,7 +576,7 @@ JSON over HTTP under `/api`; the page uses only this API.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/health` | App version, build commit and ComfyUI state, without a token |
-| `GET /api/session` | Whether the request's cookie or bearer token is valid, without a token and without counting as a failure |
+| `GET /api/session` | 200 with `{"signedIn": bool}` from the session cookie alone; no token needed, bearer tokens ignored, never counted as a failure |
 | `POST /api/session` | Exchange the token for the session cookie |
 | `POST /api/batches` | Create a batch from prompts (JSON) or images (multipart) |
 | `GET /api/jobs?state=&batch=` | List jobs, newest batch first and in batch position order within a batch, with queue position for submitted jobs |
@@ -705,8 +717,8 @@ trigger and only starts `Docker Desktop.exe`; `deploy.sh` and `rollback.sh` run 
 `deploy.sh`, `rollback.sh`, `check-image.sh`, `check-repo.sh` and `bun run verify` use `cosign`, `gh` and
 `shellcheck` binaries they download at exact versions into a cache directory, checking SHA-256 checksums
 pinned in `scripts/deploy/tools.env`. They never run a preinstalled copy. `tools.env` is an exception to
-the YAML rule for settings files: the shell scripts source it directly, which a YAML file would need a
-parser for. A Renovate custom manager in `renovate.json` (regex, datasource
+the YAML rule for settings files, chosen by the owner: the shell scripts source it directly, which a YAML
+file would need a parser for. A Renovate custom manager in `renovate.json` (regex, datasource
 `github-release-attachments`) captures each version and its digest together, so an update moves both.
 
 `scripts/deploy/deploy.sh <version>` runs on `fedora-43`:
@@ -789,6 +801,12 @@ label is added. The image's version and commit are the ones `/api/health` report
    implementation review, so the review can observe AC-10, AC-11 and AC-15 against it.
 2. After merge, the release image from `main` is deployed and AC-10's check is repeated.
 
+A version whose tag was pushed but whose `release` job failed has no GitHub Release and is never
+deployed. A failure caused by the code or the image (a scan finding, a build error) is fixed by a new
+commit, which gets the next version; a transient failure (a registry or network error) is retried by
+re-running the failed `release` job in the same run. The same holds for `main`: step 2 waits for the next
+successful release.
+
 The feature is delivered when step 2 has run. Deployments always use an exact version with its recorded
 digest, never the action's `latest` alias.
 
@@ -852,9 +870,10 @@ seed ran before or after the fake started.
 Each of these Playwright projects runs against its own container, data directory and fake: the sign-in
 and token-rotation scenarios (their failures consume the rate-limit budget), the offline and
 incompatible-version scenarios and the glossary scenario (they stop or change the fake), and the
-empty-profile scenarios. In CI the Firefox projects run headed under Xvfb, where Firefox can use Mesa
-for WebGL; where a browser still has no WebGL, the viewer render check skips with that reason rather than
-pass or fail. The
+empty-profile scenarios. The CI `checks` job installs Mesa's software GL (`libgl1-mesa-dri`, `libegl1`)
+before the suite and sets `E2E_REQUIRE_WEBGL=1`, which turns a missing WebGL context into a failure of the
+viewer render check, so CI supplies the Firefox render evidence. Without that variable, as on
+`fedora-43`, the check skips with the reason instead of passing or failing. The
 remaining journeys share one seeded container; those that change data (submit, cancel, retry, delete)
 act only on jobs they created in the same test. `bun run verify:live` runs the real generations against a deployed app and is never part
 of CI.
@@ -916,12 +935,12 @@ deletes only flagged fixture rows and their files.
 | AC-04 | Tracker tests: stopping the fake ComfyUI with jobs pending and submitted leaves every state unchanged and `/api/health` reports offline, and restarting it lets the jobs finish; a fake that switches to `comfyui_version` 0.46.1 while staying up, and one that restarts within a single tick reporting 0.46.1 with its queue emptied, each make `/api/health` report incompatible with that version, leave every job state unchanged and receive no `/prompt` or cancel call, until the fake reports 0.46.2 again and the jobs finish. Playwright `offline.spec.ts` checks the banner appears and clears for offline with unfinished jobs, for offline on the empty profile, and for an incompatible version. |
 | AC-05 | Tracker tests with a fake that keeps finished, failed and cancelled prompts in its history: cancel pending without an attempt ID (the fake receives no call); cancel pending with an attempt ID the fake has queued (the fake receives `POST /api/jobs/<that id>/cancel`); cancel queued and cancel running (the fake receives the per-job cancel for that prompt ID and never `/interrupt`); cancel requested after the fake already finished the prompt (job ends `done`, no cancel call); the fake finishes the prompt between the history read and the cancel and answers `{"cancelled": false}` (job ends `done`); retry after a failure and retry after a cancel (the fake receives a new `/prompt` with a different `prompt_id` and prefix, the same seed and preset values, the cancel-requested flag, server-error count, started time and error message are cleared, and the job ends `done` without being cancelled again); retry after a timeout on a faked clock (the new attempt is not cancelled before it has run 15 minutes); retry at 100 unfinished jobs (refused with a message); cancel of a pending job whose post timed out 5 seconds earlier, with a fake that accepts the post 10 seconds after the cancel request (the job keeps its flag, the late prompt appears, receives the per-job cancel, and the job ends `cancelled`); a per-job cancel that is unreachable or answers 500 leaves the job in its state with the flag set, the job is not submitted meanwhile, and the next tick's successful cancel ends it `cancelled`. Playwright `queue.spec.ts` cancels and retries through the page. |
 | AC-06 | Restart tests kill and restart the server against the fake in these states: prompt finished in history (job ends `done`); prompt still queued (job stays submitted and later finishes); prompt unknown after a fake restart that empties queue and history (job resubmitted with a new `prompt_id` and prefix, and on the third loss `failed`); attempt ID stored with the prompt already posted but the job still `pending` (the job becomes `submitted`; the fake receives one `/prompt` call in total); the fake accepts a prompt 15 seconds after the client's 10-second timeout, later than the next tick (the job becomes `submitted` and the fake receives one `/prompt` call in total); the fake reports the previous attempt's files missing (the resubmitted prompt carries a different prefix). Fault-injection tests kill the server after the first file is written into the collection directory, and again after the rename and before the `done` update; each time the next tick ends with a `done` row and three complete files. A timeout test on a faked clock has the fake finish the prompt just before the per-job cancel, which answers `{"cancelled": false}`, and asserts the job ends `done`. Sweep tests: kill the server after the `done` update and before ComfyUI cleanup, and after a batch's uploads rename and before its commit, restart immediately, and assert the fake's `asset-studio` folders and `/data/uploads/` hold nothing for those jobs after the start sweep. |
-| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox: on the seeded fixture, thumbnails load from `/api/assets/<id>/thumb`, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; with the viewer chunk blocked, the error state and retry button appear, and after unblocking, retry loads the viewer; on the empty profile, the library shows its empty state. |
+| AC-07 | Playwright `library.spec.ts` in Chromium and Firefox (the Firefox render evidence comes from CI, where Mesa is installed and `E2E_REQUIRE_WEBGL=1` makes a missing WebGL context fail the test): on the seeded fixture, thumbnails load from `/api/assets/<id>/thumb`, the viewer fires `load` for the fixture GLB and its canvas has non-background pixels, and the console has no errors; with the viewer chunk blocked, the error state and retry button appear, and after unblocking, retry loads the viewer; on the empty profile, the library shows its empty state. |
 | AC-08 | Playwright `export.spec.ts` in Chromium and Firefox downloads one GLB and checks its glTF binary header, then selects three assets, starts the export, receives the browser download from the one-time link, and checks its six file names follow the slug and short ID rule and that `manifest.json` matches the documented schema with the six files and their settings; a fixture prompt with only non-Latin characters and the style suffix on downloads as `asset-<short id>.glb`, and manifest prompts carry no style suffix; a second request to the same link answers 404. `bun test app/server` (which no longer contains the memory tests) export tests: 101 assets refused with 413 and the split message, a selection whose fixture files add up to just over 2 GiB (sparse files) refused the same way, a link fetched without credentials refused with 401, a link whose selection lost a job after it was issued redirected to `/?export=gone` before any byte of zip is sent, and a link older than five minutes refused (clock faked). |
 | AC-09 | Playwright `layout.spec.ts` runs the sign-in, submit, queue and library journeys in Chromium at 320x568, 390x844, 390x667, 844x390, 768x1024, 1024x768, 1280x720 and 1440x900, and at 640x450 as the reflow equivalent of 1280x900 at 200 percent zoom: no horizontal overflow, body text at least 14 px, prompt lines at most 90 characters, no label or button whose `scrollWidth` exceeds its `clientWidth`, primary actions inside the viewport, every control with an accessible name, and sign-in and submit completed by keyboard alone. The library and viewer journey also runs with `reducedMotion: 'reduce'` and asserts the viewer has no auto-rotate and interpolation off. A manual check at 200 percent browser zoom in Chromium on a 1280x720 window covers the same journeys, with screenshots. All screenshots are reviewed and the review result is recorded in the evidence. |
 | AC-10 | Manual procedure after each deploy, run from `fedora-43`: `curl https://win-main.<tailnet>.ts.net/api/health` returns the deployed version and commit; `curl --connect-timeout 5` to `win-main`'s tailnet address on ports 8790 and 8188 fails to connect. |
 | AC-11 | `bun run verify:live` against the deployed URL, with the token read over SSH into memory, submits `a small wooden crate` at the default TRELLIS.2 preset (10k, 2048) and `a stone pillar` with Hunyuan3D at 10k, waits for both to reach `done`, downloads both GLBs, checks both parse as glTF and the TRELLIS.2 one has at least one material with a base colour texture, then lists ComfyUI's `output/asset-studio/` and `input/asset-studio/` over SSH every ten seconds and passes once no entry for either job remains, failing if any remains after two minutes. |
-| AC-12 | `bun test app/server` (which no longer contains the memory tests) auth tests: every protected route returns 401 without credentials, with a wrong bearer token and with a forged cookie, and succeeds with the bearer token and with the cookie from `POST /api/session` (whose `Max-Age` is 2592000), and refuses that cookie once the faked clock passes 30 days and a cookie with a future issue time; from the trusted gateway peer, the eleventh failed authentication within 60 seconds with one `X-Forwarded-For` value returns 429, counting wrong sign-ins, wrong bearer tokens and forged cookies together, a different `X-Forwarded-For` value still gets 401, and after 60 seconds without failures the first value gets 401 again (clock faked); from an untrusted peer the header is ignored; a correct token from a client over the limit still succeeds. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, shows an error for a wrong token, and after the token is rotated shows the sign-in screen and sends no further job-list requests, then signs in with the new token. After deploy, from `fedora-43` and from a second tailnet device: the eleventh wrong sign-in from `fedora-43` within a minute gets 429 while the second device's next wrong sign-in still gets 401. |
+| AC-12 | `bun test app/server` (which no longer contains the memory tests) auth tests: every protected route returns 401 without credentials, with a wrong bearer token and with a forged cookie, and succeeds with the bearer token and with the cookie from `POST /api/session` (whose `Max-Age` is 2592000), and refuses that cookie once the faked clock passes 30 days and a cookie with a future issue time; from the trusted gateway peer, the eleventh failed authentication within 60 seconds with one `X-Forwarded-For` value returns 429, counting wrong sign-ins, wrong bearer tokens and forged cookies together, a different `X-Forwarded-For` value still gets 401, and after 60 seconds without failures the first value gets 401 again (clock faked); from an untrusted peer the header is ignored; `GET /api/session` answers 200 `{"signedIn": false}` without a cookie, with a forged cookie and with a valid bearer token, 200 `{"signedIn": true}` with a valid cookie, and twelve calls with a wrong bearer token leave the next wrong sign-in at 401; a correct token from a client over the limit still succeeds. Playwright `signin.spec.ts` in Chromium and Firefox signs in through the page, reloads with the cookie still valid, shows an error for a wrong token, and after the token is rotated shows the sign-in screen and sends no further job-list requests, then signs in with the new token. After deploy, from `fedora-43` and from a second tailnet device: the eleventh wrong sign-in from `fedora-43` within a minute gets 429 while the second device's next wrong sign-in still gets 401. |
 | AC-13 | `bun run size` after `vite build` gzips at level 9 and sums the entry chunk, its static imports and every `modulepreload` link in the built `index.html` (at most 150 KiB), and the viewer chunk (at most 350 KiB), and fails when the viewer module is reachable from the entry's static imports. Its own tests run it on two fixture builds and assert failure on one that imports the viewer statically and on one whose entry is above 150 KiB. |
 | AC-14 | `scripts/deploy/check-repo.sh` after the first merge: `gh api repos/vhco-pro/3d-assets-gen` reports public visibility, licence `apache-2.0`, `delete_branch_on_merge` true, and `security_and_analysis.secret_scanning` and `secret_scanning_push_protection` enabled; `gh api repos/vhco-pro/3d-assets-gen/dependency-graph/sbom` returns 200; `gh api repos/vhco-pro/3d-assets-gen/vulnerability-alerts` returns 204; the CodeQL and Scorecard workflow files call the named reusable workflows at a full commit SHA, with `languages` naming `javascript-typescript` and `python`; `gh run list` shows a completed successful run of each on `main`, and code scanning lists a `/language:js-ts` analysis on `main` (which carries the Python results) and an Actions analysis; `renovate.json` exists on `main`; the repository is listed in the `vhco-renovate` installation's repositories, and a Renovate Dependency Dashboard issue or Renovate PR exists. |
 | AC-15 | Manual procedure on `win-main`: deploy two prerelease versions in turn and compare the SHA-256 of `config.yaml` (unchanged), confirm the recorded previous version is the first one and the job rows are intact, rerun `deploy.sh` with the second version and confirm the recorded previous version is still the first one, remove the first image with `docker image rm`, run `rollback.sh` and confirm it stops the app, reloads the first image, `current.json` and `.env` name the first version, and `/api/health` reports the first version and commit. Then run `docker compose down`, remove the current image with `docker image rm`, confirm `docker image inspect` reports it absent, start the `AssetStudio-Logon` task and confirm `/api/health` answers with the current version within five minutes. `bats` tests of `rollback.sh` with stubbed `docker`, `ssh` and `gh`: it ensures Docker Desktop first, reloads and verifies a missing previous image, runs the remote rollback, and fails without a previous version, without a release record or without a matching backup. Unit tests: write rows without a checkpoint, take the backup, run `restore-backup` on a copy and find every row; start the server on a database whose schema version is one higher and assert it exits with the version message; with a test migration from schema 1 to 2, assert a `schema-1-*` backup is written only on the migrating start and not on the next start, and that the rollback logic picks the newest `schema-1-*` backup. |
@@ -983,6 +1002,9 @@ deletes only flagged fixture rows and their files.
 - [x] T24 `README.md`, `AGENTS.md`, `LICENSE`, `app/docs/docs.test.ts` - commands, readiness, dependencies, owner checklist, terminal-output route and Apache-2.0 licence; `bun test ./app/docs` passes (AC-14, AC-21)
       Evidence: `bun test ./app/docs`: 6 pass (README.md and AGENTS.md each name the seven commands and every named `bun run` script and script path exists; the README lists Bun, Docker and python3, the `✓ Passed: ready at` signal and the share and `autogroup:shared` port 443 checklist items; AGENTS.md links conventions/terminal-output.md and no longer says no commands exist); LICENSE is GitHub's apache-2.0 text with `Copyright 2026 VH & Co BV`.
 - [ ] T25 `app/cli/verify-live.ts` - live check of two real generations and the polled ComfyUI cleanup; runs against a deployed app (AC-11)
+- [ ] T27 `Dockerfile` - runtime on `gcr.io/distroless/base-nossl-debian13:nonroot` at the recorded digest; `bun test ./app/image` passes and Trivy 0.69.3 reports no HIGH or CRITICAL finding (AC-17); do before T26
+- [ ] T28 `.github/workflows/ci.yml`, `app/e2e/library.spec.ts` - install Mesa in the checks job and set `E2E_REQUIRE_WEBGL=1` so a missing WebGL context fails; the Firefox viewer render passes in CI (AC-07); do before T26
+- [ ] T29 `app/server/http.ts`, `app/server/auth.test.ts` - `GET /api/session` judges the cookie alone and never counts failures; the AC-12 session tests pass (AC-12); do before T26
 - [ ] T26 `docs/internal/plans/asset-studio.md` - deploy the feature-branch prerelease to `win-main` and run the AC-10, AC-11, AC-12 deployed and AC-15 procedures, plus `check-image.sh` and `check-repo.sh`; evidence recorded under each criterion (AC-10, AC-11, AC-12, AC-14, AC-15, AC-17)
 
 ## Open Questions
@@ -2156,3 +2178,6 @@ PROPOSAL: Add the distroless, Renovate datasource and eslint-plugin-react-hooks 
 - [ComfyUI Mini](https://github.com/ImDarkTom/ComfyUIMini): a lightweight mobile web UI that runs ComfyUI workflows over its API.
 - [ComfyBox](https://github.com/space-nuko/ComfyBox): an alternative ComfyUI front end with a prompt queue and history.
 - [TRELLIS.2 and Pixal3D are now native](https://blog.comfy.org/p/trellis2-and-pixal3d-are-now-native): ComfyUI runs TRELLIS.2 with native nodes.
+- [Renovate GitHub Release Attachments datasource](https://docs.renovatebot.com/modules/datasource/github-release-attachments/): needs a version and a `currentDigest`, finds the release file whose sha256 matches and supports sha256 and sha512, so a version and its checksum update together.
+- [Renovate regex custom manager](https://docs.renovatebot.com/modules/manager/regex): named capture groups such as `currentValue` and `currentDigest`, matched per file.
+- The `base-nossl` runtime's content and the plugin's rule list come from measurements, not pages: the Trivy scans and `ldd` output in Background, and `eslint-plugin-react-hooks` 7.1's `configs.recommended.rules` read from `node_modules` during implementation.
