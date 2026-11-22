@@ -65,6 +65,16 @@ for (const [w, h] of VIEWPORTS) {
     await checkLayout(page);
     await primaryActionReachable(page, "Generate");
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-main.png`), fullPage: true });
+    // The submit journey: a new job in the queue and the confirmation, then the library's preview panel.
+    await page.getByLabel("Prompts").fill(`layout ${String(w)}x${String(h)} ${Math.random().toString(36).slice(2, 8)}`);
+    await page.getByRole("button", { name: "Generate" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
+    await checkLayout(page);
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-submitted.png`), fullPage: true });
+    await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
+    await expect(page.locator("model-viewer")).toBeVisible({ timeout: 60_000 });
+    await checkLayout(page);
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-preview.png`), fullPage: true });
   });
 }
 
