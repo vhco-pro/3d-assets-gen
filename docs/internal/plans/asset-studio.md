@@ -1425,6 +1425,7 @@ None.
 | 2026-11-22 | R-19 | spec | `2420d68` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-20 | spec | `05f83e4` | claude-opus-5-5 | procedural | 1 blocking, 6 should-fix, 3 nits |
 | 2026-11-22 | R-21 | spec | `cc73fb2` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix, 3 nits |
+| 2026-11-22 | R-22 | spec | `d8ba062` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 5 nits |
 
 ### R-1
 
@@ -3578,6 +3579,80 @@ SEVERITY: nit
 WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 969-975)
 EVIDENCE: On a first deploy, `docker run` with the data volume mounted creates `asset-studio_data` before Compose does, so the volume has no Compose labels. That is a write on `win-main` before step 5, and Compose later warns that the volume "was not created by Docker Compose". Step 4 treats a first deploy only as `none`.
 PROPOSAL: Check that the volume exists with `docker volume inspect` first, and treat a missing volume as `none` without running a container.
+
+### R-22
+
+TARGET: d8ba0620c20c69cd5c260d2ea07f5f4b5bd21557
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 979-992); Acceptance Criteria AC-15 (line 1215, last clause); Test Plan row AC-15 (line 1249, the `bun test app/server` sentence); Tasks T63 (line 1387) and T64 (line 1388)
+EVIDENCE: Step 4 runs `database-schema-version` "in a throwaway container with the data volume mounted, which opens `/data/asset-studio.sqlite` read-only", and does not say whether the volume is mounted read-only. The existing precedent mounts it `:ro` (scripts/deploy/remote/rollback.ps1:17, `-v "${volume}:/data:ro"`). A WAL database closed cleanly has no `-wal` or `-shm` file, and a read-only open then needs to create them. I observed this with bun 1.4.3 and with Python's sqlite3. I made a WAL database, closed it, and opened it read-only in a read-only directory. Both failed with `attempt to write a readonly database`. In a writable directory the same read-only open printed the value and left `x.sqlite-wal` and `x.sqlite-shm` behind. So an implementer who mounts `:ro` builds a guard that stops every deploy while the app is stopped, for example after `docker compose down` or when the container exits at start as in the 2026-11-22 incident, because the guard reports that the schema could not be read. An implementer who mounts read-write leaves files on the volume, and a unit test that checks "without writing to it" by listing the directory would fail that correct build. The unit test as written can pass on either build if it opens a database whose `-wal` and `-shm` already exist. This traces to the step 4 reader that cc73fb2 added and HEAD kept.
+PROPOSAL: State that the volume is mounted read-write, the database is opened read-only, and `-wal` and `-shm` files may be created. Add a unit case for a cleanly closed WAL database with no `-wal` or `-shm`, and a bats assertion that the reader's mount is not `:ro`.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan rows AC-28 (line 1262, the replay case), AC-06 (line 1240) and AC-22 (line 1256), AC-25 (line 1259); Tasks T57, T58 and T61 (lines 1375, 1377, 1383)
+EVIDENCE: HEAD folds the built R-19 answers into Design, and most R-21 F-03 items are now resolved. The Test Plan rows still leave out three proof changes that R-19 asked for and T57, T58 and T61 built. (1) R-19 F-01 asked that the AC-28 replay case "use a hash recorded from v0.1.0's encoding, not one computed by the new code". The row still says only "a pre-upgrade batch's request replayed without the field still matches its stored hash". That passes on an encoding without `engine` if the test computes the stored hash with the new code. T57's evidence records the literal v0.1.0 hash, but the row does not require it. (2) Design step 5 (line 525) now resets `queued_at` on a lost-job resubmission. R-19 F-05 asked to add that case to the AC-06 restart tests or the AC-28 row. Neither row mentions it, although T58 added the test. (3) Design (lines 748-750) now requires ToggleGroup selection with `bg-primary` and a translucent default Button. R-19 F-03 asked for a style.spec assertion of the selected Detail segment's colour and of a translucent non-Generate button, and T61's evidence says they exist. Neither the AC-22 row nor the AC-25 row names them, so the proof as written passes when the selected segment looks like the hovered one. This traces to the R-21 F-03 fix, which changed Design but not these rows.
+PROPOSAL: Add to the AC-28 row that the replay case uses a hash recorded from v0.1.0's literal encoding. Add the `queued_at` reset on a lost-job resubmission to the AC-06 row. Add to the AC-22 row (or AC-25) the selected Detail segment's background `rgb(79, 140, 255)` and a translucent non-Generate button.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-26 (line 1260, "a running fake job whose image step the fake writes early showing its source image"); Design > Verification commands (fixture paragraph, lines 1189-1191)
+EVIDENCE: The row expects the source image of "a running fake job whose image step the fake writes early". Design's fixture paragraph says something else: the four-job batch's Generating job "is the one fixture prompt the fake serves as running" and its "256-pixel source thumbnail the seed writes into the fake's output folder". The built test checks the seeded thumbnail (app/e2e/queue-board.spec.ts:50, `Source of a glowing crystal`; app/server/seed.ts writes `thumb_00001_.png` for the running fixture job). No test in queue-board.spec.ts submits a job whose thumbnail the fake writes early (app/fake-comfy/fake.ts:199). Design never describes that early write. Read literally, an implementation reviewer finds no check for the row's case, while the seeded case Design describes is not named. This row predates this revision. It is unchanged since the R-19 acceptance, and R-21 F-02 changed other parts of it.
+PROPOSAL: Write "the fixture's Generating job, whose thumbnail the seed writes, shows its source image". Alternatively, name and add the early-write case on its own stack.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-29 (line 1263, "the tracker cancels a running Ultra job past 30 minutes but not at 20"); Acceptance Criteria AC-29 (line 1229, "timed out only after 30 minutes of running"); Design > Submission, concurrency and idempotency (tick step 6, lines 528-531)
+EVIDENCE: AC-29 says an Ultra job is timed out only after 30 minutes. The row checks only that the job is not cancelled at 20 minutes and is cancelled past 30. A tracker with any Ultra limit from 20 to 30 minutes, for example 25, passes the row. The row was added in this revision.
+PROPOSAL: Check that the tracker leaves a running Ultra job alone just before 30 minutes (for example at 29 minutes 58 seconds on the faked clock) and cancels it just after.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-11 (line 1245); Acceptance Criteria AC-11 (line 1211); Tasks T62 (line 1385)
+EVIDENCE: The row now scans tracked `.ts`, `.tsx`, `.js`, `.mjs`, `.sh`, `.ps1` and `.py` files for "a line with a `fetch(` or `curl` call containing `/api/batches`". It still misses the usual clients in three of the languages it scans. In Python, the repository's own pipeline sends requests with `urllib.request` (scripts/generate_3d.py:27-30). PowerShell uses `Invoke-WebRequest` or `Invoke-RestMethod`, and shell scripts can use `wget`. The row also misses a fetch whose URL is built on an earlier line, as in `const url = `${base}/api/batches`; await fetch(url, { method: "POST" })`. Each of these submits generations to a deployed app and passes the check. I ran `git grep` with the row's pattern outside the excluded folders and it finds nothing today, so a wider match would still pass the current tree. HEAD changed this row, so it has not passed review, and the widening rule for nits does not apply yet.
+PROPOSAL: Match any line containing `/api/batches` in those files outside the excluded folders, or any of `fetch`, `curl`, `wget`, `urllib`, `requests`, `Invoke-WebRequest` and `Invoke-RestMethod` within a few lines of it. Add must-fail examples: a Python `urllib.request.Request(base + "/api/batches", ...)`, an `Invoke-RestMethod -Method Post .../api/batches`, and a URL assigned on the line before the `fetch`.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-15 (line 1215, "refuses an image that knows an older schema than the database on `win-main` holds, or whose schema it cannot read"); Context > Owner summary (lines 122-124)
+EVIDENCE: Grammatically, "whose schema it cannot read" refers to the image. Every release answers `schema-version` (main.ts case `schema-version`), so read that way the clause never applies. Design step 4 (lines 989-991) and the summary refuse the deploy when the database's schema cannot be read, that is, when neither image has `database-schema-version` or the command fails. Design and the bats row agree with each other. Only the criterion's wording differs.
+PROPOSAL: Write "or any image when the database's schema cannot be read".
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: nit
+WHERE: Test Plan row AC-15 (line 1249, last sentence); Tasks T44 (line 1392)
+EVIDENCE: `check-upgrade.sh` starts with `deploy "$FIRST"` and exits on failure (scripts/deploy/check-upgrade.sh, `deploy` function). With the new step 4, `deploy.sh 0.2.0-feat-asset-studio.3` proceeds only when `current.json` names an image that has `database-schema-version`, because .3 answers `unknown command` (app/server/main.ts:54-56 at 13a725f's tree). T44 deploys the Ultra prerelease first, so the run works. The AC-15 row states the procedure without that precondition, so someone who runs it while production is on .3 stops at the first step.
+PROPOSAL: Add to the AC-15 row that the procedure starts with the Ultra prerelease deployed, as T44 orders.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Deployment and exposure (deploy.sh step 4, lines 981-983); Test Plan row AC-15 (line 1249, "runs no container at all, proceeding, when `docker volume inspect` finds no volume")
+EVIDENCE: `docker volume inspect` exits non-zero both for a missing volume and for an engine or SSH error. Step 4 says a missing volume means `none` and the deploy proceeds. It does not say how other failures of that call are told apart, so the simplest build fails open and skips the guard on any error. Steps 1 to 3 have just reached the engine, so the risk is small. This traces to the R-21 F-06 fix.
+PROPOSAL: Proceed only when the call reports that no such volume exists. Stop with the could-not-read failure for any other error, and add that bats case.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Verification commands (fixture paragraph, lines 1184-1187)
+EVIDENCE: The sentence says "done jobs have fixed start and finish times ... except one, `木箱`, ... and the four-job batch's Generating job is the only one with a fixed `started_at`". Read literally, "the only one" contradicts the done jobs' start times stated just before. The intended meaning, the only unfinished fixture job with a start time, matches app/server/seed.ts.
+PROPOSAL: Write "the only unfinished fixture job with a fixed `started_at`".
+
+FINDING: F-10
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (lines 124-127); Design > Pipeline port and combined graphs (lines 351-352)
+EVIDENCE: R-20 F-10 asked for citations for the Ultra measurements and the outage. HEAD names the sampler and `/system_stats` for the Ultra run, but two claims are still uncited. The five-minute outage on 2026-11-22 and the quoted container message have no log or command. The bf16 run "staged 9854 MB in system memory" names no command either. The standard asks Context and Design claims for "a `file:line`, or a command and its output".
+PROPOSAL: Name where the outage duration and message came from (for example `docker logs` of the container, or the Compose events with their timestamps) and the command that reported the 9854 MB.
 
 ## Sources
 
