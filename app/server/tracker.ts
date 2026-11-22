@@ -7,6 +7,7 @@ import { combineGraph, type JobGraphInput } from "../pipeline/combine.ts";
 import { ComfyError, type ComfyClient, type HistoryEntry, type QueueSnapshot } from "./comfy.ts";
 import type { Config } from "./config.ts";
 import { assetDir, completeAsset, MIME, removeComfyFiles, uploadPath } from "./files.ts";
+import { deleteJob } from "./assets.ts";
 import type { ComfyState, TrackerView } from "./http.ts";
 import type { JobRow, QueueInfo } from "./jobs.ts";
 import type { Store } from "./store.ts";
@@ -129,7 +130,9 @@ export class Tracker implements TrackerView {
     this.state = "reachable";
     try {
       this.snapshot = await this.comfy.queue();
+      this.flagHunyuan();
       await this.handleCancels();
+      this.removeHunyuan();
       await this.submitPending();
       this.snapshot = await this.comfy.queue();
       await this.reconcile();
@@ -213,8 +216,20 @@ export class Tracker implements TrackerView {
   }
 
   // Step 2: submission.
+  // Hunyuan3D removal (Design, Restart, upgrade and rollback): unfinished Hunyuan3D jobs get the cancel flag
+  // before step 1 handles cancels, and finished ones go through the delete path before step 2 submits.
+  private flagHunyuan(): void {
+    this.store.db.run("UPDATE jobs SET cancel_requested = 1 WHERE engine = 'hunyuan' AND state IN ('pending', 'submitted') AND cancel_requested = 0");
+  }
+
+  private removeHunyuan(): void {
+    for (const job of this.jobs("engine = 'hunyuan' AND state IN ('done', 'failed', 'cancelled')")) {
+      void deleteJob(this.store, this.config, job.id);
+    }
+  }
+
   private async submitPending(): Promise<void> {
-    for (const row of this.jobs("state = 'pending' AND cancel_requested = 0")) {
+    for (const row of this.jobs("state = 'pending' AND cancel_requested = 0 AND engine = 'trellis'")) {
       let job = row;
       if (!job.prompt_id) {
         const attempt = crypto.randomUUID();

@@ -117,6 +117,7 @@ export function retryJob(store: Store, config: Config, id: string): ActionResult
     const job = getJob(store, id);
     if (!job) return { ok: false, status: 404, error: "No such job." };
     if (job.state !== "failed" && job.state !== "cancelled") return { ok: false, status: 409, error: "Only failed or cancelled jobs can be retried." };
+    if (job.engine === "hunyuan") return { ok: false, status: 400, error: "Hunyuan3D is no longer available; use TRELLIS.2." };
     const unfinished = (store.db.query("SELECT COUNT(*) AS n FROM jobs WHERE state IN ('pending', 'submitted')").get() as { n: number }).n;
     if (unfinished + 1 > config.limits.unfinishedJobs) {
       return { ok: false, status: 409, error: `There can be at most ${String(config.limits.unfinishedJobs)} unfinished jobs; wait for some to finish before retrying.` };

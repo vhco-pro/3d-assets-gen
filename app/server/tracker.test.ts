@@ -7,6 +7,7 @@ import { ComfyClient } from "./comfy.ts";
 import { createBatch } from "./batches.ts";
 import { solidPng } from "../fake-comfy/assets.ts";
 import { getJob, requestCancel, retryJob, type JobRow } from "./jobs.ts";
+import { readFileSync } from "node:fs";
 import { openStore, type Store } from "./store.ts";
 import { testDirs, type TestDirs } from "./testkit.ts";
 import { Tracker, type Faults } from "./tracker.ts";
@@ -515,5 +516,106 @@ describe("AC-06 restarts, losses and replay", () => {
     } finally {
       fixtureFake.stop();
     }
+  });
+});
+
+describe("AC-23 Hunyuan3D jobs are cancelled and deleted", () => {
+  type St = "pending" | "submitted" | "done" | "failed" | "cancelled";
+  /** One job of `engine` in `state`, with an asset directory and ComfyUI output and input files. */
+  function makeJob(engine: "trellis" | "hunyuan", state: St, opts: { promptId?: string; postedAt?: number } = {}): string {
+    const [id = ""] = addBatch([`${engine} ${state}`], { engine });
+    store.db.run("UPDATE jobs SET state = ?, prompt_id = ?, posted_at = ? WHERE id = ?", [state, opts.promptId ?? null, opts.postedAt ?? null, id]);
+    const assets = join(dirs.config.dataDir, "assets", id);
+    mkdirSync(assets, { recursive: true });
+    writeFileSync(join(assets, "model.glb"), `glb ${id}`);
+    if (engine === "hunyuan") {
+      mkdirSync(join(dirs.config.comfyOutputDir, id), { recursive: true });
+      writeFileSync(join(dirs.config.comfyOutputDir, id, "x_00001_.glb"), "x");
+      mkdirSync(dirs.config.comfyInputDir, { recursive: true });
+      writeFileSync(join(dirs.config.comfyInputDir, `${id}.png`), "x");
+    }
+    return id;
+  }
+  const exists = (id: string): boolean => getJob(store, id) !== null;
+  const cancelCalls = (): string[] => fake.calls.filter((c) => c.method === "POST" && c.path.endsWith("/cancel")).map((c) => c.path.split("/")[3] ?? "");
+
+  async function queueOnFake(promptId: string): Promise<void> {
+    fake.holdRunning = true;
+    const res = await fetch(`${fake.url}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: { "1": { class_type: "Hunyuan3Dv2Conditioning", inputs: {} } }, prompt_id: promptId }) });
+    expect(res.ok).toBe(true);
+  }
+
+  test("one tick cancels the unfinished ones, deletes every finished one with its files, and posts no Hunyuan3D graph", async () => {
+    const submittedPrompt = crypto.randomUUID();
+    await queueOnFake(submittedPrompt);
+    const h = {
+      pendingNoAttempt: makeJob("hunyuan", "pending"),
+      submitted: makeJob("hunyuan", "submitted", { promptId: submittedPrompt, postedAt: clock.t - 60_000 }),
+      done: makeJob("hunyuan", "done"),
+      failed: makeJob("hunyuan", "failed"),
+      cancelled: makeJob("hunyuan", "cancelled"),
+    };
+    const t = { done: makeJob("trellis", "done"), failed: makeJob("trellis", "failed"), cancelled: makeJob("trellis", "cancelled") };
+    const before = Object.fromEntries(Object.values(t).map((id) => [id, { row: JSON.stringify(job(id)), glb: readFileSync(join(dirs.config.dataDir, "assets", id, "model.glb"), "utf8") }]));
+    fake.calls.length = 0;
+    await tracker().tick();
+    for (const id of Object.values(h)) {
+      expect(exists(id)).toBe(false);
+      expect(existsSync(join(dirs.config.dataDir, "assets", id))).toBe(false);
+      expect(existsSync(join(dirs.config.comfyOutputDir, id))).toBe(false);
+      expect(existsSync(join(dirs.config.comfyInputDir, `${id}.png`))).toBe(false);
+    }
+    expect(cancelCalls()).toContain(submittedPrompt);
+    expect(promptBodies().filter((b) => JSON.stringify(b.prompt).toLowerCase().includes("hunyuan"))).toEqual([]);
+    const batches = (store.db.query("SELECT COUNT(*) AS n FROM batches b WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.batch_id = b.id)").get() as { n: number }).n;
+    expect(batches).toBe(0);
+    for (const id of Object.values(t)) {
+      expect(JSON.stringify(job(id))).toBe(before[id]?.row ?? "");
+      expect(readFileSync(join(dirs.config.dataDir, "assets", id, "model.glb"), "utf8")).toBe(before[id]?.glb ?? "");
+    }
+  });
+
+  test("a pending one posted 10 seconds ago waits out the 30 seconds, then is cancelled and deleted", async () => {
+    const id = makeJob("hunyuan", "pending", { promptId: crypto.randomUUID(), postedAt: clock.t - 10_000 });
+    const t = tracker();
+    await t.tick();
+    expect(job(id).state).toBe("pending");
+    clock.t += 25_000;
+    await t.tick();
+    await t.tick();
+    expect(exists(id)).toBe(false);
+    expect(promptBodies()).toEqual([]);
+  });
+
+  test("a failing cancel keeps the row until a later tick succeeds, and the tick never submits it", async () => {
+    const promptId = crypto.randomUUID();
+    await queueOnFake(promptId);
+    const id = makeJob("hunyuan", "submitted", { promptId, postedAt: clock.t - 60_000 });
+    fake.calls.length = 0;
+    fake.cancelStatus = 500;
+    const t = tracker();
+    await t.tick();
+    await t.tick();
+    expect(exists(id)).toBe(true);
+    fake.cancelStatus = null;
+    await t.tick();
+    expect(exists(id)).toBe(false);
+    expect(promptBodies()).toEqual([]);
+  });
+
+  test("retrying a Hunyuan3D job is refused with the Hunyuan3D message", () => {
+    const id = makeJob("hunyuan", "failed");
+    const res = retryJob(store, dirs.config, id);
+    expect(res).toEqual({ ok: false, status: 400, error: "Hunyuan3D is no longer available; use TRELLIS.2." });
+  });
+
+  test("a second tick with nothing left to remove cancels and deletes nothing", async () => {
+    const keep = makeJob("trellis", "done");
+    const t = tracker();
+    await t.tick();
+    fake.calls.length = 0;
+    await t.tick();
+    expect(cancelCalls()).toEqual([]);
+    expect(exists(keep)).toBe(true);
   });
 });
