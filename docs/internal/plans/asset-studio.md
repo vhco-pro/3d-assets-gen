@@ -1,6 +1,6 @@
 ---
-status: in-progress
-status_description: "Implementing the R-19 revision on feat/asset-studio (T50 to T62, then T44 and T45)."
+status: draft
+status_description: "Revising for the Ultra Detail option and a deploy guard against older schemas, after the owner chose setting b."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/2
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
