@@ -19,6 +19,8 @@
     "app/cli",
     "app/memory",
     "app/docs",
+    "app/web/**/*.test.ts",
+    "app/web/queue.ts",
     ".github/tests",
     "vite.config.ts"
   ]

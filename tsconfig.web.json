@@ -7,5 +7,6 @@
     "jsx": "react-jsx",
     "types": []
   },
-  "include": ["app/web", "app/pipeline/presets.ts"]
+  "include": ["app/web", "app/pipeline/presets.ts"],
+  "exclude": ["app/web/**/*.test.ts"]
 }
