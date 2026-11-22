@@ -32,3 +32,9 @@ test("AGENTS.md routes to the terminal output standard and no longer says no com
   expect(agents).toContain("conventions/terminal-output.md");
   expect(agents).not.toContain("No build or test commands exist yet");
 });
+
+test("the README names TRELLIS.2 as the only mesh model and offers no engine choice (AC-23)", () => {
+  expect(readme).toContain("TRELLIS.2");
+  expect(readme).not.toMatch(/hunyuan/i);
+  expect(readme).not.toMatch(/pick an engine|choose an engine|engine choice/i);
+});

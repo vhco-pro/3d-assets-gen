@@ -100,7 +100,7 @@ describe("AC-03 submission and completion", () => {
     const body = bodies[0];
     expect(body?.prompt_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const expected = combineGraph(
-      { kind: "prompt", prompt: "a crate", style: true, seed: 1000, engine: "trellis", faces: 10000, tex: 2048 },
+      { kind: "prompt", prompt: "a crate", style: true, seed: 1000, faces: 10000, tex: 2048 },
       `asset-studio/${id ?? ""}/${body?.prompt_id ?? ""}`,
     );
     expect(body?.prompt).toEqual(expected as unknown as Record<string, unknown>);
@@ -382,7 +382,7 @@ describe("AC-06 restarts, losses and replay", () => {
     const [a] = addBatch(["a"]);
     const promptId = crypto.randomUUID();
     store.db.run("UPDATE jobs SET prompt_id = ?, posted_at = ? WHERE id = ?", [promptId, clock.t, a ?? ""]);
-    const graph = combineGraph({ kind: "prompt", prompt: "a", style: true, seed: 1000, engine: "trellis", faces: 10000, tex: 2048 }, `asset-studio/${a ?? ""}/${promptId}`);
+    const graph = combineGraph({ kind: "prompt", prompt: "a", style: true, seed: 1000, faces: 10000, tex: 2048 }, `asset-studio/${a ?? ""}/${promptId}`);
     fake.holdRunning = true;
     await fetch(`${fake.url}/prompt`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: graph, prompt_id: promptId }) });
     await tracker().tick();

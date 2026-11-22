@@ -8,7 +8,6 @@ export const TEXTURES = [1024, 2048] as const;
 export const MAX_VARIANTS = 4;
 export const MAX_SEED = 4294967295;
 export const IMAGE_SIZE = 1024;
-export const HUNYUAN_OCTREE = 256;
 
 export interface Presets {
   engine: Engine;

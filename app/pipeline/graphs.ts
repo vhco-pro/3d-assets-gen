@@ -1,4 +1,5 @@
-// Port of the graph builders in scripts/generate_3d.py. Each builder returns the same ComfyUI API graph,
+// Port of the image and TRELLIS.2 graph builders in scripts/generate_3d.py (its Hunyuan3D builder stays there
+// as reference only). Each builder returns the same ComfyUI API graph,
 // node for node, as its Python counterpart for the same inputs; app/pipeline/graphs.test.ts holds them to it.
 
 export type Ref = [string, number];
@@ -38,59 +39,6 @@ export function imageGraph({ prompt, seed, size, prefix }: ImageGraphInput): Gra
     "9": { class_type: "VAEDecode", inputs: { samples: ["8", 0], vae: ["3", 0] } },
     "10": { class_type: "SaveImage", inputs: { images: ["9", 0], filename_prefix: prefix } },
   };
-}
-
-export interface HunyuanGraphInput {
-  image: string;
-  seed: number;
-  octree: number;
-  prefix: string;
-  faces: number;
-}
-
-export function hunyuanGraph({ image, seed, octree, prefix, faces }: HunyuanGraphInput): Graph {
-  const graph: Graph = {
-    "1": { class_type: "ImageOnlyCheckpointLoader", inputs: { ckpt_name: "hunyuan_3d_v2.1.safetensors" } },
-    "2": { class_type: "LoadImage", inputs: { image } },
-    "3": { class_type: "ModelSamplingAuraFlow", inputs: { model: ["1", 0], shift: 1 } },
-    "4": { class_type: "CLIPVisionEncode", inputs: { clip_vision: ["1", 1], image: ["2", 0], crop: "center" } },
-    "5": { class_type: "Hunyuan3Dv2Conditioning", inputs: { clip_vision_output: ["4", 0] } },
-    "6": { class_type: "EmptyLatentHunyuan3Dv2", inputs: { resolution: 4096, batch_size: 1 } },
-    "7": {
-      class_type: "KSampler",
-      inputs: {
-        model: ["3", 0], positive: ["5", 0], negative: ["5", 1], latent_image: ["6", 0], seed, steps: 30, cfg: 5,
-        sampler_name: "euler", scheduler: "normal", denoise: 1,
-      },
-    },
-    "8": {
-      class_type: "VAEDecodeHunyuan3D",
-      inputs: { samples: ["7", 0], vae: ["1", 2], num_chunks: 8000, octree_resolution: octree },
-    },
-    "9": { class_type: "VoxelToMesh", inputs: { voxel: ["8", 0], algorithm: "surface net", threshold: 0.6 } },
-    "10": { class_type: "SaveGLB", inputs: { mesh: ["9", 0], filename_prefix: prefix } },
-  };
-  if (faces) {
-    graph["11"] = {
-      class_type: "RemeshMesh",
-      inputs: {
-        mesh: ["9", 0], resolution: 256, sign_mode: "solid", "sign_mode.fill": 20.0, "sign_mode.qef": true,
-        band: 1.0, project_back: 0.0, fix_poles: true, smooth_iters: 0,
-        drop_small_components: 0.01, precluster_max_verts: 20000000,
-      },
-    };
-    graph["12"] = {
-      class_type: "DecimateMesh",
-      inputs: {
-        mesh: ["11", 0], target_face_count: faces, placement_mode: "qem",
-        "placement_mode.line_quadric_weight": 1.0, "placement_mode.feature_edge_quadric_weight": 10.0,
-        "placement_mode.feature_edge_min_dihedral_deg": 30.0, "placement_mode.clamp_v_to_edge": true,
-      },
-    };
-    graph["13"] = { class_type: "MeshSmoothNormals", inputs: { mesh: ["12", 0], crease_angle: 40.0 } };
-    graph["10"] = { class_type: "SaveGLB", inputs: { mesh: ["13", 0], filename_prefix: prefix } };
-  }
-  return graph;
 }
 
 export interface TrellisGraphInput {

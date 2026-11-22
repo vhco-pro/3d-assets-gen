@@ -1,12 +1,12 @@
 # Asset Studio
 
 A small web app that queues batches of 3D asset jobs on a GPU PC running ComfyUI and hands back
-game-ready GLB files. Type prompts (one per line) or upload images, pick an engine and a detail level,
+game-ready GLB files. Type prompts (one per line) or upload images, pick a detail level and texture size,
 watch the queue, preview each model in the browser, and download one GLB or a zip of a selection with a
 `manifest.json`.
 
-Each job is one ComfyUI prompt: Z-Image Turbo makes the source image, then TRELLIS.2 (textured) or
-Hunyuan3D 2.1 makes the mesh, decimated to 5k, 10k or 20k triangles. The graphs mirror
+Each job is one ComfyUI prompt: Z-Image Turbo makes the source image, then TRELLIS.2 makes the textured
+mesh, decimated to 5k, 10k or 20k triangles. The graphs mirror the image and TRELLIS.2 builders in
 `scripts/generate_3d.py`, which stays in the repository as the reference.
 
 The feature document is [docs/internal/plans/asset-studio.md](docs/internal/plans/asset-studio.md).

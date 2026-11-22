@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import golden from "./golden/graphs.json";
-import { hunyuanGraph, imageGraph, STYLE_SUFFIX, trellisGraph, type Graph, type Ref } from "./graphs.ts";
+import * as graphs from "./graphs.ts";
+import { imageGraph, STYLE_SUFFIX, trellisGraph, type Graph, type Ref } from "./graphs.ts";
 import { combineGraph } from "./combine.ts";
 
 const g = golden as { style_suffix: string; prefix: string; seed: number; cases: Record<string, Graph> };
@@ -28,9 +29,6 @@ describe("builders match scripts/generate_3d.py", () => {
         expect(trellisGraph({ image: IMAGE, seed: SEED, prefix: PREFIX, faces, tex })).toEqual(gold(`trellis/${faces}/${tex}`));
       });
     }
-    test(`hunyuan ${faces}`, () => {
-      expect(hunyuanGraph({ image: IMAGE, seed: SEED, octree: 256, prefix: PREFIX, faces })).toEqual(gold(`hunyuan/${faces}`));
-    });
   }
 });
 
@@ -61,31 +59,40 @@ function expectedCombined(mesh: Graph, image: Graph | null, imageName: string): 
 describe("combined graphs", () => {
   test("prompt job, TRELLIS.2, style on", () => {
     const got = combineGraph(
-      { kind: "prompt", prompt: "a wooden crate", style: true, seed: SEED, engine: "trellis", faces: 10000, tex: 2048 },
+      { kind: "prompt", prompt: "a wooden crate", style: true, seed: SEED, faces: 10000, tex: 2048 },
       PREFIX,
     );
     expect(got).toEqual(expectedCombined(gold("trellis/10000/2048"), gold("image/style"), ""));
     expect(Object.values(got).filter((n) => n.class_type === "LoadImage")).toHaveLength(0);
   });
-  test("prompt job, Hunyuan3D, style off", () => {
-    const got = combineGraph(
-      { kind: "prompt", prompt: "a wooden crate", style: false, seed: 4294967295, engine: "hunyuan", faces: 20000, tex: null },
-      PREFIX,
-    );
-    const image = gold("image/plain");
-    const mesh = structuredClone(gold("hunyuan/20000"));
+  test("prompt job, style off", () => {
+    const got = combineGraph({ kind: "prompt", prompt: "a wooden crate", style: false, seed: 4294967295, faces: 20000, tex: 1024 }, PREFIX);
+    const mesh = structuredClone(gold("trellis/20000/1024"));
     for (const n of Object.values(mesh)) if ("seed" in n.inputs) n.inputs.seed = 4294967295;
-    expect(got).toEqual(expectedCombined(mesh, image, ""));
+    expect(got).toEqual(expectedCombined(mesh, gold("image/plain"), ""));
   });
   test("image job keeps LoadImage with the job's upload", () => {
     const upload = "asset-studio/11111111-2222-4333-8444-555555555555.webp";
-    const got = combineGraph({ kind: "image", upload, seed: SEED, engine: "trellis", faces: 5000, tex: 1024 }, PREFIX);
+    const got = combineGraph({ kind: "image", upload, seed: SEED, faces: 5000, tex: 1024 }, PREFIX);
     expect(got).toEqual(expectedCombined(gold("trellis/5000/1024"), null, upload));
   });
   test("every save node carries the attempt prefix", () => {
-    const got = combineGraph({ kind: "prompt", prompt: "x", style: true, seed: 1, engine: "trellis", faces: 10000, tex: 2048 }, PREFIX);
+    const got = combineGraph({ kind: "prompt", prompt: "x", style: true, seed: 1, faces: 10000, tex: 2048 }, PREFIX);
     const saves = Object.values(got).filter((n) => n.class_type === "SaveImage" || n.class_type === "SaveGLB");
     expect(saves).toHaveLength(3);
     for (const n of saves) expect(String(n.inputs.filename_prefix)).toStartWith(PREFIX);
+  });
+});
+
+describe("TRELLIS.2 is the only mesh model (AC-23)", () => {
+  test("the golden set holds no Hunyuan3D case", () => {
+    expect(Object.keys(g.cases).filter((k) => k.startsWith("hunyuan"))).toEqual([]);
+  });
+  test("the app exports no Hunyuan3D builder", () => {
+    expect(Object.keys(graphs).filter((k) => k.toLowerCase().includes("hunyuan"))).toEqual([]);
+  });
+  test("combined graphs use only image, TRELLIS.2 and thumbnail node types", () => {
+    const got = combineGraph({ kind: "image", upload: "asset-studio/x.png", seed: 1, faces: 10000, tex: 2048 }, PREFIX);
+    expect(Object.values(got).map((n) => n.class_type).filter((t) => t.toLowerCase().includes("hunyuan"))).toEqual([]);
   });
 });

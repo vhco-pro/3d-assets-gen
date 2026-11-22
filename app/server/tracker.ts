@@ -249,7 +249,8 @@ export class Tracker implements TrackerView {
   }
 
   private graphFor(job: JobRow): Record<string, unknown> {
-    const common = { seed: job.seed, engine: job.engine, faces: job.faces, tex: job.tex };
+    // Only TRELLIS.2 jobs reach this point; Hunyuan3D rows are cancelled and deleted instead (Design).
+    const common = { seed: job.seed, faces: job.faces, tex: job.tex ?? 2048 };
     const input: JobGraphInput = job.kind === "prompt"
       ? { ...common, kind: "prompt", prompt: job.prompt ?? "", style: job.style === 1 }
       : { ...common, kind: "image", upload: `asset-studio/${job.id}.${job.upload_ext ?? "png"}` };
