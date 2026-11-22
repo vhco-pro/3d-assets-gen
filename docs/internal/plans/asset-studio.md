@@ -76,7 +76,8 @@ timeouts, restarts, lost jobs and rejections, the Playwright journeys in Chromiu
 matrix, bundle budgets, CLI output tests, the image start check, and a memory check that found and fixed an
 out-of-memory export). The Firefox viewer render skipped in both places for lack of WebGL. Still planned:
 the Firefox render in CI with Mesa, the published image's start check, the deploy and rollback checks on
-`win-main`, the reachability and rate-limit checks from other tailnet devices, and two real generations.
+`win-main`, the reachability and rate-limit checks from other tailnet devices, two real generations, the repository
+settings check and the manual 200 percent zoom check with its screenshot review.
 
 Changed since the accepted R-9 scope: the first release scan failed on an unfixed HIGH OpenSSL CVE in the
 distroless `cc` base, so the runtime is now `base-nossl` (the app links only glibc); CI installs Mesa so
@@ -1005,7 +1006,9 @@ deletes only flagged fixture rows and their files.
 - [ ] T27 `Dockerfile` - runtime on `gcr.io/distroless/base-nossl-debian13:nonroot` at the recorded digest; `bun test ./app/image` passes and Trivy 0.69.3 reports no HIGH or CRITICAL finding (AC-17); do before T26
 - [ ] T28 `.github/workflows/ci.yml`, `app/e2e/library.spec.ts` - install Mesa in the checks job and set `E2E_REQUIRE_WEBGL=1` so a missing WebGL context fails; the Firefox viewer render passes in CI (AC-07); do before T26
 - [ ] T29 `app/server/http.ts`, `app/server/auth.test.ts` - `GET /api/session` judges the cookie alone and never counts failures; the AC-12 session tests pass (AC-12); do before T26
+- [ ] T30 `docs/internal/plans/asset-studio.md` - manual check at 200 percent browser zoom in Chromium on a 1280x720 window over the sign-in, submit, queue and library journeys, with screenshots, plus a review of every layout screenshot in .artifacts/screens; the result recorded under AC-09 (AC-09); do before T26
 - [ ] T26 `docs/internal/plans/asset-studio.md` - deploy the feature-branch prerelease to `win-main` and run the AC-10, AC-11, AC-12 deployed and AC-15 procedures, plus `check-image.sh` and `check-repo.sh`; evidence recorded under each criterion (AC-10, AC-11, AC-12, AC-14, AC-15, AC-17)
+- [ ] T31 `docs/internal/plans/asset-studio.md` - after merge, deploy the release image from `main` with `deploy.sh` and repeat the AC-10 check; the result recorded under AC-10 (AC-10)
 
 ## Open Questions
 
@@ -1026,6 +1029,7 @@ None.
 | 2026-11-21 | R-9 | spec | `2768304` | claude-opus-5-5 | procedural | 0 blocking, 10 should-fix, 1 nit |
 | 2026-11-21 | R-9 | spec | `2768304` | n/a | n/a | accepted by owner |
 | 2026-11-22 | R-10 | spec | `c2dbee2` | claude-opus-5-5 | procedural | 0 blocking, 6 should-fix, 2 nits |
+| 2026-11-22 | R-11 | spec | `5400611` | claude-opus-5-5 | procedural | 0 blocking, 4 should-fix, 1 nit |
 
 ### R-1
 
@@ -2170,6 +2174,43 @@ SEVERITY: nit
 WHERE: Sources; Design > Container image (lines 670-671); Design > Deployment and exposure (lines 709-710); Design > Runtime and layout (lines 250-253)
 EVIDENCE: This revision adds claims that rest on external pages: base-nossl is "glibc without OpenSSL", the Renovate `github-release-attachments` datasource updates a version and its SHA-256 together, and `eslint-plugin-react-hooks` 7.1 recommends the named rules. Sources lists none of the pages read for these. conventions/feature-documents.md: "Sources lists every external page read, each with the claim it supports."
 PROPOSAL: Add the distroless, Renovate datasource and eslint-plugin-react-hooks pages to Sources, each with the claim it supports.
+
+### R-11
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Verification commands (lines 873-876); Test Plan row AC-07 (line 938); Context > Owner summary (lines 77-78 and 82-83); Context > Background (Firefox WebGL bullet, lines 185-189); Tasks (T28, line 1006)
+EVIDENCE: Design says the CI `checks` job "installs Mesa's software GL (`libgl1-mesa-dri`, `libegl1`) ... so CI supplies the Firefox render evidence". The only observation behind this is in Background: Firefox rendered inside `mcr.microsoft.com/playwright:v1.65.1-noble`, a different OS and image. The CI run where Firefox had no WebGL (44961046719, checks job) ran on `Image: ubuntu-26.04`, and its `playwright install --with-deps` step printed `xvfb is already the newest version (2:21.1.22-1ubuntu1.3)` and `libgbm1 is already the newest version (26.0.8-1ubuntu0.3)`. On Ubuntu 26.04, `apt-get install -s xvfb` (run in `ubuntu:26.04` during this review) pulls in `libgl1-mesa-dri`, `mesa-libgallium`, `libglx-mesa0` and `libgl1` 26.0.8, so Mesa's software GL was most likely already installed when Firefox failed. Whether `libegl1`, the one package that may be missing, fixes it was never observed on the runner. Design, the AC-07 row and the Owner summary all present this remedy as settled. If it does nothing, T28's done condition cannot pass and the design has to be revised again.
+PROPOSAL: Run the remedy on the real runner before relying on it, for example a throwaway `workflow_dispatch` job on `ubuntu-latest` that installs `libegl1` and reports Firefox's WebGL renderer, and cite that run in Background. Otherwise name a fallback environment for the Firefox render, for example a CI job using the Playwright noble image for the browser suite only.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: AC-12 (line 917); Design > Access token (line 549); Design > HTTP API (`GET /api/session` row, line 579); Test Plan row AC-12 (line 943)
+EVIDENCE: AC-12 reads "Every API route except health and sign-in refuses a request without a valid token or session cookie". Design now lists three exceptions, "`GET /api/health`, `GET /api/session` and `POST /api/session`". `GET /api/session` "always answers 200" even without a valid cookie, so it does not refuse such a request. The route came in with c2dbee2 and its behaviour was defined at 5400611, but the criterion text was never updated. Read literally, an implementation that follows Design does not meet AC-12, and an implementation reviewer comparing against the exact accepted text could return `not met`.
+PROPOSAL: Reword AC-12 to name the session status route as an exception, for example "Every API route except health, sign-in and the session status check refuses ...", and say in the criterion that the status check never accepts a bearer token.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan row AC-12 (line 943); Design > Access token (lines 550-552); Design > HTTP API (`GET /api/session` row, line 579)
+EVIDENCE: Design says `GET /api/session` is judged "from the session cookie alone" and "never counts toward the failure limit". The AC-12 row added at 5400611 checks only that "twelve calls with a wrong bearer token leave the next wrong sign-in at 401". A forged or expired cookie on `GET /api/session` is never checked against the limiter. That is the case a real browser hits after a token rotation or after 30 days, because the page calls this route on every load. An implementation that counts a non-matching cookie on this route as a failed authentication passes the row. R-10 F-01 asked for tests of "its effect on the limiter".
+PROPOSAL: Add to the AC-12 auth tests that twelve `GET /api/session` calls with a forged cookie (and with an expired one on the faked clock) also leave the next wrong sign-in at 401.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T17, line 989; T26, line 1008; no other unchecked task); Test Plan row AC-09 (line 940); Design > Versioning and release path (step 2, line 802, and line 810)
+EVIDENCE: The AC-09 row requires "A manual check at 200 percent browser zoom in Chromium on a 1280x720 window ... with screenshots. All screenshots are reviewed and the review result is recorded in the evidence." T17's evidence reviewed screenshots only "at 320x568 and 1440x900" and does not mention a browser zoom check. The unchecked tasks T25 and T27 to T29 do not cover AC-09, and T26 covers AC-10, AC-11, AC-12, AC-14, AC-15 and AC-17 only. Design also says "After merge, the release image from `main` is deployed and AC-10's check is repeated" and "The feature is delivered when step 2 has run", and no task does this. conventions/feature-documents.md (Tasks): each task names "a done condition that is a test or check, and the criteria it advances". Someone following the task list never runs the AC-09 manual procedure, so the implementation review can only return `untested` or `not verified` for AC-09.
+PROPOSAL: Add an unchecked task before T26 for the manual 200 percent zoom check and the review of all layout screenshots, with the result recorded under AC-09. Add a final task, or name the shipping step, for the post-merge deploy of the `main` release and the repeat of AC-10's check.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("Still planned", lines 77-79)
+EVIDENCE: The summary lists as still planned "the Firefox render in CI with Mesa, the published image's start check, the deploy and rollback checks on `win-main`, the reachability and rate-limit checks from other tailnet devices, and two real generations". Two planned proofs are missing from that list: the `check-repo.sh` repository settings check for AC-14 (T26) and the AC-09 manual 200 percent zoom check with its screenshot review. Neither has been observed.
+PROPOSAL: Add the repository settings check and the manual zoom check to the "Still planned" list.
 
 ## Sources
 
