@@ -473,7 +473,7 @@ describe("AC-06 restarts, losses and replay", () => {
     form.append("images", new Blob([solidPng(8, 8, [10, 20, 30])]), "crate.png");
     const req = new Request("http://app/api/batches", { method: "POST", headers: { "x-batch-id": id }, body: form });
     const kill = (): void => { throw new Error("killed"); };
-    let thrown = "";
+    let thrown: string;
     try {
       const res = await createBatch(req, { store, config: dirs.config, now: () => clock.t, faults: { afterRename: kill } });
       thrown = `answered ${String(res.status)} ${await res.text()}`;
