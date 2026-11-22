@@ -163,6 +163,7 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
   };
   return (
     <div className="studio">
+      <a className="skip" href="#library-heading">Skip to library</a>
       <header className="topbar">
         <Brand />
         <ComfyStatus state={comfy} version={health.data?.comfyuiVersion} />
