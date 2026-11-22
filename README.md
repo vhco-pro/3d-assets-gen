@@ -40,6 +40,7 @@ The app runs as a container under Docker Desktop on `win-main`, next to ComfyUI,
 | `scripts/deploy/rollback.sh` | Returns to the previous version, restoring the matching database backup when the schema changed |
 | `scripts/deploy/check-image.sh <version>` | Checks a published image: anonymous pull, signature, attestations and a read-only start |
 | `scripts/deploy/check-repo.sh` | Checks the repository's security settings, workflows and Renovate |
+| `scripts/deploy/check-upgrade.sh <first> <second>` | Runs the upgrade, rollback and logon-recovery check on `win-main` with two released versions, keeping what it saw in `.artifacts/check-upgrade.log`; it leaves `<second>` deployed |
 
 All scripts print `✓ Passed`, `✗ Failed`, `∅ Skipped` and `›` status lines, use no colour when
 `NO_COLOR` is set or output is not a terminal, and accept `--ascii`.
