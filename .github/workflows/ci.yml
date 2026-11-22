@@ -29,9 +29,10 @@ jobs:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium firefox
-      # Mesa's software GL, so Firefox can create a WebGL context; E2E_REQUIRE_WEBGL makes its absence fail.
-      - run: sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri libgles2
-      - run: bun run verify
+      # Mesa's software GL plus an X display: Firefox only creates a WebGL context through GLX, even
+      # headless, so the suite runs under xvfb-run. E2E_REQUIRE_WEBGL makes a missing context fail.
+      - run: sudo apt-get install -y --no-install-recommends xvfb libegl1 libgl1-mesa-dri libgles2
+      - run: xvfb-run -a bun run verify
         env:
           APP_COMMIT: ${{ github.sha }}
           E2E_REQUIRE_WEBGL: '1'
