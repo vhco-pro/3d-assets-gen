@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Revised: base-nossl runtime, R-9 and R-10 items folded in; waiting for a new independent spec review."
+status: planned
+status_description: "Revision accepted on 2026-11-22 at review R-11."
 issue: null
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
