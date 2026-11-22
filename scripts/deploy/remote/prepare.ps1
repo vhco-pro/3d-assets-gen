@@ -11,7 +11,8 @@ foreach ($d in @($dir, (Join-Path $shared 'input\asset-studio'), (Join-Path $sha
 $config = Join-Path $dir 'config.yaml'
 if ($RotateToken -or -not (Test-Path $config)) {
   $bytes = New-Object byte[] 32
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  # Windows PowerShell 5.1 runs on .NET Framework, which has no RandomNumberGenerator.Fill.
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
   "token: $token" | Set-Content -Path $config -Encoding ascii
   Write-Output ($(if ($RotateToken) { 'rotated the access token' } else { 'created config.yaml with a new access token' }))
