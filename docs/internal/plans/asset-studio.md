@@ -1,6 +1,6 @@
 ---
-status: in-progress
-status_description: "Implementing the accepted revision on feat/asset-studio (T25 to T31)."
+status: draft
+status_description: "Revising: VH Midnight restyle of the page and TRELLIS.2 as the only engine; waiting for spec review."
 issue: null
 branch: feat/asset-studio
 goal: "A friend opens a private tailnet URL, queues a batch of prompts or images, and downloads the finished game-ready GLB assets in bulk."
