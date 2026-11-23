@@ -659,6 +659,30 @@ None.
 | 2026-11-23 | R-14 | spec | `600a13d` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer |
 | 2026-11-23 | R-15 | spec | `33ad841` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; applied with the owner's answer, nit applied |
 | 2026-11-23 | R-16 | spec | `083ecbb` | claude-opus-5-5 | procedural | 1 blocking, 1 should-fix; met by removing the URL marker rules of R-14 and R-15, as the owner chose |
+| 2026-11-23 | R-17 | spec | `e770962` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; all applied |
+
+### R-17
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-03 ("export gone" in `phone-chromium` and `phone-webkit`: "open `/?export=gone`, assert the Library tab and the changed-selection notice and that the URL is already `?tab=library` with `history.length` unchanged"); Design > Layout and navigation (URL paragraph: "at once replaces the URL with `history.replaceState`: `?tab=library` below 1024 pixels"); Acceptance Criteria AC-03 ("the address no longer carries its marker")
+EVIDENCE: This step came in with the R-16 revision (git diff 083ecbb e770962, docs/internal/plans/asset-studio-mobile.md:623). The page rewrites the URL during load, before `page.goto` resolves, so the test cannot read `history.length` between the load and the rewrite. The step does not say what "unchanged" is measured against. A test that reads `history.length` after `page.goto` and again later in the step passes a build that uses `history.pushState` for the rewrite, because the extra entry already exists at the first read. That build leaves `/?export=gone` in history, which is the thing Design rules out. Other steps in the same row give a baseline: "from `about:blank`", and "`history.length` is the same before and after each resize".
+PROPOSAL: Start the step from `about:blank`, read `history.length` there, open `/?export=gone` and assert `history.length` is exactly one more. Or assert that `page.goBack()` returns to `about:blank`, as the "tabs" step does.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Layout and navigation (URL paragraph: "Tab switches add no history entry, so Back from Create, Queue or Library leaves Asset Studio, as it does in most phone apps, except once after leaving a tile-opened Asset page (see below)"; "The page reads `export=gone` once, on load ... and at once replaces the URL with `history.replaceState`: `?tab=library` below 1024 pixels")
+EVIDENCE: Download selected navigates with `window.location.assign(url)` (app/web/App.tsx:575). When the selection changed, the server answers that URL with 302 to `/?export=gone` (app/server/export.ts:212). That is a full navigation that adds a new history entry and a new document after the Library document it came from. The rewrite to `?tab=library` replaces only the new entry, so Back from the Library tab after an export-gone redirect shows the earlier Library document once before leaving Asset Studio. That is a second exception the Back sentence does not name. No proof reaches this path, because the "export gone" step opens `/?export=gone` directly, and nothing a careful implementer builds changes.
+PROPOSAL: Name this case next to the tile-opened Asset page exception, for example "and once after a failed zip download".
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: nit
+WHERE: Design > Layout and navigation (URL paragraph: "`/` at 1024 and wider"; "Dismiss only hides the notice; it does not touch the URL or history. A reload before Dismiss loses the notice."); Acceptance Criteria AC-03 ("below 1024 pixels the changed-selection notice ... the address no longer carries its marker, and Dismiss hides it for good"); Test Plan AC-03 ("export gone" runs only in `phone-chromium` and `phone-webkit`); Context > Owner summary ("the page reads the notice's marker once on load and cleans the address at once")
+EVIDENCE: The R-16 revision also changes the desktop path. Today Dismiss calls `window.history.replaceState(null, "", "/")` and the URL keeps `export=gone` until then, so a reload keeps the notice (app/web/App.tsx:159, 189). Under the new Design the desktop rewrites the URL to `/` on load and Dismiss leaves the URL alone. AC-03 limits the clause to below 1024 pixels, and no Test Plan row opens `/?export=gone` at 1280x720. A build that leaves today's desktop code as it is passes every proof. Design states the desktop rule plainly, so implementers following it build the same thing.
+PROPOSAL: Add an `/?export=gone` case at 1280x720 to the "asset link desktop" journey that asserts the notice shows and the URL is already `/`. Or say in Design that the desktop path keeps today's behaviour.
 
 ### R-16
 
