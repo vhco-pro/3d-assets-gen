@@ -687,7 +687,8 @@ opens the app.
 - [x] T16 `app/e2e/phone.spec.ts` - the failing "photos" journey for both inputs' attributes, appended picks, the GIF refusal and two image jobs; it fails because the buttons do not exist (AC-07)
       Evidence: `E2E_TARGET=source bunx playwright test app/e2e/phone.spec.ts -g photos` fails as intended in chromium, firefox, phone-chromium and phone-webkit: no `Take photo` input (`element(s) not found`).
 
-- [ ] T17 `app/web/App.tsx` - Take photo and From photos on Create (and beside the desktop drop zone), picks appended to the chosen images, and other types refused with `Only PNG, JPEG or WebP photos can be used.`; T16 passes (AC-07)
+- [x] T17 `app/web/App.tsx` - Take photo and From photos on Create (and beside the desktop drop zone), picks appended to the chosen images, and other types refused with `Only PNG, JPEG or WebP photos can be used.`; T16 passes (AC-07)
+      Evidence: `E2E_TARGET=source bunx playwright test app/e2e/phone.spec.ts app/e2e/submit.spec.ts app/e2e/layout.spec.ts -g "photos|image|phone shell"` 31 passed: the photos journey in chromium, firefox, phone-chromium and phone-webkit, the existing image-batch journeys, and the phone-shell layout matrix with the new buttons inside the 44-pixel rule. Typecheck and lint pass.
 
 - [ ] T18 `app/e2e/phone.spec.ts`, `app/e2e/glossary.spec.ts` - the failing "ar link" journey (one `ar-link` per open and per 10 minutes, one `intent:` request whose `file` is the latest absolute link, the native listener, the disabled button), no View in your room in the desktop projects, no `ar-link` in `phone-webkit`, and the glossary's View in your room check; they fail because the page has no AR (AC-05, AC-10)
 

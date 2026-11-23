@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, ChevronDown, Images } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
+import { Box, Camera, ChevronDown, ImagePlus, Images } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
 import { DEFAULT_QUALITY, DEFAULT_SHARED_STYLE, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, QUALITIES, qualityByName, remixQuality, type QualityName } from "../pipeline/presets.ts";
 import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
 import { AssetGone, AssetPage, GONE_MESSAGE } from "./AssetPage.tsx";
@@ -24,6 +24,8 @@ export { label, stateTerm } from "./common.tsx";
 const MiB = 1024 * 1024;
 const IMAGE_CAP = 200 * MiB;
 const SHARED_KEY = "asset-studio:shared-style";
+const PHOTO_TYPES = "image/png,image/jpeg,image/webp";
+const PHOTO_REFUSED = "Only PNG, JPEG or WebP photos can be used.";
 const EXPORT_NOTICE = "The selection changed after the export started. Select the assets again and download them.";
 
 function Brand(): ReactNode {
@@ -223,7 +225,7 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     } else if (route.tab === "library") {
       content = <PhoneLibrary jobs={done} onOpen={openAsset} />;
     } else {
-      content = <section data-screen="create"><Composer key={remix.seq} draft={remix.draft} /></section>;
+      content = <section data-screen="create"><Composer key={remix.seq} draft={remix.draft} dropZone={false} /></section>;
     }
     return (
       <PhoneShell tab={route.asset !== null ? "library" : route.tab} onTab={goTab} onAssetBack={route.asset !== null ? phoneLibrary : null} banners={banners}>
@@ -247,7 +249,7 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
       </header>
       {banners}
       <main className="layout">
-        <Composer key={remix.seq} draft={remix.draft} />
+        <Composer key={remix.seq} draft={remix.draft} dropZone />
         <div className="grid min-w-0 gap-5">
           <Queue jobs={list} loading={jobs.isPending} error={jobs.error} />
           <Library jobs={done} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
@@ -310,7 +312,23 @@ function QualityControl({ value, onChange }: { value: QualityName; onChange: (q:
   );
 }
 
-function Composer({ draft }: { draft: Draft | null }): ReactNode {
+/** Take photo (the camera) or From photos (the library, several at once): each pick is added to the chosen images. */
+function PhotoButton({ capture, onPick }: { capture: boolean; onPick: (e: ChangeEvent<HTMLInputElement>) => void }): ReactNode {
+  const Icon = capture ? Camera : ImagePlus;
+  return (
+    <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-input bg-vh-control-bg px-4 text-sm font-medium hover:bg-vh-control-bg-hover has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring" data-control="">
+      {capture ? (
+        <input type="file" accept={PHOTO_TYPES} capture="environment" className="sr-only" onChange={onPick} />
+      ) : (
+        <input type="file" accept={PHOTO_TYPES} multiple className="sr-only" onChange={onPick} />
+      )}
+      <Icon size={18} aria-hidden="true" />
+      <span>{capture ? "Take photo" : "From photos"}</span>
+    </label>
+  );
+}
+
+function Composer({ draft, dropZone }: { draft: Draft | null; dropZone: boolean }): ReactNode {
   const qc = useQueryClient();
   const [prompts, setPrompts] = useState(draft?.prompt ?? "");
   const [files, setFiles] = useState<File[]>([]);
@@ -365,6 +383,19 @@ function Composer({ draft }: { draft: Draft | null }): ReactNode {
     setStatus(null);
     mutation.mutate();
   };
+  // A picked photo is appended; a file of another type is refused here (the server checks the bytes too).
+  const addPhotos = (e: ChangeEvent<HTMLInputElement>): void => {
+    const picked = e.target.files ? [...e.target.files] : [];
+    e.target.value = "";
+    const ok = picked.filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
+    if (ok.length < picked.length) {
+      setStatus(null);
+      setError(PHOTO_REFUSED);
+    } else {
+      setError(null);
+    }
+    if (ok.length > 0) setFiles((prev) => [...prev, ...ok]);
+  };
   const onDrop = (e: DragEvent<HTMLLabelElement>): void => {
     e.preventDefault();
     setOver(false);
@@ -382,7 +413,12 @@ function Composer({ draft }: { draft: Draft | null }): ReactNode {
         </div>
         <div className="grid gap-1.5">
           <span className="font-semibold">Images</span>
-          <label
+          <div className="grid grid-cols-2 gap-2">
+            <PhotoButton capture onPick={addPhotos} />
+            <PhotoButton capture={false} onPick={addPhotos} />
+          </div>
+          {!dropZone && files.length > 0 && <p className="font-semibold">{plural(files.length, "image chosen", "images chosen")}</p>}
+          {dropZone && <label
             className="relative grid cursor-pointer place-items-center gap-0.5 rounded-md border border-dashed border-input bg-black/20 p-3 text-center hover:bg-vh-control-bg-hover has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring data-[over]:border-ring"
             data-over={over ? "" : undefined}
             onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -392,7 +428,8 @@ function Composer({ draft }: { draft: Draft | null }): ReactNode {
             <input id="images" name="images" type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Images" className="sr-only" onChange={(e) => { setFiles(e.target.files ? [...e.target.files] : []); }} />
             <span className="flex items-center gap-2 font-semibold"><Images size={16} aria-hidden="true" />{files.length > 0 ? plural(files.length, "image chosen", "images chosen") : "Drop images here or choose files"}</span>
             <span className="text-sm text-muted-foreground">PNG, JPEG or WebP, up to 20 MiB each</span>
-          </label>
+          </label>}
+          {!dropZone && <span className="text-sm text-muted-foreground">PNG, JPEG or WebP, up to 20 MiB each</span>}
           {files.length > 0 && (
             <div className="grid gap-1.5">
               <ul className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
