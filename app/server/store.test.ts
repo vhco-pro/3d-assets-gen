@@ -15,6 +15,10 @@ afterEach(() => {
 // Only finished backups count; SQLite may keep a -journal file beside one while VACUUM INTO writes it.
 const backups = (): string[] => (existsSync(join(dir, "backup")) ? readdirSync(join(dir, "backup")).filter((n) => n.endsWith(".sqlite")).sort() : []);
 
+test("the migration list still has 2 entries, so this release runs no migration", () => {
+  expect(MIGRATIONS).toHaveLength(2);
+});
+
 test("a new store is at schema 2 in WAL mode and writes no backup", () => {
   expect(SCHEMA_VERSION).toBe(2);
   const s = openStore(dir);
