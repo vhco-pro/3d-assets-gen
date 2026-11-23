@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Builder and runtime are both Debian 13, so the harvested libraries match the runtime's ABI. The runtime
 # is base-nossl: the executable links only glibc, and the cc base's OpenSSL carried an unfixed HIGH CVE.
-FROM oven/bun:1.4.3-debian@sha256:923bedb355f7746666659f71e724998159a5c8c54bd1cb1030e1975a0698415b AS build
+FROM oven/bun:1.4.5-debian@sha256:3dddea58e1f8f2240eca906b023fedb944f9a8352515a35309fd0c879fe00aaa AS build
 WORKDIR /src
 COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile --ignore-scripts
