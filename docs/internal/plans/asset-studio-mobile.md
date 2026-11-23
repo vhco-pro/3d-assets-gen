@@ -590,6 +590,23 @@ None.
 | 2026-11-23 | R-2 | spec | `9527e14` | claude-opus-5-5 | procedural | 0 blocking, 12 should-fix, 2 nits; all applied with the owner's eight answers; F-01 replaced the R-1 refresh-on-tap with a background link refresh |
 | 2026-11-23 | R-3 | spec | `5bce6c5` | claude-opus-5-5 | procedural | 2 blocking, 4 should-fix; all applied with the owner's two answers; removed author extra: the Chromium `notificationclick` journey, the emulator foreground tap proves that path (R-3 F-02) |
 | 2026-11-23 | R-4 | spec | `3d878f2` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit |
+| 2026-11-23 | R-5 | spec | `52d44c8` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix |
+
+### R-5
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan (intro paragraph: "`phone-chromium` (Pixel 7) and `phone-webkit` (iPhone 15) run `app/e2e/phone.spec.ts`"); Design > Testing and the Android emulator (project list paragraph: "`phone-chromium` ..., `phone-webkit` ... and `webkit-desktop` for the existing tagged journeys"); Test Plan AC-10 ("`app/e2e/glossary.spec.ts` in `chromium` and `phone-chromium`"); Test Plan AC-01, AC-03, AC-04, AC-05, AC-06, AC-07, AC-08 (rows that run some `phone.spec.ts` journeys in `chromium` and others only in the phone projects)
+EVIDENCE: The existing `chromium` project is `{ name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: "**/signin.spec.ts" }` (playwright.config.ts:19), with no testMatch or grep, so it runs every spec file, including a new `app/e2e/phone.spec.ts`. The Test Plan wants only some phone.spec.ts journeys in `chromium` ("installable", "asset link desktop", "quality", "notifications switch", the desktop "photos" and "share" cases, the no-AR-button check). It wants others only in the phone projects ("tabs", "keyboard", "asset page", "remix", "delete", "reduced motion", "ar link"). Those would fail at the Desktop Chrome 1280x720 size, because no tab bar renders there. The document never says how a journey is limited to a project. The `@firefox` and `@webkit` tags only add journeys to their projects through grep. Read literally, the phone projects run only `phone.spec.ts`, so the AC-10 row's `glossary.spec.ts` in `phone-chromium` would never run. One implementer gives the phone projects a testMatch on phone.spec.ts, and the AC-10 phone check silently disappears. Another lets them run every spec, so the desktop-sized specs run at phone size. A third adds `test.skip` calls by project name. The three suites prove different things.
+PROPOSAL: State the selection mechanism: each project's testMatch or grep, and how a phone.spec.ts journey is restricted to its listed projects (for example `@phone` and `@desktop` tags, with `chromium` given `grepInvert: /@phone/`). Make the phone projects' scope include glossary.spec.ts, or move the AC-10 phone check into phone.spec.ts.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-02 (last sentence: "The pull request carries before-and-after captures as `conventions/frontend-testing.md` defines them: each phone screen and the Asset page at 390x844 and 844x390, and the desktop composer at 1280x720 before (Detail and Texture) and after (Quality)")
+EVIDENCE: conventions/frontend-testing.md at edd4c09, "Visual record in the pull request", says: "For each affected screen it shows a before and after pair, and an after image of each state the change adds or alters, such as an open dialog, a collapsed narrow layout or an error" and "Name any changed state left uncaptured and say why." The Design also changes several desktop states that the row's list leaves out. The Preview dialog gains View in your room, Share GLB, Remix and Delete and a `Quality:` line (Design > Layout and navigation, Design > Quality; today it has only `Download GLB` and `Close`, app/web/Viewer.tsx:131-132). Job rows and Library tiles show `Quality: <name>` or `Custom (...)`. The Notifications switch is added below the desktop queue. The phone shell also adds new states: the gone message, the empty Queue text and the notification messages. An implementer who follows the list exactly produces a record that the convention calls incomplete. The row also does not name the uncaptured states.
+PROPOSAL: Extend the list to the desktop Preview dialog, the desktop queue and library with the Quality labels and the Notifications switch, and the added phone states (gone message, empty Queue, a notifications message), or name the states left out and say why.
 
 ### R-4
 
