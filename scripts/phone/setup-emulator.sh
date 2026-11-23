@@ -41,7 +41,7 @@ fail() {
 
 [[ -r /dev/kvm && -w /dev/kvm ]] || fail "/dev/kvm is not usable by $(id -un)"
 report_pass "KVM usable"
-for cmd in curl unzip python3 java; do command -v "$cmd" > /dev/null || fail "$cmd is not installed"; done
+for cmd in curl unzip python3 java bun; do command -v "$cmd" > /dev/null || fail "$cmd is not installed"; done
 
 if [[ -x "$SDKMANAGER" ]]; then
   report_skip "command-line tools already installed"
@@ -65,6 +65,9 @@ fi
 licences="$CACHE/licences.log"
 if yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses > "$licences" 2>&1; then
   report_pass "SDK licences accepted"
+elif grep -q "The --licenses option is no longer needed" "$licences"; then
+  # Command-line tools 23 accept the licences as part of installing and refuse the separate step.
+  report_pass "SDK licences: this sdkmanager accepts them while installing"
 else
   fail "sdkmanager --licenses failed (see $licences)"
 fi
@@ -73,7 +76,8 @@ packages=(platform-tools emulator "$SYSTEM_IMAGE")
 installed="$CACHE/installed.txt"
 "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --list_installed > "$installed" 2>/dev/null || fail "sdkmanager --list_installed failed"
 missing=()
-for p in "${packages[@]}"; do grep -q "^ *${p} " "$installed" || missing+=("$p"); done
+# --list_installed prints package paths with slashes in place of semicolons.
+for p in "${packages[@]}"; do grep -q "^ *${p//;//} " "$installed" || missing+=("$p"); done
 if ((${#missing[@]} == 0)); then
   report_skip "platform tools, emulator and $SYSTEM_IMAGE already installed"
 else
@@ -92,13 +96,13 @@ else
   report_pass "created AVD $AVD (Pixel 7, $SYSTEM_IMAGE)"
 fi
 config="$HOME/.android/avd/${AVD}.avd/config.ini"
-# The back camera shows the emulator's virtual scene, so Take photo has something to photograph; the
+# The back camera is the emulated one (its moving test pattern; the virtual scene crashed this host's emulator), the
 # keyboard stays a software keyboard so the journey sees the on-screen keyboard open.
-for setting in "hw.camera.back=virtualscene" "hw.keyboard=no" "hw.ramSize=4096"; do
+for setting in "hw.camera.back=emulated" "hw.keyboard=no" "hw.ramSize=4096"; do
   key="${setting%%=*}"
   if grep -q "^${key}=" "$config"; then sed -i "s|^${key}=.*|${setting}|" "$config"; else echo "$setting" >> "$config"; fi
 done
-report_pass "AVD settings: back camera virtual scene, software keyboard, 4 GiB"
+report_pass "AVD settings: back camera emulated, software keyboard, 4 GiB"
 
 # ---- on the running emulator ----------------------------------------------------------------------------
 
@@ -115,7 +119,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if "$ADB" shell pm list packages com.google.ar.core | grep -q "com.google.ar.core" && "$ADB" shell dumpsys package com.google.ar.core | grep -q "versionName=${ARCORE_VERSION}"; then
+if "$ADB" shell pm list packages com.google.ar.core | grep -q "com.google.ar.core" && "$ADB" shell dumpsys package com.google.ar.core | grep -q "versionName=${ARCORE_VERSION%.*}\."; then
   report_skip "Google Play Services for AR ${ARCORE_VERSION} already installed"
 else
   apk="$CACHE/$ARCORE_APK"
@@ -134,7 +138,7 @@ chrome_version="$("$ADB" shell dumpsys package com.android.chrome | sed -n 's/.*
 [[ -n "$chrome_version" ]] || fail "Chrome is not installed on the emulator"
 if (( ${chrome_version%%.*} >= 105 )); then report_pass "Chrome $chrome_version (105 or newer)"; else fail "Chrome $chrome_version is older than 105"; fi
 
-if chrome_reads_command_line; then
+if chrome_reads_command_line --quiet; then
   report_skip "Chrome already reads its command line on this user build"
 else
   report_step "turning on chrome://flags/#enable-command-line-on-non-rooted-devices"
