@@ -487,3 +487,80 @@ test.describe("view in your room", () => {
     expect(asked).toBe(0);
   });
 });
+
+// ---- Share GLB (AC-08) ----------------------------------------------------------------------------------
+
+type ShareMode = "accept" | "abort" | "not-allowed" | "refuse" | "absent";
+
+/** Stubs the Web Share API before load and records every call, with the page's resource count at share time. */
+const shareStub = (mode: ShareMode): string => `(() => {
+  const w = window;
+  w.__canShare = []; w.__shared = [];
+  if (${JSON.stringify(mode)} === "absent") { delete Navigator.prototype.share; delete Navigator.prototype.canShare; return; }
+  Object.defineProperty(navigator, "canShare", { configurable: true, value: (data) => {
+    w.__canShare.push((data.files || []).map((f) => ({ name: f.name, type: f.type, size: f.size })));
+    return ${JSON.stringify(mode)} !== "refuse";
+  } });
+  Object.defineProperty(navigator, "share", { configurable: true, value: (data) => {
+    w.__shared.push({ files: (data.files || []).map((f) => ({ name: f.name, type: f.type, size: f.size, isFile: f instanceof File })), title: data.title, resources: performance.getEntriesByType("resource").length });
+    if (${JSON.stringify(mode)} === "abort") return Promise.reject(new DOMException("closed", "AbortError"));
+    if (${JSON.stringify(mode)} === "not-allowed") return Promise.reject(new DOMException("no", "NotAllowedError"));
+    return Promise.resolve();
+  } });
+})();`;
+
+interface ShareLog { canShare: { name: string; type: string; size: number }[][]; shared: { files: { name: string; type: string; size: number; isFile: boolean }[]; title: string; resources: number }[] }
+const shareLog = (page: Page): Promise<ShareLog> => page.evaluate(() => {
+  const w = window as unknown as { __canShare: ShareLog["canShare"]; __shared: ShareLog["shared"] };
+  return { canShare: w.__canShare, shared: w.__shared };
+});
+const GLB_NAME = "a-wooden-treasure-chest-00000000.glb";
+
+test.describe("share", () => {
+  for (const mode of ["accept", "abort", "not-allowed", "refuse", "absent"] as const) {
+    test(`share (${mode}): Share GLB shares the prepared file or falls back to a download @phone @firefox`, async ({ page }, testInfo) => {
+      const phone = testInfo.project.name.startsWith("phone-");
+      const { url, token } = shared();
+      await page.addInitScript(shareStub(mode));
+      // The viewer stays unloaded here, so every model.glb request comes from Share GLB.
+      await page.route(/\/assets\/viewer-[^/]+\.js$/, (route) => route.abort());
+      let glb = 0;
+      page.on("request", (req) => { if (/\/model\.glb$/.test(req.url())) glb += 1; });
+      if (phone) await phoneSignIn(page);
+      else await signIn(page, url, token);
+      await page.goto(`${url}/?asset=${CHEST}`);
+      const scope = phone ? page.getByTestId("asset-page") : page.getByRole("dialog");
+      const share = scope.getByRole("button", { name: "Share GLB" });
+      await expect(share).toBeVisible();
+      if (mode === "refuse" || mode === "absent") {
+        await expect(share).toBeEnabled();
+        await page.waitForTimeout(1000);
+        expect(glb).toBe(0);
+        const download = page.waitForEvent("download");
+        await share.click();
+        expect((await download).suggestedFilename()).toBe(GLB_NAME);
+        await expect(page.getByText("Saved to your downloads.")).toBeVisible();
+        return;
+      }
+      await expect(share).toBeEnabled();
+      const log = await shareLog(page);
+      expect(log.canShare[0]).toEqual([{ name: GLB_NAME, type: "model/gltf-binary", size: 0 }]);
+      expect(glb).toBe(1);
+      const before = await page.evaluate(() => performance.getEntriesByType("resource").length);
+      await share.click();
+      await expect.poll(async () => (await shareLog(page)).shared.length).toBe(1);
+      const call = (await shareLog(page)).shared[0];
+      expect(call?.files).toHaveLength(1);
+      expect(call?.files[0]).toMatchObject({ name: GLB_NAME, type: "model/gltf-binary", isFile: true });
+      expect(call?.files[0]?.size).toBeGreaterThan(0);
+      expect(call?.title).toBe("a wooden treasure chest");
+      expect(call?.resources).toBe(before);
+      expect(glb).toBe(1);
+      if (mode === "not-allowed") await expect(page.getByText("Sharing did not work. Use Download instead.")).toBeVisible();
+      else {
+        await page.waitForTimeout(500);
+        await expect(page.getByText("Sharing did not work. Use Download instead.")).toHaveCount(0);
+      }
+    });
+  }
+});
