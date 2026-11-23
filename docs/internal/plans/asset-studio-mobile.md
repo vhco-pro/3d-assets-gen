@@ -638,6 +638,30 @@ None.
 | 2026-11-23 | R-9 | spec | `5abb796` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix; all applied with the owner's two answers; F-01 replaced the R-8 shared-stack cancel step |
 | 2026-11-23 | R-10 | spec | `fed6bf1` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied with the owner's answer; F-01 revisited the R-9 history rule |
 | 2026-11-23 | R-11 | spec | `09015b5` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix; met by removing the pending-history rule (R-10) and keeping desktop tiles state-only, as the owner chose |
+| 2026-11-23 | R-12 | spec | `da24564` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits |
+
+### R-12
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (two-column paragraph: "A Library tile opens the Preview dialog through component state as today (`app/web/App.tsx:202-203`), without changing the URL or history" and "A layout change across 1024 pixels keeps the open asset: the Asset page becomes the Preview dialog and the other way round, and the model reloads in the new view"; URL paragraph: "The screen lives in the URL query ... `?asset=<job id>`"); Scope ("Tabs and the open asset are in the URL, so reload, Back and links work"); Context > Owner summary ("a desktop tile still opens the Preview dialog without changing the URL"); Acceptance Criteria AC-03 ("the open asset survives a layout change across 1024 pixels"); Test Plan AC-03 ("asset page": "with the Asset page open, resize from 768x1024 to 1024x768 and assert the Preview dialog shows the same asset, then back to the Asset page")
+EVIDENCE: The R-11 revision made a desktop tile open the dialog through React state only, so the URL holds no `?asset=` while that dialog is open (the dialog is driven by `preview` state today, app/web/App.tsx:158 and 202-203). Design says the phone shell picks its screen from the URL, and that a layout change turns the dialog into the Asset page. It does not say how a state-only dialog becomes an Asset page when the window narrows below 1024 pixels, for example a tablet rotated from 1024x768 to 768x1024. One implementer writes `?asset=` with `replaceState` and no history state, so `‹ Library` replaces the URL with `?tab=library`. Another uses `pushState` with `{ from: "library" }`, so Back and `‹ Library` call `history.back()`. A third keeps the asset in component state on the phone shell, so the URL lacks `?asset=` and a reload loses the asset, against Scope's "the open asset are in the URL". The only resize step starts on the phone shell with `?asset=` already in the URL, so all three builds pass.
+PROPOSAL: State what happens to the URL when a tile-opened desktop dialog crosses below 1024 pixels, for example `replaceState` adding `?asset=<id>` with no history state, so the `‹ Library` rule then replaces the URL with `?tab=library`. Add an AC-03 step in `phone-chromium` and `phone-webkit`: at 1024x768 open a tile's Preview dialog, resize to 768x1024, and assert the Asset page shows that asset with `?asset=<id>` in the URL and that `‹ Library` reaches the Library.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Layout and navigation (URL paragraph: "Tab switches add no history entry, so Back from Create, Queue or Library leaves Asset Studio, as it does in most phone apps"; Asset page paragraph: "when the asset was opened from a Library tile, the Library entry before it stays in history, so Back from that tab shows the Library once and the next Back leaves Asset Studio"); Context > Owner summary ("After the second review you decided: ... Back from a tab leaves the app"; "After the eleventh review you chose to keep history simple ... Back from there visits the Library once before leaving the app")
+EVIDENCE: The R-11 revision added the exception in the Asset page paragraph but left the URL paragraph's unqualified statement that Back from any tab leaves Asset Studio. The two now disagree for a tab reached by leaving a tile-opened Asset page. The later, specific sentence and the AC-03 "asset page" step (`page.goBack()` shows the Library, then a second one returns to `about:blank`) fix the behaviour, and AC-02 ("adds no history entry for a tab switch") still holds, so an implementer builds the same thing.
+PROPOSAL: Qualify the URL paragraph's sentence, for example "Back from Create, Queue or Library leaves Asset Studio, except once after leaving a tile-opened Asset page (see below)".
+
+FINDING: F-03
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (validation paragraph: "R-9 found 1 blocking and 2 should-fix findings R-10 found 1 should-fix finding and R-11 found 2")
+EVIDENCE: The R-11 revision edited this sentence and removed the "and" between the R-9 and R-10 clauses without adding a comma, which runs the clauses together, the same slip R-6 F-03 reported. The counts match the Review Log rows for R-9, R-10 and R-11.
+PROPOSAL: Write "R-9 found 1 blocking and 2 should-fix findings, R-10 found 1 should-fix finding and R-11 found 2".
 
 ### R-11
 
