@@ -410,3 +410,79 @@ test.describe("photos", () => {
     await expect(page.getByRole("status").filter({ hasText: "2 jobs added" })).toBeVisible();
   });
 });
+
+// ---- View in your room (AC-05) --------------------------------------------------------------------------
+
+const viewInRoom = (scope: Page | Locator): Locator => scope.getByRole("button", { name: "View in your room" });
+/** Makes WebKit report AR Quick Look support, as an iPhone does, before model-viewer reads it. */
+const QUICK_LOOK = `(() => { const s = DOMTokenList.prototype.supports; DOMTokenList.prototype.supports = function (t) { return t === "ar" || s.call(this, t); }; })();`;
+
+test.describe("view in your room", () => {
+  test("desktop browsers show no View in your room @firefox @webkit", async ({ page }) => {
+    const { url, token } = shared();
+    await signIn(page, url, token);
+    await page.getByRole("button", { name: "Preview a wooden treasure chest" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.locator("model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+    await expect(viewInRoom(dialog)).not.toBeVisible();
+  });
+
+  test("ar link: one link per open and per 10 minutes, and one tap opens Scene Viewer with the latest absolute link @android @mobile-only", async ({ page }) => {
+    await page.clock.install();
+    await phoneSignIn(page);
+    const links: string[] = [];
+    let glbLoads = 0;
+    page.on("response", (res) => {
+      if (/\/api\/assets\/[^/]+\/ar-link$/.test(res.url())) void res.json().then((b: unknown) => { links.push((b as { url: string }).url); });
+    });
+    page.on("request", (req) => { if (/\/model\.glb(\?|$)/.test(req.url())) glbLoads += 1; });
+    await page.goto(`${shared().url}/?asset=${CHEST}`);
+    const viewer = page.getByTestId("asset-page").locator("model-viewer");
+    await expect(viewer).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+    await expect(viewInRoom(page)).toBeVisible();
+    await expect.poll(() => links.length).toBe(1);
+    const loadsBefore = glbLoads;
+    await page.clock.fastForward("10:00");
+    await expect.poll(() => links.length).toBe(2);
+    await expect(viewer).toHaveAttribute("src", `/api/assets/${CHEST}/model.glb`);
+    expect(glbLoads).toBe(loadsBefore);
+
+    // The tap: exactly one intent: request, nothing before it, carrying the latest link resolved to an absolute URL.
+    const after: string[] = [];
+    page.on("request", (req) => { after.push(req.url()); });
+    const intent = page.waitForRequest(/^intent:/);
+    await viewInRoom(page).click();
+    const req = await intent;
+    await page.waitForTimeout(2000);
+    expect(after.filter((u) => u.startsWith("intent:"))).toHaveLength(1);
+    expect(after[0]).toBe(req.url());
+    const outer = new URL(req.url());
+    expect(outer.host + outer.pathname).toBe("arvr.google.com/scene-viewer/1.2");
+    expect(outer.searchParams.get("mode")).toBe("ar_preferred");
+    expect(outer.searchParams.has("sig")).toBe(false);
+    const latest = links[links.length - 1] ?? "";
+    expect(outer.searchParams.get("file")).toBe(new URL(latest, shared().url.replace("127.0.0.1", new URL(page.url()).hostname)).toString());
+    expect(new URL(outer.searchParams.get("file") ?? "").searchParams.get("sig")).toBeTruthy();
+  });
+
+  test("ar link failing: View in your room is disabled with its message @android @mobile-only", async ({ page }) => {
+    await page.route(/\/api\/assets\/[^/]+\/ar-link$/, (route) => route.fulfill({ status: 500, body: "{}" }));
+    await phoneSignIn(page);
+    await page.goto(`${shared().url}/?asset=${CHEST}`);
+    await expect(page.getByTestId("asset-page").locator("model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+    await expect(viewInRoom(page)).toBeDisabled();
+    await expect(page.getByText("AR is not available right now.")).toBeVisible();
+  });
+
+  test("iPhone: opening the Asset page asks for no signed link @ios @mobile-only", async ({ page }) => {
+    await page.addInitScript(QUICK_LOOK);
+    let asked = 0;
+    page.on("request", (req) => { if (req.url().endsWith("/ar-link")) asked += 1; });
+    await phoneSignIn(page);
+    await page.goto(`${shared().url}/?asset=${CHEST}`);
+    await expect(page.getByTestId("asset-page").locator("model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+    await expect(viewInRoom(page)).toBeVisible();
+    await page.waitForTimeout(2000);
+    expect(asked).toBe(0);
+  });
+});

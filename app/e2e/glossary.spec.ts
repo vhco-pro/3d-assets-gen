@@ -51,6 +51,9 @@ test("the phone layout uses the Glossary terms for the tabs, Quality and the Ass
   const asset = page.getByTestId("asset-page");
   for (const action of ["Download", "Remix", "Delete"]) await expect(asset.getByRole("button", { name: action, exact: true })).toHaveCount(1);
   await expect(asset.getByText(/^Quality: /)).toHaveCount(1);
+  // The Pixel 7 profile's Android user agent makes model-viewer offer Scene Viewer.
+  await expect(asset.locator("model-viewer")).toHaveAttribute("data-loaded", "true", { timeout: 60_000 });
+  await expect(asset.getByRole("button", { name: "View in your room" })).toBeVisible();
   await expect(page.getByText("Detail", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Texture", { exact: true })).toHaveCount(0);
 });
