@@ -564,6 +564,51 @@ None.
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits; all applied with the owner's nine answers; removed author extra: stored page origin as the VAPID `sub` claim, now a fixed URL (R-1 F-04) |
 | 2026-11-23 | R-2 | spec | `9527e14` | claude-opus-5-5 | procedural | 0 blocking, 12 should-fix, 2 nits; all applied with the owner's eight answers; F-01 replaced the R-1 refresh-on-tap with a background link refresh |
+| 2026-11-23 | R-3 | spec | `5bce6c5` | claude-opus-5-5 | procedural | 2 blocking, 4 should-fix |
+
+### R-3
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan AC-05 ("ar link" in `phone-chromium`: "sets `location.href` (captured by a route on `intent://`)"); Design > AR: View in your room (Android tap paragraph)
+EVIDENCE: Observed with a scratch Bun script outside the repository, using the repository's Playwright with the `Pixel 7` profile and the default headless Chromium. The page was served from `http://localhost:<port>` and ran `location.href = "intent://arvr.google.com/..."`. `page.route("intent://**", ...)`, `page.route(/^intent:/, ...)` and a context-level predicate route were never called for the intent URL (the predicate saw only `http://localhost...`). `page.on("request")` and `page.waitForRequest(/^intent:/)` did see `intent://arvr.google.com/x?fil...`, which then failed with `net::ERR_ABORTED`. A test built as the row says waits for a route handler that never runs, so it fails a correct implementation. The capture text came in with the R-2 F-01 revision.
+PROPOSAL: Capture the navigation with `page.waitForRequest` (or the `request` event) matching `^intent:`, and assert the `file` parameter and the absence of other requests between the tap and that request.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan AC-06 ("notification click" in `chromium`; "notifications switch" in `phone-chromium` and `chromium`, "with permission granted"); Design > Notifications (service worker paragraph: "On click it focuses an open Asset Studio window and navigates it ... when there is none, or `navigate()` rejects, it calls `clients.openWindow`"); Design > Testing and the Android emulator (project list)
+EVIDENCE: Observed with scratch scripts outside the repository. The `chromium` and `phone-chromium` projects run the default headless shell (playwright.config.ts:19). There, after `context.grantPermissions(["notifications"], { origin })`, `Notification.permission` is `denied` (while `Notification.requestPermission()` resolves `granted`), and `registration.showNotification` in the worker throws "No notification permission has been granted for this origin". `NotificationEvent` needs a real `Notification`, so the "notification click" step cannot be built in `chromium`. With `channel: "chromium"`, a notification was shown and a synthetic `notificationclick` was dispatched to a worker that called `clients.claim()`. In that handler `client.focus()` rejected with `InvalidAccessError`, `client.navigate("/?asset=1")` succeeded and `clients.openWindow` rejected with `InvalidAccessError`, because a dispatched event carries no user activation. A worker that awaits `focus()` before `navigate()`, which is the order Design gives, never navigates in this test. Separately, a switch that reads `Notification.permission === "denied"` on load and shows the blocked message, as Design requires, is disabled in the headless shell, so the "permission granted" switch journey fails a correct build unless the test also stubs the permission state. The click check came in with the R-2 F-07 revision.
+PROPOSAL: Run the click check in Chromium proper (`channel: "chromium"`). Say that the worker calls `navigate()` without waiting for `focus()` to succeed, and that a `focus()` rejection is ignored. For the switch journeys, say how the test sets the granted state (for example by stubbing `Notification.permission` and `requestPermission`), or run them in a project where `grantPermissions` takes effect.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > AR: View in your room ("render their own View in your room button in model-viewer's `ar-button` slot"; Android tap paragraph; iPhone paragraph "the tap calls model-viewer's `activateAR()`"); Test Plan AC-05 ("ar link" with `canActivateAR` forced true)
+EVIDENCE: In model-viewer 4.4.0 the `ar-button` slot sits inside the shadow `<div class="slot ar-button">` (node_modules/@google/model-viewer/lib/template.js:317-318). When an AR mode is available, model-viewer adds a click listener to that container that calls `event.preventDefault(); this.activateAR()` (lib/features/ar.js:76-79 and 199-200). A click on a slotted button bubbles through that container. On Android, model-viewer's own handler then opens Scene Viewer with `this.src` (ar.js:250-291), which Design keeps as the cookie-protected `/api/assets/<id>/model.glb`. That is a second intent navigation after the page's own `location.href`, and it hands Scene Viewer a URL that answers 401 and counts toward the failure limit. On iPhone, `activateAR()` runs twice. Design says neither to stop propagation nor to keep the button out of the slot. Forcing `canActivateAR` in the test does not cover the real listener path.
+PROPOSAL: State that the page's handler calls `stopPropagation()` (or that the button lives outside the slot and its visibility follows `canActivateAR` and `ar-status`), and add an assertion in "ar link" that exactly one intent request is made per tap.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Share GLB ("When the Asset page or the Preview dialog opens and the browser has `navigator.share` and `navigator.canShare`, the page fetches the GLB ... On those browsers the page does not prefetch the file."); Test Plan AC-08
+EVIDENCE: Chrome on Android has both `navigator.share` and `navigator.canShare`, yet refuses `.glb` files (Sources, Chromium FILE_TYPES.md). Under the first sentence, Chrome on Android prefetches the whole GLB on every Asset page open. The last sentence says it does not. The client's main device is Android, and a 4096-texture GLB is several megabytes. Whether a dummy `File` is passed to `canShare` before fetching is not said. The AC-08 row stubs `canShare` to refuse but never asserts that no GLB request follows, so either build passes. This text came in with the R-2 F-02 revision.
+PROPOSAL: Say that the page first calls `navigator.canShare({ files: [new File([], "<name>.glb", { type: "model/gltf-binary" })] })` and prefetches only when that is true, and assert in the AC-08 row that with `canShare` refusing, opening the view makes no `model.glb` request before the tap.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan AC-03 ("remix" in `phone-chromium`: "Remix fills Create's prompt and Quality from a seeded asset"); Test Plan AC-04 (Custom label checked only in `presets.test.ts`); Design > Quality ("`Custom (<k>k, <texture>)` for an older job"); Design > Layout and navigation (Remix)
+EVIDENCE: Every seeded fixture job is 10000 with 2048, except the cancelled Ultra job (app/server/seed.ts:93, `j.ultra ? 30000 : 10000, j.ultra ? 4096 : 2048`). So every seeded done asset is Standard, and Standard is also Create's default. A Remix that never sets Quality passes the "remix" journey. No seeded job has a pair outside the levels, so no journey ever renders `Custom (...)` on a job row, the Asset page or the Library. conventions/frontend-testing.md asks fixtures to "Cover the states the feature renders".
+PROPOSAL: Choose a non-Standard Quality before Remix, or add a seeded done job at another level and one with a pair outside the levels (for example 5000 with 2048), and assert the Quality Remix selects and the `Custom (5k, 2048)` label on the page.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation ("On the desktop layout the Preview dialog gets the same actions next to Download GLB and Close"; Asset page action list "Share GLB, Download, Remix and Delete"); Test Plan AC-08 ("for the Preview dialog")
+EVIDENCE: The Preview dialog today has `Download GLB` and `Close` (app/web/Viewer.tsx:131-132). "The same actions" includes Download, so a literal build shows both `Download` and `Download GLB` in the dialog. Another implementer keeps only `Download GLB`, and a third renames it to `Download`. No row says which labels the dialog carries.
+PROPOSAL: List the Preview dialog's exact buttons, for example View in your room, Share GLB, Remix, Delete, Download GLB and Close.
 
 ### R-2
 
