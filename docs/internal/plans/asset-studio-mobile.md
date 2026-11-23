@@ -1,6 +1,6 @@
 ---
-status: planned
-status_description: "Share GLB revision accepted by the owner on R-24; implementation resumes on feat/asset-studio-mobile."
+status: in-progress
+status_description: "Being implemented on feat/asset-studio-mobile; the Share GLB revision is accepted."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 branch: feat/asset-studio-mobile
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
