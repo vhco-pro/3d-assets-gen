@@ -795,6 +795,16 @@ None.
 | 2026-11-23 | R-21 | spec | `88427a5` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied |
 | 2026-11-23 | R-22 | spec | `0bf380e` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer (no share attempt in Chromium-based browsers) |
 | 2026-11-23 | R-23 | spec | `571f9e0` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
+| 2026-11-23 | R-24 | spec | `baed690` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
+
+### R-24
+
+FINDING: F-01
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Testing and the Android emulator ("A journey that runs at the desktop size but must not run in desktop Chromium (the AC-08 share sheet cases, which a Chromium user agent never reaches) carries `@no-chromium`."); Test Plan introduction ("`chromium` skips journeys tagged `@mobile-only`." and "A journey listed for desktop projects other than `chromium` carries `@no-chromium` (the AC-08 failed-prefetch case)."); Test Plan AC-08 ("one journey per stub mode tagged `@phone @firefox`" and "\"share (failed prefetch)\", tagged `@ios @firefox @no-chromium`"); Tasks T33
+EVIDENCE: This revision (baed690, applying R-23 F-01) added the `@no-chromium` tag. The Design names "the AC-08 share sheet cases" as the journeys that carry it, but the AC-08 row and T33 give `@no-chromium` only to "share (failed prefetch)". The share sheet cases (accept, `AbortError`, `NotAllowedError`, `DataError`, refuse, absent in `phone-webkit` and `firefox`) live in the per-mode journeys tagged `@phone @firefox`, which must run in `chromium` for the Preview dialog download checks. Read literally, the Design example would drop those `chromium` checks. Separately, the Test Plan introduction's first sentence still says only that `chromium` skips `@mobile-only`, while Design gives `grepInvert: /@mobile-only|@no-chromium/`. The row and T33 name the exact tags, and the next sentence of the introduction adds `@no-chromium`, so an implementer builds the same thing. `vh-adlc lint` passes. Under the stated grep rules the row's tags give the listed projects: `@ios @firefox @no-chromium` selects `phone-webkit` (`/@phone|@ios/`) and `firefox` (`/@firefox/`) only, and `@phone @firefox` selects `phone-chromium`, `phone-webkit`, `chromium` and `firefox`.
+PROPOSAL: In Design, change the parenthetical to "(the AC-08 failed-prefetch case, which a Chromium user agent never reaches)". In the Test Plan introduction, say that `chromium` skips journeys tagged `@mobile-only` or `@no-chromium`.
 
 ### R-23
 
