@@ -1,6 +1,6 @@
 ---
 status: draft
-status_description: "Revised for spec review R-18; waiting for a new spec review, then acceptance."
+status_description: "Spec review R-19 is clean (one nit); waiting for the owner's acceptance."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
 covers:
@@ -57,8 +57,8 @@ review R-1 found 1 blocking and 14 should-fix findings, R-2 found 12 should-fix 
 blocking and 4 should-fix findings, R-4, R-5 and R-6 found 2 should-fix findings each, R-7 found 1,
 R-8 found 5, R-9 found 1 blocking and 2 should-fix findings, R-10 found 1 should-fix finding, R-11 found 2,
 R-12 to R-15 found 1 each, R-16 found 1 blocking and 1 should-fix finding, and R-17 and R-18 found 1 should-fix
-finding each; all
-are folded in, and a new review is pending.
+finding each; all are folded in. R-19 at `145dc76` is clean, with one nit (a line citation) left as
+the nit rule allows.
 
 Your decisions, all as recommended: the Quality pairs above, on every layout; tabs below 1024 pixels;
 Scene Viewer with a 15-minute signed link; Share GLB falls back to a download on Android; Web Push to
@@ -666,6 +666,16 @@ None.
 | 2026-11-23 | R-16 | spec | `083ecbb` | claude-opus-5-5 | procedural | 1 blocking, 1 should-fix; met by removing the URL marker rules of R-14 and R-15, as the owner chose |
 | 2026-11-23 | R-17 | spec | `e770962` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; all applied |
 | 2026-11-23 | R-18 | spec | `5ce2f43` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
+| 2026-11-23 | R-19 | spec | `145dc76` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
+
+### R-19
+
+FINDING: F-01
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Layout and navigation (two-column paragraph: "A Library tile opens the Preview dialog through component state as today (`app/web/App.tsx:202-203`), without changing the URL or history")
+EVIDENCE: At 145dc76, which has the same `app/` as the measured `efac26a` (`git diff --stat efac26a 145dc76 -- app` prints nothing), the tile's state-only handler `onPreview={(job, opener) => { setPreview({ job, opener }); }}` is at app/web/App.tsx:200. Line 202 is `</main>` and line 203 is the `Viewer` render with `onClose={() => { setPreview(null); }}`. So the citation is off by two for the tile handler. The behaviour the sentence describes is correct, and an implementer builds the same thing either way. This citation was not changed by the R-18 revision (`git diff 5ce2f43 145dc76` touches only the Test Plan intro, the Owner summary count, status_description and the Review Log). I checked the R-18 change itself, the "from `about:blank`" rule in the Test Plan intro: it covers every step that uses that phrase (AC-02 "tabs", AC-03 "asset page", "asset link desktop" and "export gone"), and its "exactly one more" and `page.goBack()` assertions stay correct whether or not an engine keeps the explicit `about:blank` as a separate entry. I found nothing wrong with it. `vh-adlc lint` passes, and `vh-adlc next` answers `spec review` (stale: baseline-changed), as expected before this pass is recorded. A scratch Playwright run to repeat R-18's Firefox observation was refused by the session sandbox, so I did not observe it again.
+PROPOSAL: Cite `app/web/App.tsx:200` for the tile handler and `app/web/App.tsx:203` for the dialog's close, or `app/web/App.tsx:200-203` for both.
 
 ### R-18
 
