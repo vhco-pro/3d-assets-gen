@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { deleteJob, type Job } from "./api.ts";
+import { AR_UNAVAILABLE, arModeOf, sceneViewerIntent, useArLink, type ArMode } from "./ar.ts";
 import { dateFormat, ErrorText, qualityText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
@@ -57,11 +58,18 @@ export function ModelStage({ job, name, className, children }: { job: Job; name:
   const ref = useRef<HTMLElement>(null);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [arMode, setArMode] = useState<ArMode | null>(null);
+  const link = useArLink(job.id, arMode === "scene-viewer");
+  const arButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     // Tests wait for data-loaded; production logs nothing to the console.
-    const onLoad = (): void => { el.dataset.loaded = "true"; setLoaded(true); };
+    const onLoad = (): void => {
+      el.dataset.loaded = "true";
+      setLoaded(true);
+      setArMode(arModeOf((el as HTMLElement & { canActivateAR?: boolean }).canActivateAR === true));
+    };
     const onProgress = (e: Event): void => { setProgress((e as CustomEvent<{ totalProgress: number }>).detail.totalProgress); };
     el.addEventListener("load", onLoad);
     el.addEventListener("progress", onProgress);
@@ -70,6 +78,27 @@ export function ModelStage({ job, name, className, children }: { job: Job; name:
       el.removeEventListener("progress", onProgress);
     };
   }, [status, job.id]);
+  useEffect(() => {
+    // A native listener on the button itself: model-viewer listens for clicks on the slot's container and would
+    // start its own AR launch with the cookie-protected src, so this one stops the click first (a React onClick
+    // runs only after the click has bubbled past that container).
+    const button = arButton.current;
+    const el = ref.current;
+    if (!button || !el || !arMode) return;
+    const onClick = (e: MouseEvent): void => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (arMode === "quick-look") {
+        (el as HTMLElement & { activateAR?: () => Promise<void> }).activateAR?.().catch(() => undefined);
+        return;
+      }
+      if (link === null || link === "failed") return;
+      window.location.href = sceneViewerIntent(link.url, window.location.origin, window.location.href);
+    };
+    button.addEventListener("click", onClick);
+    return () => { button.removeEventListener("click", onClick); };
+  }, [arMode, link, status]);
+  const arBlocked = arMode === "scene-viewer" && (link === null || link === "failed");
   return (
     <div className={`preview-stage grid place-items-center overflow-hidden rounded-md ${className}`}>
       {status === "loading" && <p className="text-muted-foreground">Loading the 3D viewer…</p>}
@@ -90,9 +119,15 @@ export function ModelStage({ job, name, className, children }: { job: Job; name:
             loading="eager"
             interpolation-decay={reduced ? "0" : "200"}
             shadow-intensity="1"
+            ar
+            ar-modes="scene-viewer quick-look"
+            ar-scale="auto"
           >
+            {/* model-viewer shows this slot only when it reports AR as possible; desktop browsers never do. */}
+            <Button ref={arButton} slot="ar-button" type="button" disabled={arBlocked} className="absolute right-3 bottom-3 min-h-11">View in your room</Button>
             {children}
           </model-viewer>
+          {arMode === "scene-viewer" && link === "failed" && <p role="status" className="absolute inset-x-3 top-3 rounded-md bg-black/70 px-3 py-2 text-sm">{AR_UNAVAILABLE}</p>}
           {!loaded && (
             <div className="absolute inset-x-4 bottom-4 grid gap-1.5" role="status">
               <span className="text-sm text-muted-foreground">{`Loading model… ${String(Math.round(progress * 100))}%`}</span>

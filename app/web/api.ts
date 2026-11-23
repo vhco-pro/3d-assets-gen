@@ -129,3 +129,10 @@ export async function startExport(ids: string[]): Promise<string> {
   if (!isRecord(body) || typeof body.url !== "string") throw new ApiError(0, "Unexpected export answer.");
   return body.url;
 }
+
+/** A 15-minute signed path for the asset's GLB that Scene Viewer can fetch without the session cookie. */
+export async function fetchArLink(id: string, signal?: AbortSignal): Promise<string> {
+  const body: unknown = await (await call(`/api/assets/${id}/ar-link`, {}, signal)).json();
+  if (!isRecord(body) || typeof body.url !== "string") throw new ApiError(0, "Unexpected AR link answer.");
+  return body.url;
+}

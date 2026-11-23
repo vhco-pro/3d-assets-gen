@@ -444,7 +444,8 @@ test.describe("view in your room", () => {
     const loadsBefore = glbLoads;
     await page.clock.fastForward("10:00");
     await expect.poll(() => links.length).toBe(2);
-    await expect(viewer).toHaveAttribute("src", `/api/assets/${CHEST}/model.glb`);
+    // React 19 sets src as model-viewer's property; it still names the cookie-protected path, not the signed link.
+    expect(await viewer.evaluate((el) => (el as HTMLElement & { src: string }).src)).toBe(`/api/assets/${CHEST}/model.glb`);
     expect(glbLoads).toBe(loadsBefore);
 
     // The tap: exactly one intent: request, nothing before it, carrying the latest link resolved to an absolute URL.
