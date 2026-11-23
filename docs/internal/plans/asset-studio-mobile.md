@@ -601,6 +601,30 @@ None.
 | 2026-11-23 | R-3 | spec | `5bce6c5` | claude-opus-5-5 | procedural | 2 blocking, 4 should-fix; all applied with the owner's two answers; removed author extra: the Chromium `notificationclick` journey, the emulator foreground tap proves that path (R-3 F-02) |
 | 2026-11-23 | R-4 | spec | `3d878f2` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit |
 | 2026-11-23 | R-5 | spec | `52d44c8` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix |
+| 2026-11-23 | R-6 | spec | `61367c4` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit; all applied |
+
+### R-6
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Testing and the Android emulator (project selection paragraph: "`phone-webkit` runs those tagged `@phone` (`grep: /@phone/`)" and "Each Test Plan row's project list is the set of tags its journeys carry"); Test Plan intro ("one listed for `phone-chromium` alone carries `@android` instead of `@phone`"); Test Plan AC-05 ("in `phone-webkit` with `canActivateAR` forced true, opening the Asset page requests no `ar-link`"); Test Plan AC-06 ("In `phone-webkit` (iPhone user agent, not standalone, no `PushManager`) the Home Screen message shows")
+EVIDENCE: The R-5 F-01 revision gives `phone-webkit` the grep `/@phone/` and `phone-chromium` the grep `/@phone|@android/`. No tag selects `phone-webkit` alone, so any journey that reaches `phone-webkit` also runs in `phone-chromium`. Two rows have checks meant for `phone-webkit` only. The AC-05 check forces `canActivateAR` true and expects no `ar-link` request. In `phone-chromium` the Pixel 7 profile's Android user agent makes model-viewer choose `scene-viewer` (the same row relies on this), so a correct build requests an `ar-link` there and the check fails. The AC-06 Home Screen check expects no `PushManager` and an iOS user agent. In `phone-chromium` `PushManager` exists and the user agent is Android, so a correct build shows the switch and not the message. The scheme cannot give these journeys the project list the rows name. One implementer tags them `@phone` and the suite fails on a correct build. Another adds `test.skip` by project name, the ad hoc selection R-5 F-01 asked the document to replace. A third folds them into a shared journey that branches on the browser. The rule "Each Test Plan row's project list is the set of tags its journeys carry" is then false for these rows.
+PROPOSAL: Add a tag that only `phone-webkit` selects, for example `@ios` with `phone-webkit` grep `/@phone|@ios/`, carried with `@mobile-only` by the two WebKit-only checks. Say so in the Test Plan intro alongside `@android`.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-02 (visual record sentences: "after-only images of ... and its blocked, could-not-turn-on and Home Screen messages. The View in your room button is left uncaptured ...")
+EVIDENCE: conventions/frontend-testing.md:193-198 at edd4c09 asks for "an after image of each state the change adds or alters, such as an open dialog, a collapsed narrow layout or an error" and says "Name any changed state left uncaptured and say why." The R-5 F-02 revision extended the list, but these states that Design adds are neither captured nor named as left out with a reason. `Only PNG, JPEG or WebP photos can be used.` (Design > Images from the camera). `Sharing did not work. Use Download instead.` and `Saved to your downloads.` (Design > Share GLB). `This browser cannot show notifications.` and `Could not reach Asset Studio; notifications may not arrive.` (Design > Notifications). `AR is not available right now.` (Design > AR). The reason given for the AR button, that no headless browser offers AR, does not apply to the disabled state: the AC-05 "ar link" journey already forces `canActivateAR` true in `phone-chromium` and fails the `ar-link` route to show that message. The AC-07, AC-08 and AC-06 journeys reach the other states. An implementer who follows the list exactly still produces a record the convention calls incomplete.
+PROPOSAL: Add after-only images of those six states, or name each one left out and say why.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (validation paragraph: "R-3 found 2 blocking and 4 should-fix findings R-4 found 2 should-fix findings and R-5 found 2 should-fix findings")
+EVIDENCE: The R-5 revision edited this sentence, and it now runs three clauses together with no comma or "and" between "should-fix findings" and "R-4". The counts agree with the Review Log rows for R-3, R-4 and R-5.
+PROPOSAL: Punctuate it as a list, for example "R-3 found 2 blocking and 4 should-fix findings, R-4 found 2 should-fix findings and R-5 found 2 should-fix findings".
 
 ### R-5
 
