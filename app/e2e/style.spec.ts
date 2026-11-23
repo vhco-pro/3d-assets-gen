@@ -96,15 +96,20 @@ test("the offline banner uses --danger and the incompatible banner --warn", asyn
   await expect(banner).toHaveCount(0, { timeout: 60_000 });
 });
 
-test("two columns from 1024 pixels, one column below", async ({ page }) => {
+test("two columns from 1024 pixels, the phone shell with one screen below", async ({ page }) => {
   await signIn(page, stack.url, stack.token);
   for (const [w, h, side] of [[1280, 720, true], [1024, 768, true], [1023, 768, false], [390, 844, false]] as const) {
     await page.setViewportSize({ width: w, height: h });
     await page.evaluate(() => { window.scrollTo(0, 0); });
     const composer = await box(page, "composer");
-    const queue = await box(page, "queue");
-    if (side) expect(composer.x + composer.width, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.x);
-    else expect(composer.y + composer.height, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.y);
+    if (side) {
+      const queue = await box(page, "queue");
+      expect(composer.x + composer.width, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.x);
+    } else {
+      // Below 1024 pixels Create is one screen; the queue is on its own tab.
+      await expect(page.getByRole("navigation", { name: "Screens" })).toBeVisible();
+      await expect(page.getByTestId("queue")).toHaveCount(0);
+    }
   }
 });
 

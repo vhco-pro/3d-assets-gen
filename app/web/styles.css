@@ -141,7 +141,8 @@ p { margin: 0; }
 .preview-stage model-viewer { width: 100%; height: 100%; background: transparent; }
 
 /* ---- phone shell below 1024 pixels (asset-studio-mobile, Design > Layout and navigation) ------------- */
-.phone { --tabbar-h: 4rem; min-height: 100dvh; display: grid; grid-template-rows: auto auto 1fr; }
+:root { --tabbar-h: 4rem; }
+.phone { min-height: 100dvh; display: grid; grid-template-rows: auto auto 1fr; }
 /* Focused fields and scrolled-to controls stay clear of the fixed tab bar. */
 html:has(.phone) { scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + .75rem); }
 .phone-top {
@@ -167,6 +168,10 @@ html:has(.phone) { scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-i
 @media (min-width: 360px) { .phone-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 640px) { .phone-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .phone .preview-stage { min-height: 12rem; }
+/* Every control in the phone shell has a hit area of at least 44 by 44 CSS pixels; a switch or checkbox gets
+   it from the label that activates it. */
+.phone :is(button:not([role=checkbox]):not([role=switch]), input:not([type=checkbox]):not([type=file]):not([type=hidden]), select) { min-height: 2.75rem; min-width: 2.75rem; }
+.phone [role=switch] ~ label { display: inline-flex; align-items: center; min-height: 2.75rem; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 @media (pointer: fine) { html { overscroll-behavior: none; } }
