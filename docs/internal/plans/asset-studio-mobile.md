@@ -509,6 +509,107 @@ None.
 | Date | Review | Kind | Commit | Model | Isolation | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits; all applied with the owner's nine answers; removed author extra: stored page origin as the VAPID `sub` claim, now a fixed URL (R-1 F-04) |
+| 2026-11-23 | R-2 | spec | `9527e14` | claude-opus-5-5 | procedural | 0 blocking, 12 should-fix, 2 nits |
+
+### R-2
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > AR: View in your room (refresh paragraph "When View in your room is tapped and the current link has less than 5 minutes left..." and the iPhone paragraph); Context > Owner summary ("the AR link is refreshed when View in your room is tapped close to its expiry"); Acceptance Criteria AC-05 ("also when the page has been open longer than the first link's lifetime"); Test Plan AC-05 ("ar refresh" and emulator run 2 step "AR load")
+EVIDENCE: The refresh path awaits a fetch of `ar-link`, a new `src` and the model's `load` event before activating AR. That means a full re-download of the GLB, which no-store forbids caching. model-viewer then launches Scene Viewer by clicking an anchor with an `intent://` href (/home/m/code/3d-assets-gen/node_modules/@google/model-viewer/lib/features/ar.js:289-321). Chrome on Android launches an external app only from a navigation that still has transient user activation, which lasts a few seconds after the tap. model-viewer's own fallback comment says a deferred activateAR "fails due to not seeing a user activation" (ar.js, undoHashChange). A 4096-texture GLB loaded over the tailnet can outlast that window, so the intent may be blocked after `Preparing…` and nothing opens. The document defines no path for that case. On iPhone the rule still applies even though Quick Look does not use the link ("no signed link is needed there"), so iPhone also pays a reload and the same activation risk. Run 2 "AR load" (wait 16 minutes, then tap) exercises exactly this path, so a build that follows the document can fail it.
+PROPOSAL: Keep the tap synchronous. One way: refresh the link in the background while the Asset page or dialog is visible, for example a timer that swaps `src` before the link has 5 minutes left. Another: after `Preparing…`, ask for a second tap. Limit any refresh to Scene Viewer, and keep run 2 "AR load" as the proof.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design (no Share GLB subsection; Layout and navigation, Asset page action list); Scope ("Share GLB"); Design > Glossary (Share GLB row); Acceptance Criteria AC-08; Test Plan AC-08
+EVIDENCE: Outside the action lists and the Glossary, "Share GLB" appears only in AC-08 and its Test Plan row. `navigator.canShare`, the file name `<slug>-<short id>.glb`, the type `model/gltf-binary` and the fallback download of `/api/assets/<id>/model.glb` are stated only in the Test Plan. Design never says how the File is obtained: fetched with the cookie at tap time, prefetched, or taken from the signed link. It also leaves open what happens when `navigator.share` rejects (the user cancels, or NotAllowedError). Safari requires `navigator.share` to run with transient user activation. Fetching a multi-megabyte GLB after the tap can outlast that, so one implementer's iPhone share works and another's fails.
+PROPOSAL: Add a Share GLB subsection to Design that gives the file source and when it is fetched (before the tap, so `share` runs inside the gesture), the name and type, the `canShare` test, the download fallback with `Saved to your downloads.`, and the behaviour on a rejected share.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-01 ("installable" in `chromium`: "asserts `Page.getInstallabilityErrors` returns an empty list"); Acceptance Criteria AC-01
+EVIDENCE: The `chromium` project is `devices["Desktop Chrome"]` with Playwright 1.65.1 defaults (playwright.config.ts:19, bun.lock:146), which run headless Chromium as chromium-headless-shell. Observed with a scratch script outside the repository: on `data:text/html,<p>x</p>`, a page with no manifest, the default launch returned `{"installabilityErrors":[]}` (Chromium 159.0.8154.6). With `channel: "chromium"` and a normal context it returned `in-incognito`, `not-from-secure-origin` and `manifest-parsing-or-network-error`. With `launchPersistentContext` it returned only `not-from-secure-origin` and `manifest-parsing-or-network-error`. As written, the proof passes on a page with no manifest at all. The obvious repair of switching the channel would then fail a correct build with `in-incognito`.
+PROPOSAL: Run the installability check in Chromium (not the headless shell) with a persistent context, and add a negative control: the same call on a page without the manifest must report errors.
+
+FINDING: F-04
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation ("Switching tabs uses `history.replaceState`"); Acceptance Criteria AC-02 ("keeps the screen across reload and Back"); Test Plan AC-02 ("reload and `page.goBack()` keep or restore the screen"); Scope ("so reload, Back and links work")
+EVIDENCE: Tab switches replace the history entry, so Back after switching tabs leaves Asset Studio for whatever came before it (about:blank in a fresh Playwright page). Only opening an asset pushes an entry. AC-02 and the "tabs" row still say Back keeps or restores the screen, without saying from which state. A test writer who calls `page.goBack()` after a tab switch fails a correct build. One who calls it only after opening an asset duplicates the AC-03 check.
+PROPOSAL: State what Back does on each screen (from the Asset page it returns to the Library; from a tab it leaves the app), and make the "tabs" row assert exactly that.
+
+FINDING: F-05
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Testing and the Android emulator (android-journey.ts bullet, "`scripts/phone/journey.test.ts` checks that refusal"); Test Plan AC-12; Context > Owner summary ("the emulator checks prove ... that the script cannot submit a job to win-main"); frontmatter covers (`scripts/verify.sh`, `scripts/phone/`)
+EVIDENCE: `bun run verify` runs unit tests only with `bun test app ...` (scripts/verify.sh, step "unit tests"). Shellcheck covers only scripts/verify.sh, scripts/ci, scripts/deploy (shell_checks). The TypeScript projects include app/ paths and playwright.config.ts only (tsconfig.node.json, tsconfig.e2e.json, tsconfig.web.json). So `scripts/phone/journey.test.ts` never runs in verify or CI, `setup-emulator.sh` is never shellchecked and `android-journey.ts` is never type-checked. No Test Plan row names journey.test.ts. The guard behind an owner decision rests only on a transcript from one run.
+PROPOSAL: Say that verify.sh runs `bun test ./scripts/phone` and shellchecks `scripts/phone/*.sh`, that a tsconfig includes scripts/phone, and name journey.test.ts in the AC-12 row.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications (switch paragraph); Acceptance Criteria AC-06; Test Plan AC-06 ("notifications switch" in `phone-chromium` and `chromium`)
+EVIDENCE: "When `pushManager.subscribe` or that POST fails, the switch is off", yet after a failed POST the browser subscription remains. On the next load "the switch shows the browser's state" and re-posts, so a switch the client saw fail turns itself on. If the load-time re-post fails, the switch shows off while the server may still hold the subscription and keep notifying. Design does not say whether the page unsubscribes on failure. The Home Screen message applies to "Safari on iPhone outside an installed app", but no detection rule is given. Nor does Design say what any other browser without `PushManager` shows. The order "registers the service worker if needed, asks `Notification.requestPermission()` from the tap" puts an await before the permission request, and Safari needs that request inside the gesture. No row checks the blocked, Home Screen or unsupported states in WebKit or Firefox. conventions/frontend-testing.md asks for Firefox on "browser APIs".
+PROPOSAL: Define the failure states: unsubscribe on a failed POST, and say what the switch shows on a failed re-post. Give the detection rule and the message for browsers without Push support. Request permission first in the tap handler. Add phone-webkit and Firefox runs of the switch journey that cover those messages.
+
+FINDING: F-07
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications (service worker paragraph, "On click it focuses an open Asset Studio window and navigates it to `/?asset=<job id>`, or opens one"); Acceptance Criteria AC-06 ("tapping it opens that asset's Asset page"); Test Plan AC-06 (emulator run 1 step "notify")
+EVIDENCE: `WindowClient.navigate()` rejects for a window the service worker does not control. The page registers `/sw.js` on load, and Design names no `clients.claim()`, so the window open when the client first turns notifications on stays uncontrolled until it reloads. A click on a notification while that window is open would focus it and fail to navigate. The only proof swipes the app away first, so it exercises the `openWindow` path and never the focus-and-navigate path.
+PROPOSAL: Say that the worker calls `clients.claim()` on activate, or that it falls back to `postMessage` or `openWindow` when navigate fails. Add a check with the app window still open, for example in emulator run 1 before the swipe or in a Chromium journey.
+
+FINDING: F-08
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan AC-01 (emulator run 1 step "install": "the launcher icon opened through `adb shell monkey -p` of the installed WebAPK"); Test Plan AC-12 ("install and open standalone as in AC-01"); Design > Testing and the Android emulator (setup-emulator.sh bullet)
+EVIDENCE: The step assumes Chrome mints and installs a WebAPK package that `monkey -p` can launch. Run 1 serves the page from `http://localhost:8790`. setup-emulator.sh signs in no Google account, and Chrome falls back to a plain home-screen shortcut, which has no package, when WebAPK install does not complete. The document defines neither how the step finds the package name nor what it does if Chrome creates a shortcut, so the proof's mechanism is undefined on the environment it names.
+PROPOSAL: Say how the script finds the WebAPK package (for example `pm list packages org.chromium.webapk`) and what it does without one: tap the launcher icon through `uiautomator dump` and `input tap`, or fail with a named setup gap. Keep the `display-mode: standalone` pass condition.
+
+FINDING: F-09
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-02, AC-03 ("asset link desktop" in `chromium` and `webkit-desktop`); Design > Testing and the Android emulator
+EVIDENCE: conventions/frontend-testing.md at the pin says "Test reduced motion and 200 percent browser zoom on affected flows" and "Include Firefox for engine-sensitive behavior such as ... navigation reuse, browser APIs". No row checks reduced motion on the new Asset page or the phone shell. The URL-state journeys (`?asset=` on the desktop, popstate) and the notifications switch run without Firefox, although Firefox is the existing second desktop engine (playwright.config.ts:20).
+PROPOSAL: Add a reduced-motion check of the Asset page viewer (for example `interpolation-decay` 0 under `reducedMotion: "reduce"`), and tag the "asset link desktop" and "notifications switch" journeys `@firefox`.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (bottom tab bar paragraph); Acceptance Criteria AC-02; Test Plan AC-02
+EVIDENCE: Design gives the tab bar's icons, labels and safe-area padding, but not how the current tab is marked. guides/vh-midnight.md says "Never distinguish a required field, error or selection by colour alone". conventions/interface-colour.md lets the current item use the accent and says "Colour is never the only signal". One implementer may tint the active tab only, another may add `aria-current` and an indicator, and the "tabs" journey checks neither.
+PROPOSAL: Define the active tab as `aria-current="page"` plus a non-colour cue (for example a bar or a filled icon) in the accent, and assert `aria-current` in the "tabs" journey.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Testing and the Android emulator ("without it ... the WebKit projects skip with the launch error as the reason instead of passing or failing"); Test Plan AC-02, AC-03, AC-05, AC-07, AC-08 (rows that rely on `phone-webkit` or `webkit-desktop`)
+EVIDENCE: conventions/testing.md at the pin, which AGENTS.md routes to before claiming a run proves a change, says: "A test that needs a dependency, a service or a file fails when that dependency is missing; it does not skip and report green." Without `E2E_REQUIRE_WEBKIT`, a local `bun run verify` finishes green with every WebKit journey skipped, and the document says WebKit's libraries may be missing on fedora-43. The existing `E2E_REQUIRE_WEBGL` arrangement (app/e2e/library.spec.ts:38-40) is precedent, but the pinned convention now says otherwise. This is a conflict with repository instructions that the document does not raise.
+PROPOSAL: Make a missing WebKit fail by default, with an explicit opt-out variable that the run reports. Or raise the exception as an Open Question naming the convention.
+
+FINDING: F-12
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan AC-07 ("photos": "both inputs carry the stated `accept`, Take photo carries `capture="environment"`; two `setInputFiles` calls on Take photo leave two images chosen"); Acceptance Criteria AC-07 ("From photos adds several images")
+EVIDENCE: Nothing asserts that From photos has `multiple`, or that one From photos pick of several files adds them all to images already chosen. A From photos input without `multiple`, or one that replaces the selection as today's input does (app/web/App.tsx:328), passes the row.
+PROPOSAL: Assert `multiple` on From photos and no `multiple` on Take photo. Add a step where one Take photo file followed by a From photos pick of two files leaves three images chosen.
+
+FINDING: F-13
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("None of this has run yet, and the spec has not been reviewed."; "The message holds the asset name")
+EVIDENCE: The Review Log records spec review R-1 at `8a89924`, so "the spec has not been reviewed" is no longer true. Design > Notifications gives the payload as `{"jobId", "batchId", "name"}`, which is more than the asset name.
+PROPOSAL: Say that R-1 found 1 blocking and 14 should-fix findings, all folded in, and that a new review is pending. Say the encrypted message holds the asset name and its job and batch IDs.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan AC-05 (emulator run 2 step "AR load": "from the emulator's tailnet address")
+EVIDENCE: The emulator has no tailnet address. Its traffic leaves through the emulator's NAT on fedora-43, so win-main sees fedora-43's node, the same address Chrome on the emulator uses. Behind `tailscale serve` the logged address is the last X-Forwarded-For value only when the socket peer is trusted (app/server/auth.ts:52-62). Only the user agent tells Scene Viewer's fetch from Chrome's.
+PROPOSAL: Say "from fedora-43's tailnet address (or the address the server logs for it) with a user agent that is not Chrome's".
 
 ### R-1
 
