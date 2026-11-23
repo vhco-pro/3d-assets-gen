@@ -32,6 +32,9 @@ Needs Bun 1.4, Docker and python3. Commands, from the repository root:
 - `bun run verify`: every check, including the image build and the Playwright journeys; CI runs it.
 - `scripts/deploy/deploy.sh <version>` and `scripts/deploy/rollback.sh`: deploy to or roll back win-main.
 - `bun run clean`: delete `.dev-data/` and `.artifacts/`.
+- `scripts/phone/setup-emulator.sh` and `bun scripts/phone/android-journey.ts --run 1|2`: the Android emulator
+  journey (agent-run, never CI); run 2 against win-main submits no job. `E2E_SKIP_WEBKIT=1` leaves the WebKit
+  journeys out on a host without WebKit's libraries, and such a run is never WebKit evidence.
 
 `scripts/generate_3d.py` is the reference pipeline; `bun run golden:check` holds the TypeScript graph
 builders to it. The deploy and check scripts follow conventions/terminal-output.md through

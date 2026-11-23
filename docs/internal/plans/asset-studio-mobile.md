@@ -716,7 +716,8 @@ opens the app.
 
 - [ ] T26 `scripts/phone/setup-emulator.sh` - user-local SDK under `~/.local/share/android-sdk`, the API 35 Play Store image, the `asset-studio` AVD, the ARCore emulator APK with its checksum checked, Chrome's command-line flag and the Chrome 105 check; a run on fedora-43 prints every check as passed, a second run changes nothing, and shellcheck passes (AC-01, AC-05, AC-12)
 
-- [ ] T27 `README.md`, `AGENTS.md` - installing on Android and iPhone through the browser menu, signing in once inside the installed iPhone app, the notifications switch, and the `scripts/phone/` commands; both files name them (Design)
+- [x] T27 `README.md`, `AGENTS.md` - installing on Android and iPhone through the browser menu, signing in once inside the installed iPhone app, the notifications switch, and the `scripts/phone/` commands; both files name them (Design)
+      Evidence: `bun test ./app/docs` 11 pass 0 fail (every named command and script path exists; the seven commands, dependencies and owner checklist are still there). The README describes Quality, installing on Android (Chrome menu) and iPhone (Share, Add to Home Screen, sign in once inside the app), the notifications switch, `E2E_SKIP_WEBKIT` and the two `scripts/phone/` commands; AGENTS.md lists the phone commands and the WebKit skip rule.
 
 - [ ] T28 `docs/internal/plans/asset-studio-mobile.md`, `docs/internal/evidence/asset-studio-mobile/run-1/` - emulator run 1 against `bun run dev` through `adb reverse` (install, zoom, keyboard, AR launch, notify, camera, share), with the transcript and screenshots committed and cited under each criterion (AC-01, AC-02, AC-05, AC-06, AC-07, AC-08)
 
