@@ -1,6 +1,6 @@
 ---
 status: draft
-status_description: "Revised for spec review R-17; waiting for a new spec review, then acceptance."
+status_description: "Revised for spec review R-18; waiting for a new spec review, then acceptance."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
 covers:
@@ -56,8 +56,8 @@ win-main. You do one final check on your iPhone against the prerelease. None of 
 review R-1 found 1 blocking and 14 should-fix findings, R-2 found 12 should-fix findings, R-3 found 2
 blocking and 4 should-fix findings, R-4, R-5 and R-6 found 2 should-fix findings each, R-7 found 1,
 R-8 found 5, R-9 found 1 blocking and 2 should-fix findings, R-10 found 1 should-fix finding, R-11 found 2,
-R-12 to R-15 found 1 each, R-16 found 1 blocking and 1 should-fix finding, and R-17 found 1 should-fix
-finding; all
+R-12 to R-15 found 1 each, R-16 found 1 blocking and 1 should-fix finding, and R-17 and R-18 found 1 should-fix
+finding each; all
 are folded in, and a new review is pending.
 
 Your decisions, all as recommended: the Quality pairs above, on every layout; tabs below 1024 pixels;
@@ -616,7 +616,10 @@ into Firefox), `webkit-desktop` runs `@webkit` journeys, and `phone-chromium` (P
 journeys tagged `@mobile-only`. Design > Testing and the Android emulator gives the selection. A
 journey listed only for phone projects carries `@mobile-only`; one listed for `phone-chromium` alone
 carries `@android` instead of `@phone`, and one listed for `phone-webkit` alone carries `@ios` instead of
-`@phone` (the AC-05 no-`ar-link` check and the AC-06 Home Screen check).
+`@phone` (the AC-05 no-`ar-link` check and the AC-06 Home Screen check). A step that starts "from
+`about:blank`" first calls `page.goto("about:blank")`, so a committed `about:blank` entry exists (Firefox
+replaces a new page's initial entry on the first `goto`), then reads any `history.length` baseline and
+opens the app.
 
 | Criterion | Proof |
 | --- | --- |
