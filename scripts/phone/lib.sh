@@ -111,11 +111,11 @@ ui_tap() {
 chrome_open() {
   local url="$1" i
   "$ADB" shell am start -n "$CHROME_MAIN" > /dev/null
-  for ((i = 0; i < 12; i++)); do
+  # Taps through Chrome's first-run screens until the address bar shows.
+  for ((i = 0; i < 20; i++)); do
     sleep 2
-    if ! ui_tap '^(Use without an account|Accept & continue|No thanks|No, thanks|Got it|Continue|Skip)$'; then
-      [[ $i -ge 2 ]] && break
-    fi
+    [[ -n "$(ui_find '^com\.android\.chrome:id/(url_bar|search_box_text)$')" ]] && break
+    ui_tap '^(Use without an account|Accept & continue|No thanks|No, thanks|Got it|Continue|Skip)$' || true
   done
   # Chrome refuses chrome:// URLs from intents, so the URL is typed into the address bar.
   ui_tap '^(com\.android\.chrome:id/(url_bar|search_box_text)|Search or type URL)$' || return 1

@@ -163,15 +163,15 @@ async function signedIn(page: Page): Promise<boolean> {
   return page.getByRole("navigation", { name: "Screens" }).isVisible();
 }
 
-/** The Asset Studio page in Chrome: the standalone app window once installed, otherwise the newest tab. */
-async function appPage(ctx: StepContext): Promise<Page> {
-  return until("an Asset Studio page", async () => {
-    const pages = ctx.context.pages().filter((p) => p.url().startsWith(ctx.baseUrl));
-    for (const p of pages.reverse()) {
+/** The installed app's standalone window on this run's origin, or null when none has opened within `ms`. */
+async function standalonePage(ctx: StepContext, ms: number): Promise<Page | null> {
+  return until("the standalone Asset Studio window", async () => {
+    for (const p of ctx.context.pages()) {
+      if (p.isClosed() || !p.url().startsWith(ctx.baseUrl)) continue;
       if (await p.evaluate(() => matchMedia("(display-mode: standalone)").matches).catch(() => false)) return p;
     }
-    return pages[0] ?? null;
-  }, 30_000);
+    return null;
+  }, ms).catch(() => null);
 }
 
 /**
@@ -276,8 +276,12 @@ export const STEPS: Step[] = [
       ctx.log(`menu item: ${item}`);
       await sleep(2000);
       await until("the install confirmation", async () => (await uiTap(ctx, /^(Install|Add)$/)) || null, 20_000);
-      await sleep(8000);
-      await uiTap(ctx, /^(Add automatically|Add to home screen|Add)$/);
+      // Without a WebAPK, the launcher asks to place Chrome's shortcut; that sheet can take a while to appear.
+      await until("the WebAPK or the launcher's add sheet", async () => {
+        if (/package:org\.chromium\.webapk/.test(await ctx.adb("shell", "pm", "list", "packages", "org.chromium.webapk"))) return true;
+        return (await uiTap(ctx, /^(Add automatically|Add to home screen)$/)) || null;
+      }, 60_000, 2000).catch(() => null);
+      await sleep(2000);
       const webapk = await until("Chrome's install to finish", async () => {
         const out = await ctx.adb("shell", "pm", "list", "packages", "org.chromium.webapk");
         const pkg = /package:(org\.chromium\.webapk\.\S+)/.exec(out)?.[1];
@@ -286,19 +290,34 @@ export const STEPS: Step[] = [
       }, 60_000, 2000).catch(() => "shortcut");
       await ctx.adb("shell", "input", "keyevent", "KEYCODE_HOME");
       await sleep(2000);
+      let app: Page | null = null;
       if (webapk !== "shortcut") {
         ctx.log(`opened through its WebAPK ${webapk} with monkey -p`);
         await ctx.adb("shell", "monkey", "-p", webapk, "1");
+        app = await standalonePage(ctx, 45_000);
       } else {
+        // The launcher may hold an icon from an earlier run against another origin; each Asset Studio icon is
+        // tried until the standalone window on this run's origin opens.
         ctx.log("Chrome made a home-screen shortcut; tapping the Asset Studio launcher icon");
-        await until("the Asset Studio icon", () => uiTap(ctx, /^Asset Studio$/), 20_000);
+        const icons = (await uiNodes(ctx)).filter((n) => n.text === "Asset Studio" || n.desc === "Asset Studio");
+        for (const icon of icons) {
+          const [x1, y1, x2, y2] = icon.bounds;
+          await ctx.adb("shell", "input", "tap", String(Math.round((x1 + x2) / 2)), String(Math.round((y1 + y2) / 2)));
+          app = await standalonePage(ctx, 30_000);
+          if (app) break;
+          await ctx.adb("shell", "input", "keyevent", "KEYCODE_HOME");
+          await sleep(2000);
+        }
+        if (icons.length === 0) throw new Error("no Asset Studio icon on the home screen");
       }
-      await sleep(5000);
-      ctx.page = await appPage(ctx);
-      const standalone = await ctx.page.evaluate(() => matchMedia("(display-mode: standalone)").matches);
-      ctx.log(`display-mode standalone: ${String(standalone)}`);
+      if (!app) {
+        await ctx.shot("installed");
+        throw new Error("the app did not open standalone");
+      }
+      ctx.page = app;
+      await ctx.page.waitForLoadState();
+      ctx.log("display-mode standalone: true");
       await ctx.shot("installed");
-      if (!standalone) throw new Error("the app did not open standalone");
     },
   },
   {
@@ -440,8 +459,11 @@ export const STEPS: Step[] = [
       }
       const posted = page.waitForResponse((r) => r.url().endsWith("/api/push/subscriptions") && r.request().method() === "POST", { timeout: 60_000 });
       await tapElement(ctx, sw);
-      await sleep(1500);
-      if (await uiTap(ctx, /^Allow$/)) ctx.log("Android asked for notification permission; tapped Allow");
+      // The site's permission prompt, then (when Chrome itself may not notify yet) Android's prompt for Chrome.
+      for (let i = 0; i < 4; i++) {
+        await sleep(2000);
+        if (await uiTap(ctx, /^Allow$/)) ctx.log("a notification permission prompt appeared; tapped Allow");
+      }
       const res = await posted;
       ctx.log(`POST /api/push/subscriptions answered ${String(res.status())}`);
       await ctx.shot("notifications-on");
