@@ -791,6 +791,17 @@ None.
 | 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied with the owner's answer (Android downloads on tap, no prefetch) |
 | 2026-11-23 | R-21 | spec | `88427a5` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied |
 | 2026-11-23 | R-22 | spec | `0bf380e` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer (no share attempt in Chromium-based browsers) |
+| 2026-11-23 | R-23 | spec | `571f9e0` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix |
+
+### R-23
+
+TARGET: 571f9e0909e560f9bb63e2f9dbdac76ffe9f8ce3
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-08 (the second "share" journey: "in `phone-webkit` and, for the Preview dialog, `firefox` (`@firefox`)", and "in `phone-webkit` and `firefox` only (Chromium makes no prefetch)"); Test Plan introduction ("A journey listed only for phone projects carries `@mobile-only`"); Design > Testing and the Android emulator ("`chromium` runs every journey without `@mobile-only`", "A journey that needs the phone shell carries `@mobile-only` as well, so it never runs at the desktop size", "Each Test Plan row's project list is the set of tags its journeys carry"); Tasks T33 ("in `phone-webkit` and `firefox` the share sheet stubs")
+EVIDENCE: This revision (571f9e0) moved `chromium` out of the share sheet journey, which before listed "`phone-webkit` and, for the Preview dialog, `chromium` and `firefox`". Under the stated selection, no tag set gives `phone-webkit` plus `firefox` without `chromium`. `playwright.config.ts` at HEAD has `chromium` with only `grepInvert: /@mobile-only/`, `firefox` with `grep: /@firefox/` and `phone-webkit` with `grep: /@phone|@ios/`. Tagging the journey `@ios @firefox`, as the row's project list implies, also runs it in `chromium`, whose desktop Chrome user agent contains `Chrome/`; there a correct build calls no `canShare` and makes no prefetch, so the journey's "calls `canShare` with an empty `.glb` file and then fetches the GLB once" fails on correct code. The only mechanical way out is adding `@mobile-only`, but the Test Plan reserves that tag for journeys "listed only for phone projects" and the Design defines it as "needs the phone shell", while this journey runs in `firefox` at the desktop size. One implementer tags it `@ios @firefox` and `chromium` fails; another adds `@mobile-only` against the stated meaning; a third adds `test.skip` by project name, the ad hoc selection R-5 F-01 (stored in this document) had the scheme replace. This is the same class of gap R-5 F-01 found for `phone-webkit`-only journeys.
+PROPOSAL: Give the scheme a way to name this list, for example a `@no-chromium` tag added to the `chromium` project's `grepInvert` (and stated in Design > Testing and the Test Plan introduction), or widen the meaning of `@mobile-only` to "never in the desktop `chromium` project" in both places; then name the tags for the AC-08 journeys in the row and T33.
 
 ### R-22
 
