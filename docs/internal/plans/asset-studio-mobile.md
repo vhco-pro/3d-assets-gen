@@ -784,6 +784,44 @@ None.
 | 2026-11-23 | R-19 | spec | `145dc76` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
 | 2026-11-23 | R-19 | spec | `145dc76` | n/a | n/a | accepted by owner |
 | 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied with the owner's answer (Android downloads on tap, no prefetch) |
+| 2026-11-23 | R-21 | spec | `88427a5` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits |
+
+### R-21
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T28, and the new T33 and T34 placed after T31)
+EVIDENCE: The standard says tasks are ordered "by dependency, failing test first" and that re-planning "changes only the unchecked tail", so the unchecked tail may be reordered. T28 is emulator run 1, and its list includes the "share" step. The AC-08 row says that step passes when "on Android the download path runs" and the file appears in `/sdcard/Download`. At 88427a5, `app/web/share.tsx` has no Android rule. Chrome 124 on the AVD answers the empty-file probe true (Design > Share GLB quotes this), so the page prefetches, the tap calls `navigator.share`, Chrome rejects with `NotAllowedError`, and the catch at `share.tsx` shows `SHARE_FAILED` with no download. So run 1's share step cannot pass until T34 lands. The revision put T33 and T34 after T31, behind T28, T29 and T30. An implementer who follows the Tasks in order runs T28 against a page whose share step fails.
+PROPOSAL: Move T33 and T34 ahead of T28 in the unchecked tail, keeping their IDs, so the page change lands before emulator run 1.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-08 ("in every stub mode below, opening the Asset page calls no `canShare` and makes no `model.glb` request before the tap, and Share GLB starts a download ..."; "with the first `model.glb` request (the prefetch) failing with 500 and `canShare` accepting, Share GLB is enabled and its tap starts the download"); Tasks T33 ("a download with `Saved to your downloads.` in every mode")
+EVIDENCE: "Every stub mode below" covers whatever text follows. That text includes the new failed-prefetch case, which this revision added (R-20 F-03), and it is written as a route that fails the first `model.glb` request. On Android there is no prefetch. So the first `model.glb` request is the tap's own download (`window.location.assign` at `app/web/share.tsx`), and with a 500 route there is no Playwright `download` event. The browser navigates to the error answer instead. In `app/e2e/phone.spec.ts` at 88427a5 the modes are a `ShareMode` loop (`"accept" | "abort" | "not-allowed" | "refuse" | "absent"`). Adding the failed prefetch as one more loop mode is the obvious way to write it, and that version would fail a correct Android implementation in `phone-chromium`. Another implementer would leave that case out on Android. The two readings give different tests, and one of them fails correct code.
+PROPOSAL: Name the modes the Android sentence covers, for example "in each of the accept, `AbortError`, `NotAllowedError`, `DataError`, refuse and absent stubs". Say that the failed-prefetch case runs only in `phone-webkit`, `chromium` and `firefox`, and match the wording in T33.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Share GLB ("When the browser's user agent names Android, Share GLB does not try the share sheet."; "So on Android the page fetches nothing ahead of time"); Test Plan AC-08 (the `phone-chromium` sentence and the "for the Preview dialog, `chromium` and `firefox`" sentence)
+EVIDENCE: The Android rule covers Share GLB in both views. The Design's Share GLB section starts with the Android rule and then describes "the Asset page or the Preview dialog". A browser with an Android user agent sees the Preview dialog at 1024 CSS pixels and wider, for example an Android tablet in landscape. The AC-08 row checks the Android rule only in `phone-chromium`, which shows the phone shell and its Asset page. The Preview dialog cases run in `chromium` and `firefox` with desktop user agents. An implementation that applied the Android rule only on the Asset page would pass every listed check. Today both views use the one `ShareButton` in `app/web/share.tsx`, so the risk is small, but the proof does not pin it down.
+PROPOSAL: Add one case to the AC-08 row, for example `chromium` at 1280x720 with an Android user agent: opening the Preview dialog calls no `canShare` and makes no `model.glb` request, and Share GLB downloads. Or narrow the Design rule to the views the proof covers.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-08 ("Share GLB opens the system share sheet with the GLB file where the browser can share files of that type, and otherwise downloads the GLB"); Design > Share GLB (the Android rule); Context > Owner summary ("on Android Share GLB skips the share attempt")
+EVIDENCE: The revision makes every browser whose user agent names Android skip the share sheet, whatever it can share. The criterion text is unchanged and still promises the share sheet wherever the browser can share `.glb` files. That holds for the Chrome 124 the Design observed. It would not hold for an Android browser that can share `.glb` files, which the Design does not cover. The owner's choice is in the summary and the Design, but not in the criterion.
+PROPOSAL: Word AC-08 to match the decision, for example "... where the browser can share files of that type and is not on Android, and otherwise downloads the GLB and says `Saved to your downloads.`"
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("Spec review R-1 found ... and R-17 and R-18 found 1 should-fix finding each; all are folded in. R-19 at `145dc76` is clean, with one nit (a line citation) left as the nit rule allows.")
+EVIDENCE: The review tally stops at R-19. The Review Log row for R-20 (`90c0f6b`) says "0 blocking, 3 should-fix, 2 nits; all applied with the owner's answer". The standard asks that the summary be refreshed when proof or decisions change, and that it explain material changes since the last accepted scope. The paragraph that starts "During implementation the Android emulator showed" gives the decision but not the R-20 count.
+PROPOSAL: Add one clause after the R-19 sentence, for example "R-20 at `90c0f6b` found 3 should-fix findings and 2 nits on the Share GLB revision, all applied."
 
 ### R-20
 
