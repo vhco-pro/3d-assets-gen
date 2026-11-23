@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Spec review R-19 is clean (one nit); waiting for the owner's acceptance."
+status: planned
+status_description: "Accepted by the owner on R-19; ready for tasks and implementation."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
 covers:
@@ -667,6 +667,7 @@ None.
 | 2026-11-23 | R-17 | spec | `e770962` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; all applied |
 | 2026-11-23 | R-18 | spec | `5ce2f43` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
 | 2026-11-23 | R-19 | spec | `145dc76` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
+| 2026-11-23 | R-19 | spec | `145dc76` | n/a | n/a | accepted by owner |
 
 ### R-19
 
