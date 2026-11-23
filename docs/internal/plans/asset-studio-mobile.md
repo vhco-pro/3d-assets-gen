@@ -644,6 +644,16 @@ None.
 | 2026-11-23 | R-11 | spec | `09015b5` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix; met by removing the pending-history rule (R-10) and keeping desktop tiles state-only, as the owner chose |
 | 2026-11-23 | R-12 | spec | `da24564` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; F-01 met by removing asset carry-over across 1024 pixels, as the owner chose; nits applied |
 | 2026-11-23 | R-13 | spec | `1e6b63b` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer |
+| 2026-11-23 | R-14 | spec | `600a13d` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix |
+
+### R-14
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (URL paragraph: "The `?export=gone` notice keeps working in both layouts"; "`?tab=create` (the default when absent)"; phone shell paragraph: "The ComfyUI banners show above the screen content in both layouts"; Library paragraph: "a Select button that turns the tiles into checkboxes with Select all and Download selected"); Context > Background ("the only URL state is `?export=gone` (`app/web/App.tsx:159`)"); Acceptance Criteria AC-02, AC-03; Test Plan AC-02, AC-03
+EVIDENCE: On the phone shell, Download selected sits on the Library tab. When the selection changes before the zip is fetched, the server answers the export GET with `302` to `/?export=gone` (app/server/export.ts:212), so the browser loads a URL with no `?tab=`, and Design's default puts the client on Create, away from the Library the notice tells them to use ("Select the assets again and download them.", app/web/App.tsx:159). Today's Dismiss also calls `window.history.replaceState(null, "", "/")` (app/web/App.tsx:189), so in the phone shell it would drop any `?tab=` the client has since chosen and send them back to Create. Design does not say which tab the phone shell shows for `?export=gone`, where the notice renders there (it names only the ComfyUI banners), whether a tab switch keeps or drops `export=gone` from the query, or what URL Dismiss writes. One implementer keeps the code as it is (Create, Dismiss to `/`), another opens the Library and keeps `?tab=` on Dismiss. No Test Plan row opens `/?export=gone` at a phone size (`grep -rn "export=gone" app/e2e` finds nothing), so both builds pass. This does not trace to the R-13 revision. Its diff only changed the widening URL to `?tab=library` and added the resize-back and `history.length` checks, and I found nothing wrong with those.
+PROPOSAL: State that below 1024 pixels `?export=gone` opens the Library tab with the notice above the screen content, and that Dismiss replaces the URL with the current `?tab=` and without `export`. Add a step to the AC-03 "asset page" journey (or to "tabs"): open `/?export=gone` in `phone-chromium` and `phone-webkit`, assert the Library tab and the notice, dismiss it, and assert the URL is `?tab=library`.
 
 ### R-13
 
