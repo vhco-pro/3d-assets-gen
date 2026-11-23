@@ -1,7 +1,8 @@
 ---
-status: planned
-status_description: "Accepted by the owner on R-19; ready for tasks and implementation."
+status: in-progress
+status_description: "Being implemented on feat/asset-studio-mobile."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
+branch: feat/asset-studio-mobile
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
 covers:
   - app/
