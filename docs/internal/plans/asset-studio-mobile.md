@@ -53,7 +53,9 @@ the session cookie. There is no database migration, so a rollback to v0.2.0 keep
 Planned proof: unit tests for the push encryption (against the RFC 8291 example) and the signed link;
 Playwright journeys at phone sizes in Chromium and in WebKit, Safari's engine; and an agent-run procedure
 on an Android emulator on fedora-43, first against a local stack and then against the prerelease on
-win-main. You do one final check on your iPhone against the prerelease. None of this has run yet. Spec
+win-main. You do one final check on your iPhone against the prerelease. So far the unit tests, the
+Playwright suite in every project and the emulator setup have run (Tasks T1 to T27); the emulator runs, the
+rollback procedure and your iPhone check are recorded under the criteria as they complete. Spec
 review R-1 found 1 blocking and 14 should-fix findings, R-2 found 12 should-fix findings, R-3 found 2
 blocking and 4 should-fix findings, R-4, R-5 and R-6 found 2 should-fix findings each, R-7 found 1,
 R-8 found 5, R-9 found 1 blocking and 2 should-fix findings, R-10 found 1 should-fix finding, R-11 found 2,
@@ -98,9 +100,11 @@ sixteenth review that the page reads the notice's marker once on load and cleans
 so Dismiss only hides the notice and Back never brings it back.
 
 During implementation the Android emulator showed that Chrome on Android answers yes when asked whether
-it can share a `.glb` file and then refuses the share. You chose that a refused share downloads the file
-and says it was saved, as the no-share case does; a closed share sheet still shows nothing, and other
-failures still point to Download. This revision changes only that rule and its tests.
+it can share a `.glb` file and then refuses the share. You chose that on Android Share GLB skips the share
+attempt and downloads the file on the tap, with no download ahead of time, so opening an asset on the phone
+does not fetch the GLB twice. On other browsers a share the browser refuses also downloads the file and
+says it was saved, a closed share sheet shows nothing, other failures point to Download, and a failed
+advance fetch falls back to the download. This revision changes only the Share GLB rules and their tests.
 
 Accepting the spec authorizes the implementation on a feature branch, prerelease deploys to win-main
 (which replace the running v0.2.0 for the client while testing), the rollback test there, the merge and
@@ -353,27 +357,31 @@ AR mode model-viewer can activate: `quick-look` on iOS and iPadOS, `scene-viewer
 
 ### Share GLB
 
-When the Asset page or the Preview dialog opens and the browser has `navigator.share` and
+When the browser's user agent names Android, Share GLB does not try the share sheet. Chrome on Android does
+not share `.glb` files, but it does not say so up front: on the emulator's Chrome 124.0.6367.219 a real
+click answered `canShare` true for a `.glb` `File` (and for one typed `application/octet-stream`), then
+`navigator.share` rejected with `NotAllowedError: Permission denied`. That was observed on 2026-11-23 in a
+Playwright `_android` session on the AVD (`device.launchBrowser()`, a test button added to the page whose
+click handler called `navigator.canShare` and `navigator.share` with an 8-byte `.glb` `File`), which printed
+`["canShare glb true, png true, glb as octet true","rejected NotAllowedError: Permission denied"]`. So on
+Android the page fetches nothing ahead of time; tapping Share GLB starts the download of
+`/api/assets/<id>/model.glb` as Download does and shows `Saved to your downloads.`
+
+On other browsers, when the Asset page or the Preview dialog opens and the browser has `navigator.share` and
 `navigator.canShare`, the page first asks
 `navigator.canShare({ files: [new File([], "<slug>-<short id>.glb", { type: "model/gltf-binary" })] })`
 with an empty file. Only when that is true does it fetch the GLB from `/api/assets/<id>/model.glb` with the cookie into a
 `File` named `<slug>-<short id>.glb` with type `model/gltf-binary` (the name the server's
 `Content-Disposition` gives) and keeps it while the view is open. Share GLB is enabled once that file is
-ready (`Preparing…` until then). Tapping it calls `navigator.canShare({ files: [file] })` and, when that is
-true, `navigator.share({ files: [file], title: <name> })` synchronously in the tap handler, so the
-gesture's activation still holds. A rejected share with `AbortError` (the user closed the sheet) shows
-nothing. A rejection with `NotAllowedError` (the browser refuses to share this file) starts the download
-of `/api/assets/<id>/model.glb` as Download does and shows `Saved to your downloads.` Any other rejection
-shows `Sharing did not work. Use Download instead.` When the browser has no `navigator.share`, or
-`canShare` is false, Share GLB starts the same download and shows `Saved to your downloads.`; on those
-browsers the page does not prefetch the file.
-
-Chrome on Android does not share `.glb` files, but it does not say so up front: on the emulator's Chrome
-124.0.6367.219, a real click answered `canShare` true for a `.glb` `File` (and for one typed
-`application/octet-stream`), then `navigator.share` rejected with `NotAllowedError: Permission denied`
-(`scripts/phone` probe run on 2026-11-23, output
-`["canShare glb true, png true, glb as octet true","rejected NotAllowedError: Permission denied"]`). So on
-Android the page prefetches the file, the share is refused, and the download path runs from the rejection.
+ready (`Preparing…` until then). When that fetch fails (a network error or a non-2xx answer), Share GLB is
+enabled and its tap starts the download and shows `Saved to your downloads.` Tapping it with the file
+ready calls `navigator.canShare({ files: [file] })` and, when that is true,
+`navigator.share({ files: [file], title: <name> })` synchronously in the tap handler, so the gesture's
+activation still holds. A rejected share with `AbortError` (the user closed the sheet) shows nothing. A
+rejection with `NotAllowedError` (the browser refuses to share this file) starts the download and shows
+`Saved to your downloads.` Any other rejection shows `Sharing did not work. Use Download instead.` When the
+browser has no `navigator.share`, or `canShare` is false, Share GLB starts the same download and shows
+`Saved to your downloads.`; on those browsers the page does not prefetch the file.
 
 ### Notifications
 
@@ -644,7 +652,7 @@ opens the app.
 | AC-05 | `app/server/arlink.test.ts`: a link from `ar-link` fetches the GLB with no cookie (200, GLB bytes) and logs one line with the job ID and user agent; the same link after the clock passes `exp`, with one changed character in `sig`, with another job's ID, and after the token changes answers 401; a bad signature counts toward the failure limit; `ar-link` for an unknown or failed job answers 404. `app/e2e/phone.spec.ts` asserts no View in your room button in `chromium`, `firefox` and `webkit-desktop`; "ar link" in `phone-chromium` with an Android user agent and model-viewer's `canActivateAR` forced true: opening the Asset page requests one `ar-link`; with the page clock advanced 10 minutes it requests another and the viewer's `src` stays `/api/assets/<id>/model.glb` with no reload; tapping View in your room makes exactly one request matching `^intent:` (captured with `page.waitForRequest`, then counted through the `request` event for two seconds), whose decoded `file` parameter equals the latest link resolved against the page's origin, `exp` and `sig` included (and no `sig` parameter appears outside `file`), with no other request between the tap and it; the button's listener is native, which the test checks by asserting the single intent request with model-viewer's own container listener active (no forced `canActivateAR` in this case, the Pixel 7 profile's Android user agent makes model-viewer choose `scene-viewer`); with the `ar-link` route failing, the button is disabled with `AR is not available right now.`; in `phone-webkit` with `canActivateAR` forced true, opening the Asset page requests no `ar-link`. Emulator run 1 step "AR launch": tap View in your room; pass when `logcat` shows an `android.intent.action.VIEW` for `arvr.google.com/scene-viewer` whose decoded `file` is the absolute signed URL. Emulator run 2 step "AR load": wait 16 minutes on the Asset page, tap View in your room; pass when the server log on win-main (read with `docker logs` over the deploy connection) has a signed-link line for that job, written after the tap, from fedora-43's tailnet address (or the address the server logs for it) with a user agent that is not Chrome's, and a screenshot shows Scene Viewer displaying the model. |
 | AC-06 | `app/server/push.test.ts`: the RFC 8291 section 5 example encrypts to the published ciphertext; a VAPID JWT verifies with the public key and has `sub` `https://github.com/vhco-pro/3d-assets-gen`; marking a job done POSTs one encrypted message to the fake push service that decrypts to `{"jobId","batchId","name"}`; a 410 deletes the subscription; a subscription with an old token fingerprint gets nothing and is deleted; an invalid body answers 422 naming the field; a job with a 2000-character CJK prompt produces a payload whose plaintext is under 3993 bytes and decrypts to the first 80 characters; a second `done` update that changes no row sends nothing; concurrent subscribe and delete calls leave a valid file. `app/e2e/phone.spec.ts` "notifications switch" in `phone-chromium`, `chromium` and `firefox` (`@firefox`): with `Notification.permission` and `requestPermission` stubbed to `granted` and `pushManager.subscribe` answered by a stub, turning the switch on calls `requestPermission` before any other awaited call, posts the subscription, and off deletes it; with the permission stubbed to `denied`, the blocked message shows; a failing POST calls `unsubscribe` on the stub and turns the switch off with its message; after the test deletes the subscription on the server, a reload posts it again; after the stubbed subscription's `options.applicationServerKey` is changed to differ from the server's key, a reload calls `unsubscribe`, then `subscribe` with the server's key, then posts once; with that `subscribe` stub rejecting, the reload leaves the switch off with `Notifications could not be turned on. Try again.`; in `chromium` on its own stack started with `startStack(<name>, "empty")` (no jobs, so the queue is hidden), the switch is still shown above the Library; no job on the shared stack is cancelled for this; a failing re-post on load keeps the switch on with `Could not reach Asset Studio; notifications may not arrive.` In `phone-webkit` (iPhone user agent, not standalone) with both `Notification` and `PushManager` deleted from `window` by an init script before load, the Home Screen message shows and the page logs no error; in `phone-chromium` with `PushManager` deleted before load, `This browser cannot show notifications.` shows. In `chromium`, after the first registration the page has `navigator.serviceWorker.controller` set without a reload. Emulator run 1 step "notify": turn notifications on, submit one Fast prompt, open the recent-apps screen with `adb shell input keyevent KEYCODE_APP_SWITCH` and swipe the Asset Studio task away with `adb shell input swipe` (never `am force-stop`), wait for the fake to finish it; pass when `adb shell dumpsys notification --noredact` lists `Asset Studio` with `<prompt> is ready.` within 60 seconds; then `adb shell cmd statusbar expand-notifications`, find the notification's bounds in `uiautomator dump` and tap it with `adb shell input tap`; pass when the app opens on `/?asset=<that job id>`. Before that, with the app still open in the foreground, a first job's notification is tapped the same way and the open app moves to `/?asset=<that job id>` without a second app window (`dumpsys activity recents` lists one Asset Studio task). Then turn notifications off, submit another prompt and assert no new notification within 60 seconds after it finishes. |
 | AC-07 | `app/e2e/phone.spec.ts` "photos" in `phone-chromium`, `phone-webkit` and, for the desktop buttons, `chromium` and `firefox` (`@firefox`): both inputs carry the stated `accept`, Take photo carries `capture="environment"` and no `multiple`, From photos carries `multiple` and no `capture`; two `setInputFiles` calls on Take photo leave two images chosen; one more Take photo file followed by one From photos pick of two files leaves three images chosen when started from none; a GIF is refused with the message; Generate creates two image jobs. Emulator run 1 step "camera": tap Take photo, press the emulator camera's shutter and confirm through `adb shell input`, then assert `1 image chosen` and that Generate creates one image job. |
-| AC-08 | `app/e2e/phone.spec.ts` "share" in `phone-chromium`, `phone-webkit` and, for the Preview dialog, `chromium` and `firefox` (`@firefox`): with `navigator.share` and `navigator.canShare` stubbed to accept files, opening the view calls `canShare` with an empty `.glb` file and then fetches the GLB once, Share GLB is enabled after that, and tapping it calls `navigator.share` with one `File` named `<slug>-<short id>.glb` of type `model/gltf-binary` with no request between the tap and the call; a stub rejecting with `AbortError` shows nothing; one rejecting with `NotAllowedError` starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with that file name) and shows `Saved to your downloads.`; one rejecting with `DataError` shows `Sharing did not work. Use Download instead.`; with it stubbed to refuse or absent, opening the view makes no `model.glb` request before the tap, and Share GLB starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with that file name) and shows `Saved to your downloads.` Emulator run 1 step "share": Chrome on Android refuses GLB files (it answers `canShare` true, then `share` rejects with `NotAllowedError`), so the download path runs; pass when the file appears in `/sdcard/Download` with the GLB's size. |
+| AC-08 | `app/e2e/phone.spec.ts` "share" in `phone-chromium` (the Pixel 7 profile's Android user agent): in every stub mode below, opening the Asset page calls no `canShare` and makes no `model.glb` request before the tap, and Share GLB starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with the file name `<slug>-<short id>.glb`) and shows `Saved to your downloads.` "share" in `phone-webkit` and, for the Preview dialog, `chromium` and `firefox` (`@firefox`): with `navigator.share` and `navigator.canShare` stubbed to accept files, opening the view calls `canShare` with an empty `.glb` file and then fetches the GLB once, Share GLB is enabled after that, and tapping it calls `navigator.share` with one `File` named `<slug>-<short id>.glb` of type `model/gltf-binary` with no request between the tap and the call; a stub rejecting with `AbortError` shows nothing; one rejecting with `NotAllowedError` starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with that file name) and shows `Saved to your downloads.`; one rejecting with `DataError` shows `Sharing did not work. Use Download instead.`; with it stubbed to refuse or absent, opening the view makes no `model.glb` request before the tap, and Share GLB starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with that file name) and shows `Saved to your downloads.`; with the first `model.glb` request (the prefetch) failing with 500 and `canShare` accepting, Share GLB is enabled and its tap starts the download and shows `Saved to your downloads.` Emulator run 1 step "share": on Android the download path runs; pass when the file appears in `/sdcard/Download` with the GLB's size. |
 | AC-09 | `app/server/store.test.ts` asserts the migration list still has 2 entries. `app/server/push.test.ts` "reload": a server started on an existing `push.json` sends with the stored keys to the stored subscription. Written procedure after emulator run 2, run by the agent: record the set of job IDs from `GET /api/jobs`, the `schema-version` of both images (both 2), the `GET /api/push/key` public key and the subscription endpoints in `push.json` on win-main; run `scripts/deploy/rollback.sh` to v0.2.0 and assert every recorded job ID is still listed (new IDs are allowed); deploy the prerelease again and assert every recorded job ID is still listed, the public key is the same and every recorded endpoint is still in `push.json`. |
 | AC-10 | `app/e2e/glossary.spec.ts` in `chromium` and `phone-chromium`: asserts each new term appears with its element (the Quality group label and its four items, the three tab labels, Share GLB, Download, Remix and Delete on the Asset page, the two photo buttons, the switch label) and that `Detail` and `Texture` do not; in `phone-chromium` with an Android user agent and `canActivateAR` forced true, the Asset page shows View in your room. |
 | AC-11 | `bun run size` in `bun run verify`, unchanged budget. |
@@ -741,6 +749,10 @@ opens the app.
 
 - [ ] T31 `docs/internal/plans/asset-studio-mobile.md` - the AC-09 procedure on win-main after run 2: job IDs, both schema versions, the push key and endpoints recorded; rollback to v0.2.0 keeps every job; the prerelease deployed again keeps the jobs, the key and the endpoints; the values recorded under AC-09 (AC-09)
 
+- [ ] T33 `app/e2e/phone.spec.ts` - the revised "share" journey: in `phone-chromium` (Android user agent) no `canShare` call and no `model.glb` request before the tap and a download with `Saved to your downloads.` in every mode; elsewhere `NotAllowedError` downloads, a new `DataError` case shows the message, and a failed prefetch leaves Share GLB enabled to download; the Android and `NotAllowedError` cases fail against the current page (AC-08)
+
+- [ ] T34 `app/web/share.tsx` - no share attempt or prefetch when the user agent names Android, the download on a `NotAllowedError` rejection, the message for other rejections; T33 passes (AC-08)
+
 - [ ] T32 `docs/internal/plans/asset-studio-mobile.md` - after the merge, v0.3.0 deployed with `scripts/deploy/deploy.sh` and `/api/health` checked as in the earlier feature's AC-10; the result recorded (Design)
 
 ## Open Questions
@@ -771,7 +783,7 @@ None.
 | 2026-11-23 | R-18 | spec | `5ce2f43` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
 | 2026-11-23 | R-19 | spec | `145dc76` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
 | 2026-11-23 | R-19 | spec | `145dc76` | n/a | n/a | accepted by owner |
-| 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits |
+| 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied with the owner's answer (Android downloads on tap, no prefetch) |
 
 ### R-20
 
