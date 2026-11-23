@@ -84,6 +84,9 @@
   --font-sans: var(--vh-font-sans);
   --font-mono: var(--vh-font-mono);
 }
+/* Tailwind's preflight sets text-size-adjust to 100%, which stops Chrome on Android from applying the
+   person's text scaling (asset-studio-mobile, the emulator's 200 percent check). Let the browser scale text. */
+html { -webkit-text-size-adjust: auto; text-size-adjust: auto; }
 body {
   min-height: 100vh; margin: 0; color: var(--vh-ink);
   font: 15px/1.55 var(--vh-font-sans);
