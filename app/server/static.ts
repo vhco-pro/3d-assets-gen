@@ -5,6 +5,15 @@ import { join, normalize } from "node:path";
 import { embedded } from "./embedded.ts";
 
 const DIST = join(import.meta.dir, "..", "..", "dist", "web");
+/** Files of app/web/public served at the root by exact name: [content type, cache-control]. */
+const ROOT_FILES: Record<string, [string, string]> = {
+  "manifest.webmanifest": ["application/manifest+json", "no-cache"],
+  "sw.js": ["text/javascript", "no-cache"],
+  "icon-192.png": ["image/png", "public, max-age=86400"],
+  "icon-512.png": ["image/png", "public, max-age=86400"],
+  "icon-maskable-512.png": ["image/png", "public, max-age=86400"],
+  "apple-touch-icon.png": ["image/png", "public, max-age=86400"],
+};
 const TYPES: Record<string, string> = { js: "text/javascript", css: "text/css", html: "text/html; charset=utf-8", svg: "image/svg+xml", png: "image/png", json: "application/json" };
 
 function fileFor(rel: string): Blob | null {
@@ -38,6 +47,12 @@ export async function pageRoute(_req: Request, url: URL): Promise<Response> {
     if (!file) return new Response("Not found", { status: 404 });
     const ext = rel.slice(rel.lastIndexOf(".") + 1);
     return new Response(file, { headers: { "content-type": TYPES[ext] ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable" } });
+  }
+  const root = ROOT_FILES[rel];
+  if (root) {
+    const file = fileFor(rel);
+    if (!file) return new Response("Not found", { status: 404 });
+    return new Response(file, { headers: { "content-type": root[0], "cache-control": root[1] } });
   }
   const page = await indexHtml();
   if (!page) return new Response("The page has not been built; run bun run build:web.", { status: 503 });
