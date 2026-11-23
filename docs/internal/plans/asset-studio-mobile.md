@@ -1,6 +1,6 @@
 ---
 status: draft
-status_description: "Owner answered all eleven questions; waiting for the spec review and acceptance."
+status_description: "Revised for spec review R-1 with the owner's nine answers; waiting for a new spec review, then acceptance."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
 covers:
@@ -58,6 +58,14 @@ Scene Viewer with a 15-minute signed link; Share GLB falls back to a download on
 every device that turned it on; no offline cache and no Install button; Remix included; the emulator
 check against win-main submits no real job; and the merge does not wait for your iPhone check, so an
 iPhone-only problem it finds becomes a follow-up fix.
+
+After the first spec review you also decided: the AR link is refreshed when View in your room is tapped
+close to its expiry; the page re-saves its notification subscription on every load while the switch is
+on; a `?asset=` link on a wide screen opens the Preview dialog; Remix of an older asset picks the level
+with the same triangle count, otherwise Standard; the earlier Asset Studio document stays as history,
+and this document takes over its Detail and Texture terms; and the emulator checks prove that Scene
+Viewer itself loads the model on win-main, that notifications arrive with the app swiped away, that the
+script cannot submit a job to win-main, and that a rollback keeps every recorded job.
 
 Accepting the spec authorizes the implementation on a feature branch, prerelease deploys to win-main
 (which replace the running v0.2.0 for the client while testing), the rollback test there, the merge and
@@ -123,8 +131,10 @@ Current state, measured in this repository at `efac26a`:
 
 Related work: [vhco-pro/3d-assets-gen#2](https://github.com/vhco-pro/3d-assets-gen/issues/2) and
 `docs/internal/plans/asset-studio.md` delivered v0.2.0; that document stays `in-progress` for a tooling
-reason and covers `app/`, so this feature's changes make its reviews stale. That does not block this
-feature. [vhco-pro/3d-assets-gen#9](https://github.com/vhco-pro/3d-assets-gen/issues/9) (a
+reason and covers `app/`, so this feature's changes make its reviews stale. By the owner's decision it is
+left unchanged as history: its met AC-18 and AC-29 name Detail and Texture, which this feature removes, and
+from this feature on, this document's Quality design and Glossary replace those parts of it. No task here
+edits that document. [vhco-pro/3d-assets-gen#9](https://github.com/vhco-pro/3d-assets-gen/issues/9) (a
 `check-upgrade.sh` comparison bug) is not fixed here.
 
 ## Scope
@@ -176,6 +186,12 @@ in both layouts. When the query names an asset that is not in the job list or no
 shows `This asset is no longer available.` with a button back to the Library. The server needs no route
 change, since every path outside `/api/` returns the page (`app/server/static.ts:42-44`).
 
+In the two-column layout `?tab=` is ignored, and `?asset=<job id>` of a done asset opens the Preview
+dialog for it; closing the dialog removes `?asset=` from the URL. An unknown or unfinished asset there
+shows the same gone message in the page's notice area, with Dismiss. A layout change across 1024 pixels
+keeps the open asset: the Asset page becomes the Preview dialog and the other way round, and the model
+reloads in the new view.
+
 Create holds the existing composer fields in this order: Prompts, Take photo and From photos, the chosen
 images, Quality, Variants, Game-asset style, Seed, Shared style, and Generate. Queue holds the existing
 queue component, with its summary strip, batch groups and job rows. When the queue is empty it shows
@@ -189,6 +205,9 @@ name, its Quality (see below), `Generated in`, Seed and Created, then the action
 AR is available), Share GLB, Download, Remix and Delete. Delete goes back to the Library after the job is
 deleted. Remix fills Create's prompt, Quality, Game-asset style and Shared style from the asset (image
 assets fill only Quality and Game-asset style, since the image is not re-uploaded) and switches to Create.
+For an asset whose pair matches no level, Remix selects the level with the same triangle count (5000 Fast,
+10000 Standard, 20000 High) and otherwise Standard; `remixQuality` in `app/pipeline/presets.ts` holds the
+rule.
 On the desktop layout the Preview dialog gets the same actions next to Download GLB and Close.
 
 Every control in the phone shell has a hit area of at least 44 by 44 CSS pixels. The existing layout rules
@@ -215,7 +234,8 @@ Create shows Quality as one segmented radio group with those four names, and the
 Asset page, the Preview dialog and the Library show `Quality: <name>` for a job whose pair matches a
 level, and `Custom (<k>k, <texture>)` for an older job whose pair does not (for example 5000 with 2048);
 a Hunyuan3D job with no texture shows `Custom (<k>k)`. The queue's typical-duration grouping by triangles
-and texture is unchanged. Detail and Texture leave the page and the Glossary.
+and texture is unchanged. Detail and Texture leave the page; this document's Glossary is where the preset
+terms are defined from now on.
 
 ### Images from the camera
 
@@ -225,8 +245,9 @@ gains the same two buttons): Take photo, a file input with `accept="image/png,im
 is appended to the chosen images instead of replacing them, so a batch can hold several camera shots; the
 existing list, Clear images, the 20 MiB per image and 200 MiB per batch limits and the server's
 leading-byte check stay. A file of another type is refused on the page with
-`Only PNG, JPEG or WebP photos can be used.` Keeping the explicit type list makes iPhone convert HEIC
-photos to JPEG on upload.
+`Only PNG, JPEG or WebP photos can be used.` Keeping the explicit type list is expected to make iPhone
+convert HEIC photos to JPEG on upload; this is unverified, and a HEIC file that still arrives is refused by
+the page's type check with the message above and by the server's leading-byte check.
 
 ### AR: View in your room
 
@@ -238,12 +259,20 @@ uses Scene Viewer, the native viewer the owner approved.
 
 Scene Viewer downloads the model itself, in the Google app, without the browser's cookies. So the page
 first asks `GET /api/assets/<id>/ar-link` (session required), which answers
-`{"url": "/api/assets/<id>/model.glb?exp=<unix seconds>&sig=<base64url>"}` with `exp` 15 minutes ahead and
+`{"url": "/api/assets/<id>/model.glb?exp=<unix seconds>&sig=<base64url>"}` (404 `No such asset.` for an
+unknown job or one that is not `done`) with `exp` 15 minutes ahead and
 `sig` the HMAC-SHA256 of `ar:<id>:<exp>` keyed with the access token, and uses that URL as the viewer's
 `src` on the phone shell and in the Preview dialog. `model.glb` with a valid, unexpired `exp` and `sig`
-for that job ID is served without a session, with `cache-control: private, no-store`; an invalid or
+for that job ID is served without a session, with `cache-control: private, no-store`, and logged as
+one line holding the job ID, the client address and the `User-Agent`; an invalid or
 expired signature answers 401 and counts toward the per-client failure limit as a wrong cookie does
-(`app/server/http.ts:76-81`). Without `exp` and `sig` the route behaves as today. Rotating the token
+(`app/server/http.ts:76-81`). Without `exp` and `sig` the route behaves as today.
+
+When View in your room is tapped and the current link has less than 5 minutes left, the page first fetches
+a new link, sets it as `src`, waits for the model's `load` event and only then activates AR, so Scene
+Viewer never receives an expired link. The button shows `Preparing…` while that runs. This is the only
+time the link changes, and it costs one more download of the model after a page has been open more than
+10 minutes. Rotating the token
 invalidates every link. A link only reaches the tailnet, and anyone holding one can fetch that single GLB
 until it expires.
 
@@ -257,7 +286,10 @@ The page has a Notifications switch on the Queue screen (and below the queue on 
 `Notification.requestPermission()` from the tap, gets the server's public key from `GET /api/push/key`,
 subscribes with `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` and posts the
 subscription to `POST /api/push/subscriptions`. Turning it off unsubscribes and calls
-`DELETE /api/push/subscriptions` with the endpoint. The switch shows the browser's state on load. When
+`DELETE /api/push/subscriptions` with the endpoint. On each signed-in load the switch shows the browser's state, and when the browser has a subscription
+the page posts it again to `POST /api/push/subscriptions` (an idempotent upsert), so a subscription the
+server dropped after a token rotation, a 404 or 410, or eviction comes back. When `pushManager.subscribe`
+or that POST fails, the switch is off and shows `Notifications could not be turned on. Try again.` When
 permission is denied it is disabled with `Notifications are blocked in the browser settings.` In Safari
 on iPhone outside an installed app, where Web Push is unavailable, it is replaced by
 `Add Asset Studio to your Home Screen to get notifications.` Every subscribed device gets every finished
@@ -273,8 +305,7 @@ device instead of piling up. On click it focuses an open Asset Studio window and
 Server side, `app/server/push.ts` owns everything:
 
 - State is one JSON file, `<data dir>/push.json`, holding the VAPID key pair (P-256, created on first use)
-  and the subscriptions: endpoint, `p256dh` and `auth` keys, creation time, the https origin the page was
-  served from (used as the VAPID `sub` claim), and a fingerprint of the access token (the first 16 hex
+  and the subscriptions: endpoint, `p256dh` and `auth` keys, creation time, and a fingerprint of the access token (the first 16 hex
   characters of HMAC-SHA256 of `push` keyed with the token). Writes go to a temporary file and are renamed
   into place, one at a time through a promise chain, so concurrent requests cannot interleave. A
   subscription is upserted by endpoint; at most 20 are kept, dropping the oldest. A corrupt or missing
@@ -282,12 +313,13 @@ Server side, `app/server/push.ts` owns everything:
   `GET /api/push/key`.
 - Routes, all behind the session or token: `GET /api/push/key` returns `{"publicKey": "<base64url>"}`;
   `POST /api/push/subscriptions` takes the browser's subscription JSON, checks the endpoint is `https`
-  and the keys decode to 65 and 16 bytes, and answers 204; `DELETE /api/push/subscriptions` takes
+  and the keys decode to 65 and 16 bytes, and answers 204, or 422 with an error naming the invalid field
+  (`endpoint`, `keys.p256dh` or `keys.auth`); `DELETE /api/push/subscriptions` takes
   `{"endpoint": "..."}` and answers 204 whether or not it existed.
 - Sending: right after the tracker marks a job `done` (`app/server/tracker.ts:398`), it calls
   `push.jobDone(job)` without awaiting it. For each subscription whose fingerprint matches the current
   token (others are deleted), it encrypts the payload `{"jobId", "batchId", "name"}` with RFC 8291
-  (aes128gcm) and signs a VAPID JWT (RFC 8292, ES256, 12 hours) with WebCrypto, then POSTs it with
+  (aes128gcm) and signs a VAPID JWT (RFC 8292, ES256, 12 hours, `sub` the fixed `https://github.com/vhco-pro/3d-assets-gen`) with WebCrypto, then POSTs it with
   `TTL: 3600` and `Urgency: normal`, a 10-second timeout, and no retry. A 404 or 410 deletes the
   subscription; any other failure is logged with the push service's host and status and dropped. No new
   dependency is added.
@@ -295,8 +327,10 @@ Server side, `app/server/push.ts` owns everything:
   the asset is still in the Library. A job collected after a restart goes through the same path, so it
   notifies. Seeded fixture jobs never pass through the tracker and never notify.
 - The payload leaves win-main encrypted; the push service (Google's FCM for Chrome, Apple's for Safari)
-  sees the endpoint, size and timing, not the name. The container needs outbound HTTPS to those hosts,
-  which Docker Desktop allows by default.
+  sees the endpoint, size and timing, not the name. The container needs outbound HTTPS to those hosts.
+  Docker Desktop is expected to allow that by default; this is unverified until a real job's notification
+  arrives from win-main (the owner's iPhone check or first use), and a failed send shows in the log line
+  above.
 
 ### Manifest, icons and serving
 
@@ -328,8 +362,9 @@ writer. Two tracker ticks cannot mark the same job done, since `update` checks t
 
 ### Glossary
 
-The page uses exactly these terms; the existing Glossary in `docs/internal/plans/asset-studio.md` keeps
-its rows except Detail and Texture, which this feature removes.
+The page uses exactly these terms. `docs/internal/plans/asset-studio.md` stays unchanged as history; for
+the page from this feature on, Quality and its levels replace that document's Detail and Texture rows, and
+its other rows still hold.
 
 | Term on the page | Meaning |
 | --- | --- |
@@ -362,12 +397,19 @@ subscriber's private key.
 - `setup-emulator.sh` installs, user-locally under `~/.local/share/android-sdk`, the command-line tools,
   platform tools, the emulator and one `google_apis_playstore` x86_64 system image (API 35), accepts the
   SDK licences, creates the AVD `asset-studio`, and installs Google Play Services for AR's emulator APK
-  from the official `google-ar/arcore-android-sdk` release, checking its published checksum. It is
-  idempotent and prints what it installed.
+  from the official `google-ar/arcore-android-sdk` release, checking its published checksum. Because a
+  Play Store image is a user build, it turns on Chrome's `Enable command line on non-rooted devices` flag,
+  which Playwright's Android support requires, by opening
+  `chrome://flags/#enable-command-line-on-non-rooted-devices` and selecting `Enabled` with `uiautomator`
+  and `input tap`, relaunches Chrome, and checks that `chrome://version` shows the command line Playwright
+  wrote. It also checks Chrome is version 105 or newer. It is idempotent and prints what it installed and each check's result.
 - `android-journey.ts` starts the AVD headless with KVM and drives Chrome on it through Playwright's
   Android support, with `adb` for what Playwright cannot reach (the camera app, the notification shade,
-  `logcat`). It takes the base URL and the token from the environment and writes a transcript and
-  screenshots to `.artifacts/phone/`.
+  `logcat`, `uiautomator dump` and `input tap` for the notification shade). It takes the base URL and
+  the token from the environment and writes a transcript and screenshots to `.artifacts/phone/`. Each step
+  is declared as submitting or not; a submitting step (notify, camera, share) refuses to run and fails the
+  run unless the base URL's host is `localhost`, and `scripts/phone/journey.test.ts` checks that refusal
+  for `https://win-main.tail6948f.ts.net`.
 
 Run 1 is against a local stack: `bun run dev` on fedora-43, made reachable as `http://localhost:8790`
 inside the emulator with `adb reverse`, which keeps it a secure context, so the whole journey including a
@@ -375,7 +417,8 @@ finished job's notification runs on the fake. Run 2 is against the prerelease at
 `https://win-main.tail6948f.ts.net`, reached over the host's Tailscale, with the token from
 `%LOCALAPPDATA%\AssetStudio\config.yaml` read over the existing deploy connection and never printed.
 Run 2 submits no generation to the deployed app, so the notification of a finished job is proven only in
-run 1.
+run 1. Scene Viewer's own fetch of the signed link is observed only in run 2: in run 1 the link is
+cleartext `http://localhost`, which the Google app may refuse, so run 1 checks only the launch.
 
 ### Release and delivery
 
@@ -393,54 +436,65 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
       no installability errors for it; on the Android emulator, Chrome installs Asset Studio from its menu
       and the home-screen icon opens it without browser chrome.
 - [ ] AC-02: Below 1024 CSS pixels the page shows the bottom tab bar with Create, Queue and Library, shows
-      one screen at a time with Create first, keeps the screen across reload and Back, and meets the layout
-      rules (text at least 14 pixels, no clipped text, no horizontal overflow, the contrast rules, hit areas
-      at least 44 by 44 pixels) at every phone and tablet size of the matrix in Chromium and WebKit; at 1024
-      pixels and wider the two-column layout remains.
+      one screen at a time with Create first, keeps the screen across reload and Back, keeps Generate
+      reachable while the on-screen keyboard is open, and meets the layout rules (text at least 14 pixels,
+      no clipped text, no horizontal overflow, the contrast rules, hit areas at least 44 by 44 pixels) at
+      every matrix size below 1024 pixels in Chromium and WebKit; at 1024 pixels and wider the two-column
+      layout remains.
 - [ ] AC-03: Tapping a Library tile opens the Asset page with the 3D model, name, Quality, generation time,
       seed and creation time and the actions View in your room (where AR is available), Share GLB, Download,
-      Remix and Delete; Back returns to the Library; `?asset=<id>` opens that asset directly; and an unknown
-      or unfinished asset shows `This asset is no longer available.` with a way back.
+      Remix and Delete; Back returns to the Library; `?asset=<id>` opens that asset directly, as the Asset
+      page below 1024 pixels and as the Preview dialog at 1024 and wider, and the open asset survives a
+      layout change across 1024 pixels; an unknown or unfinished asset shows
+      `This asset is no longer available.` with a way back; and Remix fills Create from the asset, choosing
+      for a Custom asset the level with its triangle count, otherwise Standard.
 - [ ] AC-04: Create offers one Quality control with Fast, Standard (selected first), High and Ultra, a batch
       created with each level gets the triangles and texture of the Quality table, Detail and Texture appear
       nowhere on the page, and jobs show their Quality name, or `Custom (...)` when their settings match no
       level.
-- [ ] AC-05: On Android, View in your room opens Scene Viewer with a link that serves the GLB without a
-      session; that link answers 401 once expired, with a changed signature, for another job or after a token
-      rotation; and on a browser without AR support the button is not shown.
+- [ ] AC-05: On Android, View in your room opens Scene Viewer showing the model, loaded through a link that
+      needs no session, also when the page has been open longer than the first link's lifetime; that link
+      answers 401 once expired, with a changed signature, for another job or after a token rotation; and on
+      a browser without AR support the button is not shown.
 - [ ] AC-06: With notifications turned on, a device receives a notification titled `Asset Studio` with
-      `<name> is ready.` within a minute of a job finishing, also with the app closed; tapping it opens that
-      asset's Asset page; after turning notifications off, or after a token rotation, that device receives
-      none.
+      `<name> is ready.` within a minute of a job finishing, also after the app was removed from the recent
+      apps; tapping it opens that asset's Asset page; a subscription the server dropped is restored on the
+      next signed-in load while the switch is on; and after turning notifications off, or after a token
+      rotation without a new load, that device receives none.
 - [ ] AC-07: Take photo opens the camera and each photo taken is added to the chosen images; From photos
       adds several images; a batch made this way creates one image job per photo; and a file of another type
       is refused with `Only PNG, JPEG or WebP photos can be used.`
 - [ ] AC-08: Share GLB opens the system share sheet with the GLB file where the browser can share files of
       that type, and otherwise downloads the GLB and says `Saved to your downloads.`
-- [ ] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job, and rolling
-      forward again keeps the existing notification subscriptions working.
+- [ ] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed
+      before the rollback, and rolling forward again keeps the push key and the existing notification
+      subscriptions.
 - [ ] AC-10: The page uses the Glossary terms of this document for Quality, the tabs and the new actions.
 - [ ] AC-11: The initial page load stays within 150 KiB of JavaScript after gzip at level 9.
 - [ ] AC-12: The prerelease deployed on win-main passes the Android emulator journey run 2 against
-      `https://win-main.tail6948f.ts.net`: install, sign in, the three tabs, an existing asset opened in Scene
-      Viewer, and notifications turned on.
+      `https://win-main.tail6948f.ts.net`: install, sign in, the three tabs, an existing asset shown in Scene
+      Viewer, and notifications turned on, without submitting any job.
 
 ## Test Plan
 
+Project names: `chromium` and `firefox` are the existing desktop projects (`@firefox` tags opt a journey
+into Firefox), `webkit-desktop` runs `@webkit` journeys, and `phone-chromium` (Pixel 7) and `phone-webkit`
+(iPhone 15) run `app/e2e/phone.spec.ts`.
+
 | Criterion | Proof |
 | --- | --- |
-| AC-01 | `app/e2e/phone.spec.ts` "installable": fetches `/manifest.webmanifest`, each icon and `/sw.js` from the image with their content types, then opens a CDP session and asserts `Page.getInstallabilityErrors` returns an empty list. Emulator run 1 step "install": Chrome's menu item `Install app` or `Add to Home screen`, then the launcher icon opened through `adb shell monkey -p` of the installed WebAPK; pass when the Playwright page reports `matchMedia('(display-mode: standalone)').matches` true. |
-| AC-02 | `app/e2e/phone.spec.ts` "tabs" in `phone-chromium` and `phone-webkit`: Create is shown first, each tab shows only its screen, the URL carries `?tab=`, reload and `page.goBack()` keep or restore the screen. `app/e2e/layout.spec.ts` runs its existing rules plus the 44-pixel hit-area rule over the phone shell at 320x568, 390x844, 390x667, 844x390 and 768x1024 in both engines, and asserts the two-column layout at 1024x768, 1280x720 and 1440x900. Captures of each screen at 390x844 and 844x390 are inspected and attached to the PR. |
-| AC-03 | `app/e2e/phone.spec.ts` "asset page": tap a seeded done tile, assert the model loads (`data-loaded`), the facts and the actions; `page.goBack()` shows the Library; open `/?asset=<seeded id>` directly; open `/?asset=<random uuid>` and a seeded failed job's ID and assert the gone message and its button. Remix fills Create's prompt and Quality from the seeded asset. Delete on a job the test created returns to the Library without it. |
-| AC-04 | `app/pipeline/presets.test.ts`: every Quality maps to the table's pair and passes `validPairing`; the label function returns each name and `Custom (5k, 2048)` and `Custom (10k)`. `app/e2e/phone.spec.ts` "quality": submit one prompt per level and read the created jobs from `GET /api/jobs`, asserting `faces` and `tex`; assert the page has no element with the text `Detail` or `Texture`; the seeded cancelled Ultra job shows `Quality: Ultra`. |
-| AC-05 | `app/server/arlink.test.ts`: a link from `ar-link` fetches the GLB with no cookie (200, GLB bytes); the same link after the clock passes `exp`, with one changed character in `sig`, with another job's ID, and after the token changes answers 401; a bad signature counts toward the failure limit. `app/e2e/phone.spec.ts` asserts no View in your room button in desktop Chromium, Firefox and WebKit. Emulator run 1 step "AR": tap View in your room; pass when `logcat` shows an `android.intent.action.VIEW` for `arvr.google.com/scene-viewer` whose `file` is the signed URL and the dev server answers that URL with 200 to a request without a cookie. |
-| AC-06 | `app/server/push.test.ts`: the RFC 8291 section 5 example encrypts to the published ciphertext; a VAPID JWT verifies with the public key; marking a job done POSTs one encrypted message to the fake push service that decrypts to `{"jobId","batchId","name"}`; a 410 deletes the subscription; a subscription with an old token fingerprint gets nothing and is deleted; concurrent subscribe and delete calls leave a valid file. `app/e2e/phone.spec.ts` "notifications switch": with permission granted and `pushManager.subscribe` answered by a stub, turning the switch on posts the subscription and off deletes it; denied permission shows the blocked message. Emulator run 1 step "notify": turn notifications on, submit one Fast prompt, press Home so Chrome is in the background, wait for the fake to finish it; pass when `adb shell dumpsys notification --noredact` lists `Asset Studio` with `<prompt> is ready.` within 60 seconds and tapping it through `adb shell cmd notification` opens `/?asset=<that job id>`. Then turn notifications off, submit another prompt and assert no new notification within 60 seconds after it finishes. |
-| AC-07 | `app/e2e/phone.spec.ts` "photos": both inputs carry the stated `accept`, Take photo carries `capture="environment"`; two `setInputFiles` calls on Take photo leave two images chosen; a GIF is refused with the message; Generate creates two image jobs. Emulator run 1 step "camera": tap Take photo, press the emulator camera's shutter and confirm through `adb shell input`, then assert `1 image chosen` and that Generate creates one image job. |
-| AC-08 | `app/e2e/phone.spec.ts` "share": with `navigator.canShare` stubbed to accept files, Share GLB calls `navigator.share` with one `File` named `<slug>-<short id>.glb` of type `model/gltf-binary`; with it stubbed to refuse, Share GLB starts a download of `/api/assets/<id>/model.glb` and shows `Saved to your downloads.` Emulator run 1 step "share": Chrome on Android refuses GLB files, so the download path runs; pass when the file appears in `/sdcard/Download` with the GLB's size. |
-| AC-09 | `app/server/store.test.ts` asserts the migration list still has 2 entries. `app/server/push.test.ts` "reload": a server started on an existing `push.json` sends with the stored keys to the stored subscription. Written procedure after emulator run 2, run by the agent: record the `GET /api/jobs` count, the `schema-version` of both images (both 2) and the sha256 of `push.json` on win-main; run `scripts/deploy/rollback.sh` to v0.2.0 and assert the job count is unchanged; deploy the prerelease again and assert the job count and the `push.json` sha256 are unchanged and `GET /api/push/key` returns the same key as before. |
-| AC-10 | `app/e2e/glossary.spec.ts`: asserts each new term appears with its element (Quality group label and its four items, the three tab labels, the four Asset actions, the two photo buttons, the switch label) and that `Detail` and `Texture` do not. |
+| AC-01 | `app/e2e/phone.spec.ts` "installable" in `chromium`: fetches `/manifest.webmanifest`, each icon and `/sw.js` from the image with their content types, then opens a CDP session and asserts `Page.getInstallabilityErrors` returns an empty list. Emulator run 1 step "install": Chrome's menu item `Install app` or `Add to Home screen`, then the launcher icon opened through `adb shell monkey -p` of the installed WebAPK; pass when the Playwright page reports `matchMedia('(display-mode: standalone)').matches` true. |
+| AC-02 | `app/e2e/phone.spec.ts` "tabs" in `phone-chromium` and `phone-webkit`: Create is shown first, each tab shows only its screen, the URL carries `?tab=`, reload and `page.goBack()` keep or restore the screen; "keyboard": with the Prompts field focused and the viewport reduced to 390x500 to stand in for the open keyboard, Generate can be scrolled into view and is not covered by the tab bar. `app/e2e/layout.spec.ts` runs its existing rules plus the 44-pixel hit-area rule over the phone shell at 320x568, 390x844, 390x667, 844x390, 768x1024 and 640x450 in `chromium` and `webkit-desktop`, and asserts the two-column layout at 1024x768, 1280x720 and 1440x900. 640x450 is also the 200 percent zoom reflow case for 1280x900; real zoom is checked in emulator run 1 step "zoom" (Chrome's accessibility text scaling at 200 percent, a screenshot of each tab, no clipped label or covered Generate). Emulator run 1 step "keyboard": with the Prompts field focused and the on-screen keyboard open, Generate is reachable by scrolling and tappable. The pull request carries before-and-after captures as `conventions/frontend-testing.md` defines them: each phone screen and the Asset page at 390x844 and 844x390, and the desktop composer at 1280x720 before (Detail and Texture) and after (Quality), committed to `refs/pr-visuals/<PR number>`. |
+| AC-03 | `app/e2e/phone.spec.ts` "asset page" in `phone-chromium` and `phone-webkit`: tap a seeded done tile, assert the model loads (`data-loaded`), the facts and the actions; `page.goBack()` shows the Library; open `/?asset=<seeded id>` directly; open `/?asset=<random uuid>` and a seeded failed job's ID and assert the gone message and its button; with the Asset page open, resize from 768x1024 to 1024x768 and assert the Preview dialog shows the same asset, then back to the Asset page. "asset link desktop" in `chromium` and `webkit-desktop` at 1280x720: `/?asset=<seeded id>` opens the Preview dialog, closing it removes `?asset=`, an unknown ID shows the gone notice. "remix" in `phone-chromium`: Remix fills Create's prompt and Quality from a seeded asset. `app/pipeline/presets.test.ts`: `remixQuality` gives Fast for 5000 with 2048, Standard for 10000 with no texture, High for 20000 with 4096 and Standard for 15000 with 2048. "delete" in `phone-chromium`: Delete on a job the test created returns to the Library without it. |
+| AC-04 | `app/pipeline/presets.test.ts`: every Quality maps to the table's pair and passes `validPairing`; the label function returns each name and `Custom (5k, 2048)` and `Custom (10k)`. `app/e2e/phone.spec.ts` "quality" in `phone-chromium` and `chromium`: submit one prompt per level and read the created jobs from `GET /api/jobs`, asserting `faces` and `tex`; assert the page has no element with the text `Detail` or `Texture`; the seeded cancelled Ultra job shows `Quality: Ultra`. |
+| AC-05 | `app/server/arlink.test.ts`: a link from `ar-link` fetches the GLB with no cookie (200, GLB bytes) and logs one line with the job ID and user agent; the same link after the clock passes `exp`, with one changed character in `sig`, with another job's ID, and after the token changes answers 401; a bad signature counts toward the failure limit; `ar-link` for an unknown or failed job answers 404. `app/e2e/phone.spec.ts` asserts no View in your room button in `chromium`, `firefox` and `webkit-desktop`; "ar refresh" in `phone-chromium` with an Android user agent and model-viewer's `canActivateAR` forced true: with the page clock advanced past 10 minutes, tapping View in your room requests a new `ar-link` and sets it as `src` before `activateAR` is called, and with less than 10 minutes it requests none. Emulator run 1 step "AR launch": tap View in your room; pass when `logcat` shows an `android.intent.action.VIEW` for `arvr.google.com/scene-viewer` whose `file` is the signed URL. Emulator run 2 step "AR load": wait 16 minutes on the Asset page, tap View in your room; pass when the server log on win-main (read with `docker logs` over the deploy connection) has a signed-link line for that job, written after the tap, from the emulator's tailnet address with a user agent that is not Chrome's, and a screenshot shows Scene Viewer displaying the model. |
+| AC-06 | `app/server/push.test.ts`: the RFC 8291 section 5 example encrypts to the published ciphertext; a VAPID JWT verifies with the public key and has `sub` `https://github.com/vhco-pro/3d-assets-gen`; marking a job done POSTs one encrypted message to the fake push service that decrypts to `{"jobId","batchId","name"}`; a 410 deletes the subscription; a subscription with an old token fingerprint gets nothing and is deleted; an invalid body answers 422 naming the field; concurrent subscribe and delete calls leave a valid file. `app/e2e/phone.spec.ts` "notifications switch" in `phone-chromium` and `chromium`: with permission granted and `pushManager.subscribe` answered by a stub, turning the switch on posts the subscription and off deletes it; denied permission shows the blocked message; a failing POST turns the switch off with its message; after the test deletes the subscription on the server, a reload posts it again. Emulator run 1 step "notify": turn notifications on, submit one Fast prompt, open the recent-apps screen with `adb shell input keyevent KEYCODE_APP_SWITCH` and swipe the Asset Studio task away with `adb shell input swipe` (never `am force-stop`), wait for the fake to finish it; pass when `adb shell dumpsys notification --noredact` lists `Asset Studio` with `<prompt> is ready.` within 60 seconds; then `adb shell cmd statusbar expand-notifications`, find the notification's bounds in `uiautomator dump` and tap it with `adb shell input tap`; pass when the app opens on `/?asset=<that job id>`. Then turn notifications off, submit another prompt and assert no new notification within 60 seconds after it finishes. |
+| AC-07 | `app/e2e/phone.spec.ts` "photos" in `phone-chromium`, `phone-webkit` and, for the desktop buttons, `chromium` and `firefox` (`@firefox`): both inputs carry the stated `accept`, Take photo carries `capture="environment"`; two `setInputFiles` calls on Take photo leave two images chosen; a GIF is refused with the message; Generate creates two image jobs. Emulator run 1 step "camera": tap Take photo, press the emulator camera's shutter and confirm through `adb shell input`, then assert `1 image chosen` and that Generate creates one image job. |
+| AC-08 | `app/e2e/phone.spec.ts` "share" in `phone-chromium`, `phone-webkit` and, for the Preview dialog, `chromium` and `firefox` (`@firefox`): with `navigator.canShare` stubbed to accept files, Share GLB calls `navigator.share` with one `File` named `<slug>-<short id>.glb` of type `model/gltf-binary`; with it stubbed to refuse or absent, Share GLB starts a download of `/api/assets/<id>/model.glb` (Playwright's `download` event with that file name) and shows `Saved to your downloads.` Emulator run 1 step "share": Chrome on Android refuses GLB files, so the download path runs; pass when the file appears in `/sdcard/Download` with the GLB's size. |
+| AC-09 | `app/server/store.test.ts` asserts the migration list still has 2 entries. `app/server/push.test.ts` "reload": a server started on an existing `push.json` sends with the stored keys to the stored subscription. Written procedure after emulator run 2, run by the agent: record the set of job IDs from `GET /api/jobs`, the `schema-version` of both images (both 2), the `GET /api/push/key` public key and the subscription endpoints in `push.json` on win-main; run `scripts/deploy/rollback.sh` to v0.2.0 and assert every recorded job ID is still listed (new IDs are allowed); deploy the prerelease again and assert every recorded job ID is still listed, the public key is the same and every recorded endpoint is still in `push.json`. |
+| AC-10 | `app/e2e/glossary.spec.ts` in `chromium` and `phone-chromium`: asserts each new term appears with its element (the Quality group label and its four items, the three tab labels, Share GLB, Download, Remix and Delete on the Asset page, the two photo buttons, the switch label) and that `Detail` and `Texture` do not; in `phone-chromium` with an Android user agent and `canActivateAR` forced true, the Asset page shows View in your room. |
 | AC-11 | `bun run size` in `bun run verify`, unchanged budget. |
-| AC-12 | Emulator run 2 against the deployed prerelease: install and open standalone as in AC-01; sign in with the deployed token; open each tab; open an existing done asset and pass the AC-05 Scene Viewer step against the deployed URL (`curl` from fedora-43 of the logged signed URL answers 200 without a cookie); turn notifications on and assert `POST /api/push/subscriptions` answered 204 in the transcript. Transcript and screenshots committed with the evidence. |
+| AC-12 | Emulator run 2 against the deployed prerelease: install and open standalone as in AC-01; sign in with the deployed token; open each tab; pass the AC-05 run 2 step "AR load" on an existing done asset; turn notifications on and assert `POST /api/push/subscriptions` answered 204 in the transcript; the transcript shows each submitting step refused, as the script's guard requires. Transcript and screenshots committed with the evidence. |
 
 ## Tasks
 
@@ -454,7 +508,7 @@ None.
 
 | Date | Review | Kind | Commit | Model | Isolation | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits |
+| 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits; all applied with the owner's nine answers; removed author extra: stored page origin as the VAPID `sub` claim, now a fixed URL (R-1 F-04) |
 
 ### R-1
 
@@ -584,7 +638,7 @@ PROPOSAL: Add a source for each claim to Sources, or mark it as unverified and g
 - [Scene Viewer documentation](https://developers.google.com/ar/develop/scene-viewer): the `file` parameter is the URL of the glTF or GLB that Scene Viewer loads.
 - [WebKit: Web Push for web apps on iOS and iPadOS](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/): Web Push on iPhone works from iOS 16.4 for web apps added to the Home Screen, with permission requested from a user gesture.
 - [Revisiting Chrome's installability criteria](https://developer.chrome.com/blog/update-install-criteria): installing from Chrome's menu no longer needs a service worker with a `fetch` handler (Chrome 108 on mobile); the automatic install prompt still did.
-- [Playwright Android API](https://playwright.dev/docs/api/class-android): experimental automation of Chrome for Android on a device or emulator through `adb`, with `launchBrowser()`.
+- [Playwright Android API](https://playwright.dev/docs/api/class-android): experimental automation of Chrome for Android on a device or emulator through `adb`, with `launchBrowser()`; it needs Chrome 105 or newer and Chrome's `Enable command line on non-rooted devices` flag.
 - [Run AR apps in Android Emulator](https://developers.google.com/ar/develop/java/emulator): ARCore on the emulator needs an x86 or x86_64 image at API 27 or later and the emulator build of Google Play Services for AR installed with `adb install`.
 - [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291) and [RFC 8292](https://www.rfc-editor.org/rfc/rfc8292): Web Push message encryption (with the worked example in section 5) and VAPID.
 - [Owner-approved phone design](https://claude.ai/artifact/P7NTa7J8JBXeJkef8tayfc): the four screens, the Quality levels, View in your room, notifications, camera upload and Share GLB.
