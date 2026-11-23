@@ -130,6 +130,22 @@ export async function startExport(ids: string[]): Promise<string> {
   return body.url;
 }
 
+/** The server's VAPID public key, base64url. */
+export async function fetchPushKey(): Promise<string> {
+  const body: unknown = await (await call("/api/push/key")).json();
+  if (!isRecord(body) || typeof body.publicKey !== "string") throw new ApiError(0, "Unexpected push key answer.");
+  return body.publicKey;
+}
+
+/** Saves the browser's push subscription on the server (an upsert by endpoint). */
+export async function postPushSubscription(subscription: PushSubscriptionJSON): Promise<void> {
+  await call("/api/push/subscriptions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(subscription) });
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  await call("/api/push/subscriptions", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint }) });
+}
+
 /** A 15-minute signed path for the asset's GLB that Scene Viewer can fetch without the session cookie. */
 export async function fetchArLink(id: string, signal?: AbortSignal): Promise<string> {
   const body: unknown = await (await call(`/api/assets/${id}/ar-link`, {}, signal)).json();

@@ -14,6 +14,7 @@ import { Progress } from "./components/ui/progress.tsx";
 import { Switch } from "./components/ui/switch.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { ToggleGroup, ToggleGroupItem } from "./components/ui/toggle-group.tsx";
+import { NotifySwitch, useNotifications } from "./notify.tsx";
 import { openedFromLibrary, pushAsset, readRoute, replaceUrl, tabHref, WIDE_QUERY, type Route, type Tab } from "./nav.ts";
 import { estimates, formatDuration } from "./queue.ts";
 import { PhoneLibrary, PhoneShell } from "./Shell.tsx";
@@ -126,6 +127,7 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     refetchInterval: (q) => (q.state.data?.some((j) => j.state === "pending" || j.state === "submitted") ? 2000 : 15000),
   });
   const health = useQuery({ queryKey: ["health"], queryFn: ({ signal }) => fetchHealth(signal), refetchInterval: 5000 });
+  const notifications = useNotifications();
   const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   const [route, setRoute] = useState<Route>(() => readRoute(window.location.search));
   const [preview, setPreview] = useState<{ job: Job; opener: HTMLElement | null } | null>(null);
@@ -221,7 +223,12 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     if (route.asset !== null) {
       content = assetJob ? <AssetPage job={assetJob} onLibrary={phoneLibrary} onRemix={() => { startRemix(assetJob); goTab("create"); }} /> : assetGone ? <AssetGone onLibrary={phoneLibrary} /> : <p className="text-muted-foreground">Loading…</p>;
     } else if (route.tab === "queue") {
-      content = <section data-screen="queue"><Queue jobs={list} loading={jobs.isPending} error={jobs.error} showEmpty /></section>;
+      content = (
+        <section data-screen="queue" className="grid gap-4">
+          <Card className="p-4"><NotifySwitch n={notifications} /></Card>
+          <Queue jobs={list} loading={jobs.isPending} error={jobs.error} showEmpty />
+        </section>
+      );
     } else if (route.tab === "library") {
       content = <PhoneLibrary jobs={done} onOpen={openAsset} />;
     } else {
@@ -252,6 +259,7 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
         <Composer key={remix.seq} draft={remix.draft} dropZone />
         <div className="grid min-w-0 gap-5">
           <Queue jobs={list} loading={jobs.isPending} error={jobs.error} />
+          <Card className="p-4" data-testid="notifications"><NotifySwitch n={notifications} /></Card>
           <Library jobs={done} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
         </div>
       </main>
