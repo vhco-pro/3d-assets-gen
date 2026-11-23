@@ -1,6 +1,6 @@
-import { CircleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Job } from "./api.ts";
+import { dateFormat, ErrorText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
 import { Progress } from "./components/ui/progress.tsx";
@@ -46,13 +46,11 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
 /**
- * The preview: a modal dialog (focus trapped; Escape closes it and focus returns to the opener) with the
- * viewer, its download progress, the full prompt, the settings, the timing and the downloads.
+ * The 3D stage: loads the viewer module on demand, shows the model with its download progress, and offers
+ * Reload viewer when the module fails. Used by the Preview dialog and the phone's Asset page.
  */
-export function Viewer({ job, name, opener, onClose }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void }): ReactNode {
+export function ModelStage({ job, name, className, children }: { job: Job; name: string; className: string; children?: ReactNode }): ReactNode {
   const [attempt, setAttempt] = useState(0);
   const status = useViewerModule(attempt);
   const reduced = useReducedMotion();
@@ -72,9 +70,56 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
       el.removeEventListener("progress", onProgress);
     };
   }, [status, job.id]);
-  const waited = job.startedAt !== null ? job.startedAt - job.queuedAt : null;
-  const generated = job.startedAt !== null && job.finishedAt !== null ? job.finishedAt - job.startedAt : null;
-  const total = job.finishedAt !== null ? job.finishedAt - job.queuedAt : null;
+  return (
+    <div className={`preview-stage grid place-items-center overflow-hidden rounded-md ${className}`}>
+      {status === "loading" && <p className="text-muted-foreground">Loading the 3D viewer…</p>}
+      {status === "failed" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <ErrorText>The 3D viewer could not load.</ErrorText>
+          <Button type="button" onClick={() => { setAttempt((a) => a + 1); }}>Reload viewer</Button>
+        </div>
+      )}
+      {status === "ready" && (
+        <div className="relative size-full">
+          <model-viewer
+            ref={ref}
+            key={job.id}
+            src={`/api/assets/${job.id}/model.glb`}
+            alt={name}
+            camera-controls=""
+            loading="eager"
+            interpolation-decay={reduced ? "0" : "200"}
+            shadow-intensity="1"
+          >
+            {children}
+          </model-viewer>
+          {!loaded && (
+            <div className="absolute inset-x-4 bottom-4 grid gap-1.5" role="status">
+              <span className="text-sm text-muted-foreground">{`Loading model… ${String(Math.round(progress * 100))}%`}</span>
+              <Progress value={Math.round(progress * 100)} aria-label="Model download" className="h-1.5" />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The timing facts of a finished job: how long it waited, generated and took in total. */
+export function timing(job: Job): { waited: number | null; generated: number | null; total: number | null } {
+  return {
+    waited: job.startedAt !== null ? job.startedAt - job.queuedAt : null,
+    generated: job.startedAt !== null && job.finishedAt !== null ? job.finishedAt - job.startedAt : null,
+    total: job.finishedAt !== null ? job.finishedAt - job.queuedAt : null,
+  };
+}
+
+/**
+ * The preview: a modal dialog (focus trapped; Escape closes it and focus returns to the opener) with the
+ * viewer, its download progress, the full prompt, the settings, the timing and the downloads.
+ */
+export function Viewer({ job, name, opener, onClose }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void }): ReactNode {
+  const { waited, generated, total } = timing(job);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent showCloseButton={false} aria-modal="true" onCloseAutoFocus={(e) => { e.preventDefault(); opener?.focus(); }} className="grid max-h-[calc(100dvh-2rem)] w-[min(56rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border bg-[var(--vh-bg-1)] p-0 sm:max-w-none">
@@ -83,38 +128,7 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
           <DialogDescription className="sr-only">The 3D model with its prompt, settings and timing.</DialogDescription>
         </div>
         <div className="grid min-h-0 gap-3.5 overflow-y-auto p-4">
-          <div className="preview-stage grid h-[clamp(9rem,50dvh,30rem)] place-items-center overflow-hidden rounded-md">
-            {status === "loading" && <p className="text-muted-foreground">Loading the 3D viewer…</p>}
-            {status === "failed" && (
-              <div className="flex flex-wrap items-center gap-3">
-                <p role="alert" data-error="">
-                  <CircleAlert size={16} aria-hidden="true" />
-                  <span>The 3D viewer could not load.</span>
-                </p>
-                <Button type="button" onClick={() => { setAttempt((a) => a + 1); }}>Reload viewer</Button>
-              </div>
-            )}
-            {status === "ready" && (
-              <div className="relative size-full">
-                <model-viewer
-                  ref={ref}
-                  key={job.id}
-                  src={`/api/assets/${job.id}/model.glb`}
-                  alt={name}
-                  camera-controls=""
-                  loading="eager"
-                  interpolation-decay={reduced ? "0" : "200"}
-                  shadow-intensity="1"
-                />
-                {!loaded && (
-                  <div className="absolute inset-x-4 bottom-4 grid gap-1.5" role="status">
-                    <span className="text-sm text-muted-foreground">{`Loading model… ${String(Math.round(progress * 100))}%`}</span>
-                    <Progress value={Math.round(progress * 100)} aria-label="Model download" className="h-1.5" />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <ModelStage job={job} name={name} className="h-[clamp(9rem,50dvh,30rem)]" />
           <p data-testid="full-prompt" className="max-w-[72ch] whitespace-pre-wrap [overflow-wrap:anywhere]">{name}</p>
           {job.sharedStyle && <p className="text-sm text-muted-foreground"><span className="font-semibold">Shared style</span>{` ${job.sharedStyle}`}</p>}
           <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[.95rem] text-muted-foreground">

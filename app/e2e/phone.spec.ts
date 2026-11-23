@@ -80,8 +80,12 @@ const query = (page: Page): URLSearchParams => new URL(page.url()).searchParams;
 async function phoneSignIn(page: Page): Promise<void> {
   const { url, token } = shared();
   await page.goto(url);
-  await page.getByLabel("Access token").fill(token);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  const form = page.getByLabel("Access token");
+  await expect(form.or(tabBar(page))).toBeVisible();
+  if (await form.isVisible()) {
+    await form.fill(token);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
   await expect(tabBar(page)).toBeVisible();
 }
 

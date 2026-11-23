@@ -27,7 +27,32 @@ export async function signIn(page: Page, url: string, token: string): Promise<vo
 }
 
 /** Fails the test on any console error or page error. */
-export const test = base.extend<{ consoleErrors: string[] }>({
+export const test = base.extend<{ consoleErrors: string[]; webkitCookies: undefined }>({
+  // WebKit refuses a Secure cookie from any http:// origin, 127.0.0.1 and localhost included, while the
+  // deployed app is served over HTTPS. In WebKit the session cookie's Secure attribute is dropped on its way in,
+  // so the journeys can sign in against the plain-HTTP test stack; the page itself is still a secure context.
+  // Routes do not see requests from a page a service worker controls, so the WebKit projects block service
+  // workers (playwright.config.ts); no WebKit journey needs one.
+  webkitCookies: [
+    async ({ context, browserName }, use) => {
+      if (browserName === "webkit") {
+        await context.route(/\/api\/session$/, async (route) => {
+          if (route.request().method() !== "POST") {
+            await route.fallback();
+            return;
+          }
+          // A plain fetch, not route.fetch(): that one would store the Secure cookie in the context's jar itself.
+          const req = route.request();
+          const res = await fetch(req.url(), { method: "POST", headers: req.headers(), body: req.postData() ?? "" });
+          const headers = Object.fromEntries(res.headers.entries());
+          if (headers["set-cookie"]) headers["set-cookie"] = headers["set-cookie"].replace(/;\s*Secure/gi, "");
+          await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+        });
+      }
+      await use(undefined);
+    },
+    { auto: true },
+  ],
   consoleErrors: [
     async ({ page }, use) => {
       const errors: string[] = [];

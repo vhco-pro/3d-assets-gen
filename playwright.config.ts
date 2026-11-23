@@ -6,7 +6,8 @@ const firefox = { ...devices["Desktop Firefox"], launchOptions: { firefoxUserPre
 // Journeys run in Chromium; tests tagged @firefox run in Firefox too and @webkit in desktop WebKit. The phone
 // projects run journeys tagged @phone, plus @android (phone-chromium) or @ios (phone-webkit); @mobile-only keeps
 // a phone-shell journey out of the desktop Chromium project. E2E_SKIP_WEBKIT=1 leaves both WebKit projects out
-// on a host without WebKit's libraries (scripts/verify.sh reports it); CI never sets it. Sign-in scenarios use
+// on a host without WebKit's libraries (scripts/verify.sh reports it); CI never sets it. The WebKit projects
+// block service workers so the sign-in cookie fixture in fixtures.ts can see the page's requests. Sign-in scenarios use
 // the failure budget on purpose, so they have their own projects and their own container (see signin.spec.ts).
 const skipWebkit = process.env.E2E_SKIP_WEBKIT === "1";
 const SIGNIN = "**/signin.spec.ts";
@@ -24,9 +25,9 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: SIGNIN, grepInvert: /@mobile-only/ },
     { name: "firefox", use: firefox, grep: /@firefox/, testIgnore: SIGNIN },
-    ...(skipWebkit ? [] : [{ name: "webkit-desktop", use: { ...devices["Desktop Safari"] }, grep: /@webkit/, testIgnore: SIGNIN }]),
+    ...(skipWebkit ? [] : [{ name: "webkit-desktop", use: { ...devices["Desktop Safari"], serviceWorkers: "block" as const }, grep: /@webkit/, testIgnore: SIGNIN }]),
     { name: "phone-chromium", use: { ...devices["Pixel 7"] }, grep: /@phone|@android/, testIgnore: SIGNIN },
-    ...(skipWebkit ? [] : [{ name: "phone-webkit", use: { ...devices["iPhone 15"] }, grep: /@phone|@ios/, testIgnore: SIGNIN }]),
+    ...(skipWebkit ? [] : [{ name: "phone-webkit", use: { ...devices["iPhone 15"], serviceWorkers: "block" as const }, grep: /@phone|@ios/, testIgnore: SIGNIN }]),
     { name: "signin-chromium", use: { ...devices["Desktop Chrome"] }, testMatch: SIGNIN },
     { name: "signin-firefox", use: firefox, testMatch: SIGNIN },
   ],
