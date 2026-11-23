@@ -629,6 +629,23 @@ None.
 | 2026-11-23 | R-7 | spec | `490eb4c` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied |
 | 2026-11-23 | R-8 | spec | `8ce3ce4` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 1 nit; all applied with the owner's two answers |
 | 2026-11-23 | R-9 | spec | `5abb796` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix; all applied with the owner's two answers; F-01 replaced the R-8 shared-stack cancel step |
+| 2026-11-23 | R-10 | spec | `fed6bf1` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit |
+
+### R-10
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (Asset page paragraph: "Every other way off the Asset page (the Create or Queue tab, Remix, or the gone message's button, which leads to the Library) first applies that rule, `history.back()` when the entry carries `{ from: "library" }`, and then replaces the URL with the target tab, so the pushed asset entry never stays in history"; URL paragraph: "A `popstate` listener re-reads the URL"); Context > Owner summary ("leaving an Asset page any way keeps Back leaving the app"); Test Plan AC-03 ("asset page": "from `about:blank` open the Library, open an asset from a tile, tap Queue, and `page.goBack()` returns to `about:blank`; the same after Remix from a tile-opened asset")
+EVIDENCE: This text came in with the R-9 F-02 revision. `history.back()` does not move the session history right away. The HTML standard queues the traversal, and `location` and the current entry change only later, when `popstate` fires. If an implementer writes the rule as it reads, `history.back(); history.replaceState(null, "", "?tab=queue")` in one handler, the replace hits the asset entry while it is still current. The queued traversal then lands on the `?tab=library` entry, and the document's own `popstate` listener re-reads the URL and shows the Library. The client taps Queue (or Remix, which should show Create) and ends up on the Library. A second implementer waits for `popstate` before replacing, and their build shows Queue. The new AC-03 step passes both builds: with the naive build, history is [about:blank, `?tab=library` (current), `?tab=queue` (forward)], so `page.goBack()` still returns to `about:blank`. The step never asserts which screen shows after the tap. I did not run this in a browser, because the session sandbox refused a scratch script outside the worktree. The ordering comes from the history traversal model, not from an observed run.
+PROPOSAL: State that the page replaces the URL with the target tab only after the `popstate` from `history.back()` has arrived, and that the `popstate` listener does not render the Library in between, for example by checking a pending-target flag. In the AC-03 "asset page" step, assert that the Queue screen (and Create, after Remix) is shown and that the URL carries `?tab=queue` (and `?tab=create`) before `page.goBack()`.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan AC-06 ("notifications switch": "in `chromium` on its own stack started with `startStack` and seeded with `bun run seed --profile empty`"); Test Plan AC-02 (visual record: "without one (the empty-profile stack)")
+EVIDENCE: `bun run seed` is `bun app/server/main.ts seed --config dev/config.yaml` (package.json:8), so it seeds the dev stack's data, not a test stack. `startStack(name, "empty")` seeds its own stack with the image's `seed --profile empty` command (app/e2e/harness.ts:62, 111-113), which is how library.spec.ts:67 and queue-board.spec.ts:105 already do it. The `startStack` part makes the intent clear, so an implementer builds the same journey.
+PROPOSAL: Write "on its own stack started with `startStack(<name>, "empty")`" and drop the `bun run seed` reference.
 
 ### R-9
 
