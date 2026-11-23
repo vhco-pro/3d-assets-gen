@@ -589,17 +589,19 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
 
 ## Acceptance Criteria
 
-- [ ] AC-01: The built page serves a valid web app manifest, its icons and `/sw.js`, and Chromium reports
+- [x] AC-01: The built page serves a valid web app manifest, its icons and `/sw.js`, and Chromium reports
       no installability errors for it; on the Android emulator, Chrome installs Asset Studio from its menu
       and the home-screen icon opens it without browser chrome.
-- [ ] AC-02: Below 1024 CSS pixels the page shows the bottom tab bar with Create, Queue and Library, shows
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): "the image serves the manifest, its icons and /sw.js, and Chromium reports no installability errors" and "the service worker controls the page after its first registration" passed. In emulator run 1 and run 2 (`docs/internal/evidence/asset-studio-mobile/run-1/`, `run-2/`), step install used Chrome's `Install app` menu item, and the launcher icon opened a window with `display-mode standalone: true` (`01-installed.png`).
+- [x] AC-02: Below 1024 CSS pixels the page shows the bottom tab bar with Create, Queue and Library, shows
       one screen at a time with Create first, marks the current tab by more than colour, keeps the screen
       across reload, adds no history entry for a tab switch, keeps Generate
       reachable while the on-screen keyboard is open, and meets the layout rules (text at least 14 pixels,
       no clipped text, no horizontal overflow, the contrast rules, hit areas at least 44 by 44 pixels) at
       every matrix size below 1024 pixels in Chromium and WebKit; at 1024 pixels and wider the two-column
       layout remains.
-- [ ] AC-03: Tapping a Library tile opens the Asset page with the 3D model, name, Quality, generation time,
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): "tabs" and "keyboard" passed in `phone-chromium` and `phone-webkit`; `layout.spec.ts` "sign-in, each tab and the Asset page in the phone shell" passed at 320x568, 390x844, 390x667, 844x390, 768x1024 and 640x450 in `chromium` and `webkit-desktop`, and "two columns" at 1024x768, 1280x720 and 1440x900. Emulator run 1 steps zoom and keyboard passed (no clipped label or covered Generate at Chrome's 200 percent text scaling, which enlarges only the blocks its autosizer picks, as the run-1 README notes; Generate reachable and tappable with the keyboard open). The PR captures are on `refs/pr-visuals/13` at `befe086`.
+- [x] AC-03: Tapping a Library tile opens the Asset page with the 3D model, name, Quality, generation time,
       seed and creation time and the actions View in your room (where AR is available), Share GLB, Download,
       Remix and Delete, with the tab bar still shown; Back returns to the Library, and the `‹ Library`
       button reaches the Library from inside the app even when the asset was opened directly; `?asset=<id>` opens that asset directly, as the Asset
@@ -610,32 +612,42 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
       and Dismiss hides it for good;
       and Remix fills Create from the asset, choosing
       for a Custom asset the level with its triangle count, otherwise Standard.
-- [ ] AC-04: Create offers one Quality control with Fast, Standard (selected first), High and Ultra, a batch
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): "asset page" (tile, Back, `‹ Library`, `?asset=`, resize closing, gone message), "asset link desktop" (the Preview dialog at 1024 and wider), "export gone" (the notice on the Library tab, the marker removed, Dismiss), "delete" and "remix" (High for a 20000/2048 asset, Fast for the 5k Custom one) passed in their listed projects.
+- [x] AC-04: Create offers one Quality control with Fast, Standard (selected first), High and Ultra, a batch
       created with each level gets the triangles and texture of the Quality table, Detail and Texture appear
       nowhere on the page, and jobs show their Quality name, or `Custom (...)` when their settings match no
       level.
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): "quality" (each level submits its pair, Detail and Texture gone, jobs show the Quality name or `Custom (...)`), `submit.spec.ts` "Quality Ultra shows its note and submits 30000 with 4096" and `queue-board.spec.ts` "finishes against the fake and its preview shows Quality:" passed; `bun test app/pipeline/presets.test.ts` is part of the same run.
 - [ ] AC-05: On Android, View in your room opens Scene Viewer showing the model, loaded through a link that
       needs no session, also when the page has been open longer than the first link's lifetime; that link
       answers 401 once expired, with a changed signature, for another job or after a token rotation; and on
       a browser without AR support the button is not shown.
-- [ ] AC-06: With notifications turned on, a device receives a notification titled `Asset Studio` with
+      Residual: https://github.com/vhco-pro/3d-assets-gen/issues/16
+- [x] AC-06: With notifications turned on, a device receives a notification titled `Asset Studio` with
       `<name> is ready.` within a minute of a job finishing, also after the app was removed from the recent
       apps; tapping it opens that asset's Asset page; a subscription the server dropped is restored on the
       next signed-in load while the switch is on; and after turning notifications off, or after a token
       rotation without a new load, that device receives none.
-- [ ] AC-07: Take photo opens the camera and each photo taken is added to the chosen images; From photos
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): the five "notifications switch" journeys passed in `phone-chromium`, `phone-webkit` and `chromium`, including the re-post of a dropped subscription on load; `app/server/push.test.ts` (14 tests, including the RFC 8291 vector, token rotation and the stale-subscription drop) passed in the same run. Emulator run 1 step notify passed: a notification `notify closed 6y1qw is ready.` arrived 0 s after the job finished with Asset Studio swiped from recents, and its tap opened that asset's Asset page (`15-notify-closed.png`); after turning notifications off, no notification arrived within 60 s.
+- [x] AC-07: Take photo opens the camera and each photo taken is added to the chosen images; From photos
       adds several images; a batch made this way creates one image job per photo; and a file of another type
       is refused with `Only PNG, JPEG or WebP photos can be used.`
-- [ ] AC-08: Share GLB opens the system share sheet with the GLB file where the browser can share files of
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): "photos" passed in all four projects it lists (Take photo and From photos add to the chosen images, a GIF is refused with `Only PNG, JPEG or WebP photos can be used.`, Generate makes one image job per photo). Emulator run 1 step camera passed: the emulator camera's photo was added and its batch made one image job (`16-camera.png`, `17-camera-job.png`).
+- [x] AC-08: Share GLB opens the system share sheet with the GLB file where the browser can share files of
       that type and is not Chromium-based, and otherwise downloads the GLB and says `Saved to your downloads.`
-- [ ] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): the six per-mode "share" journeys passed in `phone-chromium`, `phone-webkit`, `chromium` and `firefox`, and "share (failed prefetch)" in `phone-webkit` and `firefox`. Emulator run 1 step share passed: Chrome on Android downloaded the GLB to `/sdcard/Download` at its full size (`18-share.png`).
+- [x] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed
       before the rollback, and rolling forward again keeps the push key and the existing notification
       subscriptions.
-- [ ] AC-10: The page uses the Glossary terms of this document for Quality, the tabs and the new actions.
-- [ ] AC-11: The initial page load stays within 150 KiB of JavaScript after gzip at level 9.
+      Evidence: Done on win-main with 0.3.0-feat-asset-studio-mobile.2 (no schema change since, migrations untouched). Image and database schema stayed 2 and 2 at every stage. The same 100 jobs (SHA-256 prefix `fa235a1e772e`) were there before the deploy, on the prerelease, after `scripts/deploy/rollback.sh` to v0.2.0 and after deploying the prerelease again. That last deploy kept push key `644b62b9fe1c` and the same 2 endpoints (`5fa142105c4a`). The full record is under T31.
+- [x] AC-10: The page uses the Glossary terms of this document for Quality, the tabs and the new actions.
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): `glossary.spec.ts` "the phone layout uses the Glossary terms for the tabs, Quality and the Asset page's actions" and the existing Glossary check passed.
+- [x] AC-11: The initial page load stays within 150 KiB of JavaScript after gzip at level 9.
+      Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): the bundle budget step reported `initial 122.7 KiB, viewer 280.5 KiB (gzip level 9)` and passed.
 - [ ] AC-12: The prerelease deployed on win-main passes the Android emulator journey run 2 against
       `https://win-main.tail6948f.ts.net`: install, sign in, the three tabs, an existing asset shown in Scene
       Viewer, and notifications turned on, without submitting any job.
+      Residual: https://github.com/vhco-pro/3d-assets-gen/issues/16
 
 ## Test Plan
 
