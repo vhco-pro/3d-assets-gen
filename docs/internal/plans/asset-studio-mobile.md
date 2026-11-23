@@ -621,6 +621,30 @@ None.
 | 2026-11-23 | R-6 | spec | `61367c4` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit; all applied |
 | 2026-11-23 | R-7 | spec | `490eb4c` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied |
 | 2026-11-23 | R-8 | spec | `8ce3ce4` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 1 nit; all applied with the owner's two answers |
+| 2026-11-23 | R-9 | spec | `5abb796` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix |
+
+### R-9
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan AC-06 ("notifications switch": "in `chromium` with no unfinished job (the seeded unfinished jobs cancelled through the API first) the queue is hidden and the switch is still shown above the Library"); Test Plan AC-02 (visual record: "the Notifications switch above the desktop Library (with and without a visible queue)"); Design > Layout and navigation ("the desktop queue still hides"); Design > Notifications ("shown whether or not the queue is visible")
+EVIDENCE: The desktop `Queue` lists every job that is not done and returns null only when that list is empty: `const rows = jobs.filter((j) => j.state !== "done"); ... if (!loading && !failedLoad && rows.length === 0) return null;` (app/web/App.tsx:518-520). Cancelled and failed jobs are rows. The seed has failed jobs id(5), id(11) and id(13) and cancelled jobs id(6) and id(14) (app/server/seed.ts:56-70), and other rows rely on them: AC-03 opens "a seeded failed job's ID" and AC-04 needs "the seeded cancelled Ultra job shows `Quality: Ultra` in the queue". Cancelling the two submitted jobs (id(7), id(8)) only adds two more cancelled rows, so a correct build still shows the queue and the step's "the queue is hidden" assertion fails. Cancelling id(7) also changes the shared stack the other journeys run against at the same time (playwright.config.ts:15, `workers: 2`; app/e2e/global.ts:1, "the one seeded stack the non-isolated journeys share"). The "without a visible queue" capture has the same problem. The R-8 revision added this step for R-8 F-05, whose evidence described the hide rule as "when no job is unfinished"; the code hides the queue only when every job is done.
+PROPOSAL: Run the hidden-queue check on its own isolated stack seeded with the `empty` profile, or with only done jobs (the harness already supports per-test stacks through `startStack`), and say so in the row and the visual record entry. Do not cancel jobs on the shared stack.
+
+FINDING: F-02
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (URL paragraph: "Switching tabs uses `history.replaceState`; opening an asset uses `history.pushState` ... Tab switches add no history entry, so Back from Create, Queue or Library leaves Asset Studio"; Asset page paragraph: "The Asset page keeps the bottom tab bar ... tapping the Library tab does the same as the button" and "Remix ... switches to Create"; gone message "with a button back to the Library"); Acceptance Criteria AC-02 ("adds no history entry for a tab switch"); Test Plan AC-02 ("tabs") and AC-03 ("asset page", "remix")
+EVIDENCE: The R-8 revision kept the tab bar on the Asset page and defined only the Library tab and the `‹ Library` button there. Tapping Create or Queue on the Asset page, or Remix (which switches to Create), is still covered only by the general rule "Switching tabs uses `history.replaceState`". After a tile tap pushes `?asset=`, replacing that entry with `?tab=queue` leaves history as [previous page, `?tab=library`, `?tab=queue`], so Back from Queue returns to the Library instead of leaving Asset Studio as Design says. One implementer replaces the entry (leaving the stale Library entry), another calls `history.back()` first and then replaces, and a third pushes. The "tabs" journey starts from Create without an open asset, and the "remix" journey never presses Back, so all three builds pass. The gone message's button also has no stated rule, unlike `‹ Library` and Delete.
+PROPOSAL: State that leaving the Asset page by any tab, by Remix or by the gone message's button first applies the `‹ Library` rule (`history.back()` when the entry carries `{ from: "library" }`) and then replaces the URL with the target tab. Add a step to the "asset page" or "remix" journey: open an asset from a tile, tap Queue (or Remix), and assert that `page.goBack()` leaves the app.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications (switch paragraph: "on a mismatch (the server lost `push.json` and made new keys) it unsubscribes, subscribes again with the server's key and posts the new subscription", "When the re-post on load fails, the switch stays on and shows `Could not reach Asset Studio; notifications may not arrive.`"; server bullet: "the page re-subscribes on its next load when the key it subscribed with differs"); Test Plan AC-06 ("notifications switch": the key-mismatch reload step)
+EVIDENCE: The R-8 revision added the key-mismatch path on load. It changes state in two places (the browser's push subscription and the server's `push.json`) and crosses the push service boundary, but only the final POST's failure is covered. If `unsubscribe` succeeds and the new `pushManager.subscribe` then fails, for example because the push service is unreachable or the browser refuses a subscribe call outside a gesture, the device has no subscription. Design does not say whether the switch then shows off with no message, off with `Notifications could not be turned on. Try again.`, or on with the could-not-reach message. One implementer leaves the switch silently off, another shows a message, and the journey only covers the success order (`unsubscribe`, `subscribe`, one POST).
+PROPOSAL: State what the switch shows when the re-subscribe on load fails after the old subscription was removed (for example off with `Notifications could not be turned on. Try again.`), and add that case to the key-mismatch step with a `subscribe` stub that rejects.
 
 ### R-8
 
