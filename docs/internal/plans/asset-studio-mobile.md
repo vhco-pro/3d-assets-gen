@@ -583,6 +583,30 @@ None.
 | 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits; all applied with the owner's nine answers; removed author extra: stored page origin as the VAPID `sub` claim, now a fixed URL (R-1 F-04) |
 | 2026-11-23 | R-2 | spec | `9527e14` | claude-opus-5-5 | procedural | 0 blocking, 12 should-fix, 2 nits; all applied with the owner's eight answers; F-01 replaced the R-1 refresh-on-tap with a background link refresh |
 | 2026-11-23 | R-3 | spec | `5bce6c5` | claude-opus-5-5 | procedural | 2 blocking, 4 should-fix; all applied with the owner's two answers; removed author extra: the Chromium `notificationclick` journey, the emulator foreground tap proves that path (R-3 F-02) |
+| 2026-11-23 | R-4 | spec | `3d878f2` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit |
+
+### R-4
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > AR: View in your room (first paragraph: "so the button's click handler calls `stopPropagation()` and `preventDefault()` first; each tap then starts exactly one AR launch, the page's own"); Design > AR: View in your room (iPhone paragraph: "the tap calls model-viewer's `activateAR()`"); Test Plan AC-05 ("ar link": "makes exactly one request matching `^intent:`")
+EVIDENCE: The page is React 19 (package.json:26-27), and React attaches its event listeners at the root container, so a React `onClick` runs only after the native click has bubbled past every ancestor. model-viewer adds its click listener to the shadow container `div.slot.ar-button` (node_modules/@google/model-viewer/lib/features/ar.js:76-79 and 199-200), which sits between the slotted button and the root. I tested this with a scratch page outside the repository: a custom element with that shadow structure and a click listener on the container, and a React 19 `<button slot="ar-button" onClick={e => { e.stopPropagation(); e.preventDefault(); ... }}>`, clicked with the repository's Playwright Chromium. The order logged was `["container","react"]`, so the container listener ran before the React handler's `stopPropagation()`. If the "click handler" is the usual React prop, model-viewer still calls `activateAR()`. On Android that sends a second intent with the cookie-protected `src` (ar.js:250-291), and on iPhone `activateAR()` runs twice. The document does not say whether the handler is a React prop or a native listener, so two implementers build different things. The "ar link" row would catch the Android double intent in `phone-chromium`. The iPhone case goes unchecked, because in `phone-webkit` model-viewer selects no AR mode and attaches no container listener (the test forces `canActivateAR`). This text came in with the R-3 F-03 revision.
+PROPOSAL: Say that the button's click listener is a native one, attached with `addEventListener` on the button element through a ref (not a React `onClick` prop), so `stopPropagation()` runs before the event reaches model-viewer's container. The other option is to render the button outside the `ar-button` slot and drive its visibility from `ar-status` and `canActivateAR`.
+
+FINDING: F-02
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > AR: View in your room (`ar-link` answer `{"url": "/api/assets/<id>/model.glb?exp=<unix seconds>&sig=<base64url>"}`; Android tap paragraph: "`...&file=<link>` ... in the same format model-viewer 4.4.0 uses"); Test Plan AC-05 ("ar link": "whose `file` parameter is the latest link"; emulator run 1 step "AR launch": "whose `file` is the signed URL")
+EVIDENCE: `ar-link` returns a path relative to the origin. model-viewer resolves the model against the page with `new URL(firstSrc, location)` and adds it percent-encoded as `'&file=' + encodeURIComponent(modelUrl.toString())` (node_modules/@google/model-viewer/lib/features/ar.js:258 and 289-290). The document writes `file=<link>`, where `<link>` is the relative path, and never says that the value is made absolute and encoded. A build that puts the relative path in the intent, or leaves `?exp=...&sig=...` unencoded so that `sig` becomes a separate intent parameter, gives Scene Viewer a URL it cannot load, or one that answers 401. That build still passes a "ar link" assertion that compares `file` with the `ar-link` response, and it passes run 1, which checks only the launch. Only emulator run 2 would catch it.
+PROPOSAL: State that `file` is the link resolved against `location.origin` into an absolute URL and encoded with `encodeURIComponent`. In the "ar link" row, assert that the decoded `file` parameter equals that absolute URL, including `exp` and `sig`.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary (validation paragraph: "Spec review R-1 found 1 blocking and 14 should-fix findings and R-2 found 12 should-fix findings; all are folded in, and a new review is pending.")
+EVIDENCE: The Review Log records R-3 at `5bce6c5` with 2 blocking and 4 should-fix findings, and status_description says the document was revised for R-3. The summary's validation state stops at R-2. A later paragraph mentions "After the third review you decided ..." but does not give R-3's findings.
+PROPOSAL: Add that R-3 found 2 blocking and 4 should-fix findings, all folded in.
 
 ### R-3
 
