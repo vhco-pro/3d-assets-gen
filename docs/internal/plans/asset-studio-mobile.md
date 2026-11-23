@@ -642,7 +642,8 @@ opens the app.
 - [x] T1 `app/pipeline/presets.test.ts` - failing tests: every Quality maps to its table pair and passes `validPairing`; the label function returns each name, `Custom (5k, 2048)` and `Custom (10k)`; `remixQuality` gives Fast for 5000 with 2048, Standard for 10000 with no texture, High for 20000 with 4096 and Standard for 15000 with 2048; they fail because the exports do not exist (AC-03, AC-04)
       Evidence: `bun test app/pipeline/presets.test.ts` fails as intended: `SyntaxError: Export named 'QUALITIES' not found in module app/pipeline/presets.ts` (0 pass, 1 fail, 1 error).
 
-- [ ] T2 `app/pipeline/presets.ts` - `QUALITIES`, the Quality label function and `remixQuality`; T1 passes (AC-03, AC-04)
+- [x] T2 `app/pipeline/presets.ts` - `QUALITIES`, the Quality label function and `remixQuality`; T1 passes (AC-03, AC-04)
+      Evidence: `bun test app/pipeline/presets.test.ts` 5 pass 0 fail; `bun run typecheck`, `bun run lint` and the unit run (`bun test app` without e2e, image and memory) pass, 167 pass 0 fail.
 
 - [ ] T3 `app/server/arlink.test.ts`, `app/server/store.test.ts` - failing AC-05 server tests: a link from `ar-link` fetches the GLB with no cookie and logs one line with the job ID and user agent; the link answers 401 after `exp`, with one changed `sig` character, for another job and after a token change; a bad signature counts toward the failure limit; `ar-link` answers 404 for an unknown or failed job; plus the guard that the migration list still has 2 entries; the link tests fail because the route does not exist (AC-05, AC-09)
 
