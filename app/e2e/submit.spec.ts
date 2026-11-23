@@ -90,14 +90,10 @@ test("Shared style is prefilled, saved on change, resettable, capped at 300 and 
   await expect(page.getByText("Shared style applies to prompts only.")).toBeVisible();
 });
 
-test("Ultra 30k locks Texture to 4096, shows its note and submits 30000 with 4096 (AC-29)", async ({ page }) => {
-  const detail = page.getByLabel("Detail", { exact: true });
-  const texture = page.getByLabel("Texture", { exact: true });
-  await expect(texture.getByRole("radio", { name: "4096" })).toBeDisabled();
-  await detail.getByRole("radio", { name: "Ultra 30k" }).click();
-  await expect(texture.getByRole("radio", { name: "4096" })).toHaveAttribute("data-state", "on");
-  await expect(texture.getByRole("radio", { name: "1024" })).toBeDisabled();
-  await expect(texture.getByRole("radio", { name: "2048" })).toBeDisabled();
+test("Quality Ultra shows its note and submits 30000 with 4096 (AC-29, asset-studio-mobile AC-04)", async ({ page }) => {
+  const quality = page.getByLabel("Quality", { exact: true });
+  await expect(quality.getByRole("radio", { name: "Standard" })).toHaveAttribute("data-state", "on");
+  await quality.getByRole("radio", { name: "Ultra" }).click();
   await expect(page.getByText("Ultra: best quality, about 10 min per job.")).toBeVisible();
   const prompt = uniquePrompt("ultra");
   await page.getByLabel("Prompts").fill(prompt);
@@ -106,8 +102,6 @@ test("Ultra 30k locks Texture to 4096, shows its note and submits 30000 with 409
   const body = (await posted).postDataJSON() as { presets: { faces: number; tex: number } };
   expect(body.presets).toMatchObject({ faces: 30000, tex: 4096 });
   await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
-  await detail.getByRole("radio", { name: "10k" }).click();
-  await expect(texture.getByRole("radio", { name: "2048" })).toHaveAttribute("data-state", "on");
-  await expect(texture.getByRole("radio", { name: "4096" })).toBeDisabled();
+  await quality.getByRole("radio", { name: "Standard" }).click();
   await expect(page.getByText("Ultra: best quality, about 10 min per job.")).toHaveCount(0);
 });

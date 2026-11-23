@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { deleteJob, type Job } from "./api.ts";
-import { dateFormat, ErrorText, label } from "./common.tsx";
+import { dateFormat, ErrorText, label, qualityText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { formatDuration } from "./queue.ts";
 import { ModelStage, timing } from "./Viewer.tsx";
@@ -19,7 +19,7 @@ function Fact({ term, children }: { term: string; children: ReactNode }): ReactN
   );
 }
 
-export function AssetPage({ job, onLibrary }: { job: Job; onLibrary: () => void }): ReactNode {
+export function AssetPage({ job, onLibrary, onRemix }: { job: Job; onLibrary: () => void; onRemix: () => void }): ReactNode {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,6 +42,7 @@ export function AssetPage({ job, onLibrary }: { job: Job; onLibrary: () => void 
     <section data-screen="asset" data-testid="asset-page" aria-labelledby="asset-name" className="grid gap-3.5">
       <ModelStage job={job} name={name} className="aspect-square max-h-[60dvh] w-full justify-self-center" />
       <h2 id="asset-name" className="text-[1.15rem] [overflow-wrap:anywhere]">{name}</h2>
+      <p className="font-semibold text-muted-foreground">{qualityText(job)}</p>
       {job.sharedStyle && <p className="text-sm text-muted-foreground"><span className="font-semibold">Shared style</span>{` ${job.sharedStyle}`}</p>}
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[.95rem] text-muted-foreground">
         {generated !== null && <Fact term="Generated in">{formatDuration(generated)}</Fact>}
@@ -50,6 +51,7 @@ export function AssetPage({ job, onLibrary }: { job: Job; onLibrary: () => void 
       </dl>
       <div className="grid grid-cols-2 gap-2">
         <Button type="button" size="lg" onClick={() => { window.location.assign(`/api/assets/${job.id}/model.glb`); }}>Download</Button>
+        <Button type="button" size="lg" onClick={onRemix}>Remix</Button>
         <Button type="button" size="lg" variant="delete" disabled={busy} onClick={remove}>Delete</Button>
       </div>
       {error && <ErrorText>{error}</ErrorText>}

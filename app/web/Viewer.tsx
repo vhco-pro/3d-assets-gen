@@ -1,10 +1,10 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Job } from "./api.ts";
-import { dateFormat, ErrorText } from "./common.tsx";
+import { deleteJob, type Job } from "./api.ts";
+import { dateFormat, ErrorText, qualityText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
 import { Progress } from "./components/ui/progress.tsx";
-import { isUltra } from "../pipeline/presets.ts";
 import { formatDuration } from "./queue.ts";
 
 type Status = "loading" | "ready" | "failed";
@@ -118,8 +118,24 @@ export function timing(job: Job): { waited: number | null; generated: number | n
  * The preview: a modal dialog (focus trapped; Escape closes it and focus returns to the opener) with the
  * viewer, its download progress, the full prompt, the settings, the timing and the downloads.
  */
-export function Viewer({ job, name, opener, onClose }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void }): ReactNode {
+export function Viewer({ job, name, opener, onClose, onRemix }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void; onRemix: () => void }): ReactNode {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const { waited, generated, total } = timing(job);
+  const remove = (): void => {
+    setBusy(true);
+    setError(null);
+    deleteJob(job.id)
+      .then(async () => {
+        await qc.invalidateQueries({ queryKey: ["jobs"] });
+        onClose();
+      })
+      .catch((e: unknown) => {
+        setBusy(false);
+        setError(e instanceof Error ? e.message : "That action failed. Try again.");
+      });
+  };
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent showCloseButton={false} aria-modal="true" onCloseAutoFocus={(e) => { e.preventDefault(); opener?.focus(); }} className="grid max-h-[calc(100dvh-2rem)] w-[min(56rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border bg-[var(--vh-bg-1)] p-0 sm:max-w-none">
@@ -131,9 +147,8 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
           <ModelStage job={job} name={name} className="h-[clamp(9rem,50dvh,30rem)]" />
           <p data-testid="full-prompt" className="max-w-[72ch] whitespace-pre-wrap [overflow-wrap:anywhere]">{name}</p>
           {job.sharedStyle && <p className="text-sm text-muted-foreground"><span className="font-semibold">Shared style</span>{` ${job.sharedStyle}`}</p>}
+          <p className="font-semibold text-muted-foreground">{qualityText(job)}</p>
           <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[.95rem] text-muted-foreground">
-            <div className="flex gap-1.5"><dt className="font-semibold">Detail</dt><dd className="tabular-nums">{isUltra(job.faces, job.tex) ? "Ultra (30k triangles)" : `${String(job.faces / 1000)}k triangles`}</dd></div>
-            {job.tex !== null && <div className="flex gap-1.5"><dt className="font-semibold">Texture</dt><dd className="tabular-nums">{String(job.tex)}</dd></div>}
             <div className="flex gap-1.5"><dt className="font-semibold">Seed</dt><dd className="mono">{String(job.seed)}</dd></div>
             <div className="flex gap-1.5"><dt className="font-semibold">Created</dt><dd>{dateFormat.format(job.createdAt)}</dd></div>
             {waited !== null && <div className="flex gap-1.5"><dt className="font-semibold">Waited</dt><dd className="tabular-nums">{formatDuration(waited)}</dd></div>}
@@ -141,7 +156,10 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
             {total !== null && <div className="flex gap-1.5"><dt className="font-semibold">Total</dt><dd className="tabular-nums">{formatDuration(total)}</dd></div>}
           </dl>
         </div>
+        {error && <div className="px-4"><ErrorText>{error}</ErrorText></div>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-border px-4 py-3">
+          <Button type="button" onClick={onRemix}>Remix</Button>
+          <Button type="button" variant="delete" disabled={busy} onClick={remove}>Delete</Button>
           <Button type="button" onClick={() => { window.location.assign(`/api/assets/${job.id}/model.glb`); }}>Download GLB</Button>
           <Button type="button" onClick={onClose}>Close</Button>
         </div>

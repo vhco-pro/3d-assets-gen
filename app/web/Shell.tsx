@@ -3,7 +3,7 @@
 import { Images, ListOrdered, SquarePen } from "lucide-react";
 import { useState, type MouseEvent, type ReactNode } from "react";
 import type { Job } from "./api.ts";
-import { ErrorText, label, plural, useSelection } from "./common.tsx";
+import { ErrorText, label, plural, qualityText, useSelection } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Checkbox } from "./components/ui/checkbox.tsx";
 import { tabHref, type Tab } from "./nav.ts";
@@ -97,6 +97,7 @@ export function PhoneLibrary({ jobs, onOpen }: { jobs: Job[]; onOpen: (job: Job)
               </button>
             )}
             <span data-testid="prompt-text" className="prompt clamp text-[.95rem]" title={label(j)}>{label(j)}</span>
+            <span className="text-sm text-muted-foreground">{qualityText(j)}</span>
           </li>
         ))}
       </ul>

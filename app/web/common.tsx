@@ -2,6 +2,7 @@
 // Library's selection with its zip download.
 import { CircleAlert } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { qualityLabel, qualityOf } from "../pipeline/presets.ts";
 import { startExport, type Job } from "./api.ts";
 import { Badge } from "./components/ui/badge.tsx";
 
@@ -35,6 +36,11 @@ export function label(job: Job): string {
 
 export function plural(n: number, one: string, many: string): string {
   return `${String(n)} ${n === 1 ? one : many}`;
+}
+
+/** `Quality: <name>` for a job whose pair matches a level, otherwise `Custom (<k>k, <texture>)` (Design > Quality). */
+export function qualityText(job: Pick<Job, "faces" | "tex">): string {
+  return qualityOf(job.faces, job.tex) ? `Quality: ${qualityLabel(job.faces, job.tex)}` : qualityLabel(job.faces, job.tex);
 }
 
 export const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });

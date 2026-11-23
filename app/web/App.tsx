@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Box, ChevronDown, Images } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
-import { DEFAULT_SHARED_STYLE, DETAILS, isUltra, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, TEXTURES, ULTRA_FACES, ULTRA_TEX } from "../pipeline/presets.ts";
+import { DEFAULT_QUALITY, DEFAULT_SHARED_STYLE, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, QUALITIES, qualityByName, remixQuality, type QualityName } from "../pipeline/presets.ts";
 import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
 import { AssetGone, AssetPage, GONE_MESSAGE } from "./AssetPage.tsx";
-import { ErrorText, label, plural, StateBadge, useSelection } from "./common.tsx";
+import { ErrorText, label, plural, qualityText, StateBadge, useSelection } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Card } from "./components/ui/card.tsx";
 import { Checkbox } from "./components/ui/checkbox.tsx";
@@ -129,6 +129,8 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
   const [preview, setPreview] = useState<{ job: Job; opener: HTMLElement | null } | null>(null);
   // The export notice is read once, on load; the address loses its marker at once (below).
   const [notice, setNotice] = useState<string | null>(() => (new URLSearchParams(window.location.search).get("export") === "gone" ? EXPORT_NOTICE : null));
+  // Remix remounts the composer with the asset's prompt and settings.
+  const [remix, setRemix] = useState<{ seq: number; draft: Draft | null }>({ seq: 0, draft: null });
   const previewOpen = useRef(false);
   useEffect(() => {
     previewOpen.current = preview !== null;
@@ -186,6 +188,11 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     setRoute(next);
   };
   const phoneLibrary = (): void => { toLibrary(tabHref("library"), { tab: "library", asset: null }); };
+  const startRemix = (job: Job): void => {
+    const draft = draftFrom(job);
+    if (draft.sharedStyle !== undefined) saveShared(draft.sharedStyle);
+    setRemix((r) => ({ seq: r.seq + 1, draft }));
+  };
   const closeLinkedAsset = (): void => { toLibrary("/", { tab: "create", asset: null }); };
 
   const banners = (comfy === "offline" || comfy === "incompatible" || notice || (wide && assetGone)) && (
@@ -210,13 +217,13 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
   if (!wide) {
     let content: ReactNode;
     if (route.asset !== null) {
-      content = assetJob ? <AssetPage job={assetJob} onLibrary={phoneLibrary} /> : assetGone ? <AssetGone onLibrary={phoneLibrary} /> : <p className="text-muted-foreground">Loading…</p>;
+      content = assetJob ? <AssetPage job={assetJob} onLibrary={phoneLibrary} onRemix={() => { startRemix(assetJob); goTab("create"); }} /> : assetGone ? <AssetGone onLibrary={phoneLibrary} /> : <p className="text-muted-foreground">Loading…</p>;
     } else if (route.tab === "queue") {
       content = <section data-screen="queue"><Queue jobs={list} loading={jobs.isPending} error={jobs.error} showEmpty /></section>;
     } else if (route.tab === "library") {
       content = <PhoneLibrary jobs={done} onOpen={openAsset} />;
     } else {
-      content = <section data-screen="create"><Composer /></section>;
+      content = <section data-screen="create"><Composer key={remix.seq} draft={remix.draft} /></section>;
     }
     return (
       <PhoneShell tab={route.asset !== null ? "library" : route.tab} onTab={goTab} onAssetBack={route.asset !== null ? phoneLibrary : null} banners={banners}>
@@ -240,13 +247,21 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
       </header>
       {banners}
       <main className="layout">
-        <Composer />
+        <Composer key={remix.seq} draft={remix.draft} />
         <div className="grid min-w-0 gap-5">
           <Queue jobs={list} loading={jobs.isPending} error={jobs.error} />
           <Library jobs={done} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
         </div>
       </main>
-      {dialog && <Viewer job={dialog.job} name={label(dialog.job)} opener={dialog.opener} onClose={() => { if (preview) setPreview(null); else closeLinkedAsset(); }} />}
+      {dialog && (
+        <Viewer
+          job={dialog.job}
+          name={label(dialog.job)}
+          opener={dialog.opener}
+          onClose={() => { if (preview) setPreview(null); else closeLinkedAsset(); }}
+          onRemix={() => { startRemix(dialog.job); if (preview) setPreview(null); else closeLinkedAsset(); }}
+        />
+      )}
     </div>
   );
 }
@@ -259,7 +274,7 @@ function readShared(): string {
   }
 }
 
-function saveShared(value: string): void {
+export function saveShared(value: string): void {
   try {
     window.localStorage.setItem(SHARED_KEY, value);
   } catch {
@@ -267,44 +282,47 @@ function saveShared(value: string): void {
   }
 }
 
-/** Detail's segment text: `5k`, `10k`, `20k` and `Ultra 30k`. */
-const detailLabel = (d: number): string => (d === ULTRA_FACES ? "Ultra 30k" : `${String(d / 1000)}k`);
+/** What Remix copies into Create: an image asset fills only Quality and Game-asset style. */
+interface Draft {
+  prompt?: string;
+  quality: QualityName;
+  style: boolean;
+  sharedStyle?: string;
+}
 
-function Segments({ name, legend, values, value, format, onChange, disabled }: { name: string; legend: string; values: readonly number[]; value: number; format: (v: number) => string; onChange: (v: number) => void; disabled?: (v: number) => boolean }): ReactNode {
-  const id = `${name}-label`;
+function draftFrom(job: Job): Draft {
+  const quality = remixQuality(job.faces, job.tex);
+  if (job.kind === "image") return { quality, style: job.style };
+  return { prompt: job.prompt ?? "", quality, style: job.style, sharedStyle: job.sharedStyle ?? "" };
+}
+
+/** Quality: one segmented radio group with the four levels (asset-studio-mobile, Design > Quality). */
+function QualityControl({ value, onChange }: { value: QualityName; onChange: (q: QualityName) => void }): ReactNode {
   return (
-    // Full width so Detail's four items and Texture's three stay on one row each.
     <div className="col-span-full grid gap-1.5">
-      <span className="font-semibold" id={id}>{legend}</span>
-      <ToggleGroup type="single" variant="outline" aria-labelledby={id} value={String(value)} onValueChange={(v) => { if (v) onChange(Number(v)); }} className="w-fit flex-wrap">
-        {values.map((v) => (
-          <ToggleGroupItem key={v} value={String(v)} disabled={disabled?.(v) ?? false} className="min-w-12 tabular-nums">{format(v)}</ToggleGroupItem>
+      <span className="font-semibold" id="quality-label">Quality</span>
+      <ToggleGroup type="single" variant="outline" aria-labelledby="quality-label" value={value} onValueChange={(v) => { const q = QUALITIES.find((x) => x.name === v); if (q) onChange(q.name); }} className="w-fit flex-wrap">
+        {QUALITIES.map((q) => (
+          <ToggleGroupItem key={q.name} value={q.name} className="min-w-16">{q.name}</ToggleGroupItem>
         ))}
       </ToggleGroup>
     </div>
   );
 }
 
-function Composer(): ReactNode {
+function Composer({ draft }: { draft: Draft | null }): ReactNode {
   const qc = useQueryClient();
-  const [prompts, setPrompts] = useState("");
+  const [prompts, setPrompts] = useState(draft?.prompt ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [over, setOver] = useState(false);
-  const [faces, setFaces] = useState(10000);
-  const [tex, setTex] = useState(2048);
+  const [quality, setQuality] = useState<QualityName>(draft?.quality ?? DEFAULT_QUALITY);
+  const { faces, tex } = qualityByName(quality);
   const [variants, setVariants] = useState("1");
-  const [style, setStyle] = useState(true);
+  const [style, setStyle] = useState(draft?.style ?? true);
   const [seed, setSeed] = useState("");
-  const [shared, setShared] = useState(readShared);
+  const [shared, setShared] = useState(() => draft?.sharedStyle ?? readShared());
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const ultra = faces === ULTRA_FACES;
-  // Ultra is one pairing: it selects and locks 4096; leaving it goes back to the 2048 default.
-  const chooseDetail = (d: number): void => {
-    setFaces(d);
-    if (d === ULTRA_FACES) setTex(ULTRA_TEX);
-    else if (tex === ULTRA_TEX) setTex(2048);
-  };
   const lines = prompts.split("\n").map((l) => l.trim()).filter(Boolean);
   const v = Number(variants);
   const perLine = Number.isInteger(v) && v >= 1 ? Math.min(v, MAX_VARIANTS) : 1;
@@ -387,9 +405,8 @@ function Composer(): ReactNode {
           )}
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-x-4 gap-y-3.5">
-          <Segments name="detail" legend="Detail" values={DETAILS} value={faces} format={detailLabel} onChange={chooseDetail} />
-          <Segments name="texture" legend="Texture" values={TEXTURES} value={tex} format={String} onChange={setTex} disabled={(t) => (ultra ? t !== ULTRA_TEX : t === ULTRA_TEX)} />
-          {ultra && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
+          <QualityControl value={quality} onChange={setQuality} />
+          {quality === "Ultra" && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
           <div className="grid gap-1.5">
             <label className="font-semibold" htmlFor="variants">Variants</label>
             <div className="flex gap-1.5">
@@ -467,8 +484,7 @@ function JobRow({ job, est, now, onAction }: { job: Job; est: Estimates; now: nu
         <ClampedText text={label(job)} />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StateBadge job={job} />
-          <Chip>{isUltra(job.faces, job.tex) ? "Ultra" : `${String(job.faces / 1000)}k`}</Chip>
-          {job.tex !== null && <Chip>{String(job.tex)}</Chip>}
+          <Chip>{qualityText(job)}</Chip>
           <Chip><span className="mono">{`seed ${String(job.seed)}`}</span></Chip>
         </div>
         {unfinished && (
@@ -648,6 +664,7 @@ function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job, opener:
                 <label htmlFor={`select-${j.id}`}>Select</label>
               </div>
             </div>
+            <span className="text-sm text-muted-foreground">{qualityText(j)}</span>
             {j.startedAt !== null && j.finishedAt !== null && <span className="text-sm text-muted-foreground">{`Generated in ${formatDuration(j.finishedAt - j.startedAt)}`}</span>}
             <div className="flex flex-wrap gap-1.5">
               <Button type="button" size="sm" aria-label={`Download ${label(j)}`} onClick={() => { window.location.assign(`/api/assets/${j.id}/model.glb`); }}>Download</Button>

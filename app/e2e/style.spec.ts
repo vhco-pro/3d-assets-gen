@@ -155,11 +155,11 @@ test("controls are shadcn components: data-slot attributes, a primary-coloured s
   await signIn(page, stack.url, stack.token);
   await page.getByLabel("Prompts").fill("slot check");
   await expect(page.getByRole("button", { name: /^Generate/ })).toHaveAttribute("data-slot", "button");
-  await expect(page.getByLabel("Detail", { exact: true })).toHaveAttribute("data-slot", "toggle-group");
+  await expect(page.getByLabel("Quality", { exact: true })).toHaveAttribute("data-slot", "toggle-group");
   await expect(page.getByLabel("Game-asset style", { exact: true })).toHaveAttribute("data-slot", "switch");
   await expect(page.getByTestId("asset").first().getByRole("checkbox")).toHaveAttribute("data-slot", "checkbox");
-  const selected = page.getByLabel("Detail", { exact: true }).locator("[data-state=on]");
-  await expect(selected).toHaveText("10k");
+  const selected = page.getByLabel("Quality", { exact: true }).locator("[data-state=on]");
+  await expect(selected).toHaveText("Standard");
   expect(await selected.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(79, 140, 255)");
   const plain = page.getByRole("button", { name: "Download selected" });
   expect(await plain.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(255, 255, 255, 0.07)");
