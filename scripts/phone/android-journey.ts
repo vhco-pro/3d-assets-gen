@@ -76,7 +76,12 @@ interface UiNode { text: string; desc: string; res: string; bounds: [number, num
 
 /** The screen's uiautomator nodes. */
 export async function uiNodes(ctx: Pick<StepContext, "adb">): Promise<UiNode[]> {
-  const xml = await ctx.adb("exec-out", "uiautomator", "dump", "/dev/tty");
+  // uiautomator refuses to dump while the screen never goes idle (a rendering 3D view); it is asked again.
+  let xml = "";
+  for (let i = 0; i < 5 && !xml.includes("<hierarchy"); i++) {
+    xml = await ctx.adb("exec-out", "uiautomator", "dump", "/dev/tty").catch(() => "");
+    if (!xml.includes("<hierarchy")) await sleep(700);
+  }
   const nodes: UiNode[] = [];
   for (const m of xml.matchAll(/<node [^>]*>/g)) {
     const tag = m[0];
@@ -101,30 +106,57 @@ export async function uiTap(ctx: Pick<StepContext, "adb">, pattern: RegExp): Pro
   return true;
 }
 
-/** A real touch on a page element: its CSS box mapped to screen pixels, tapped with adb input tap. */
-async function tapElement(ctx: StepContext, selector: ReturnType<Page["locator"]>): Promise<void> {
-  await selector.scrollIntoViewIfNeeded();
+/**
+ * Where the page's top-left corner sits on the screen. Chrome's toolbar overlays the top of the web view in a
+ * tab, so the page starts below it; the installed app has no toolbar. The last good answer is kept, because
+ * uiautomator cannot read the screen while a 3D view keeps rendering.
+ */
+async function pageOrigin(ctx: StepContext): Promise<{ left: number; top: number }> {
+  const nodes = await uiNodes(ctx);
+  const view = nodes.find((n) => n.desc === "Web View");
+  if (view) {
+    const toolbar = nodes.find((n) => n.res === "com.android.chrome:id/control_container" && n.bounds[3] > view.bounds[1]);
+    ctx.state.originLeft = String(view.bounds[0]);
+    ctx.state.originTop = String(toolbar ? toolbar.bounds[3] : view.bounds[1]);
+  }
+  if (ctx.state.originTop === undefined) throw new Error("no web view on screen");
+  return { left: Number(ctx.state.originLeft), top: Number(ctx.state.originTop) };
+}
+
+/**
+ * A touch on a page element through Playwright's click: CDP input, which Chrome treats as a user gesture
+ * (permission prompts, the Scene Viewer intent and the camera picker all open from it).
+ */
+async function tapElement(_ctx: StepContext, selector: ReturnType<Page["locator"]>): Promise<void> {
+  // noWaitAfter: an intent:// navigation (Scene Viewer) never finishes as a page navigation.
+  await selector.click({ noWaitAfter: true });
+}
+
+/** A screen touch through adb input tap: the element's CSS box mapped through the page's origin on screen. */
+async function screenTap(ctx: StepContext, selector: ReturnType<Page["locator"]>): Promise<void> {
+  await selector.evaluate((el) => { el.scrollIntoView({ block: "center" }); });
+  await sleep(400);
   const box = await selector.boundingBox();
   if (!box) throw new Error("element has no box");
-  const view = await ctx.page.evaluate(() => ({ dpr: window.devicePixelRatio, inner: window.innerHeight, outer: window.outerHeight }));
-  const screen = await screenSize(ctx);
-  // The page fills the screen's width; its top sits below the status bar and any browser chrome.
-  const top = screen.height - Math.round(view.inner * view.dpr) - (await navBarHeight(ctx));
-  const x = Math.round((box.x + box.width / 2) * view.dpr);
-  const y = Math.round(top + (box.y + box.height / 2) * view.dpr);
+  const dpr = await ctx.page.evaluate(() => window.devicePixelRatio);
+  const { left, top } = await pageOrigin(ctx);
+  const x = Math.round(left + (box.x + box.width / 2) * dpr);
+  const y = Math.round(top + (box.y + box.height / 2) * dpr);
   await ctx.adb("shell", "input", "tap", String(x), String(y));
 }
 
-async function screenSize(ctx: Pick<StepContext, "adb">): Promise<{ width: number; height: number }> {
-  const m = /(\d+)x(\d+)/.exec(await ctx.adb("shell", "wm", "size"));
-  return { width: Number(m?.[1] ?? 1080), height: Number(m?.[2] ?? 2400) };
-}
-
-async function navBarHeight(ctx: Pick<StepContext, "adb">): Promise<number> {
-  // Gesture navigation leaves a thin bar; read its height from the window manager when it reports one.
-  const out = await ctx.adb("shell", "dumpsys", "window", "displays").catch(() => "");
-  const m = /mStableInsets=\[0,\d+\]\[0,(\d+)\]/.exec(out) ?? /navigationBarFrame.*?\[0,(\d+)\]\[\d+,(\d+)\]/.exec(out);
-  return m ? Number(m[1]) : 0;
+/** Answers Chrome's own prompts: its notification permission (needed for web push) and the system dialog. */
+async function chromePrompts(ctx: StepContext): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    const nodes = await uiNodes(ctx);
+    const has = (re: RegExp): boolean => nodes.some((n) => re.test(n.text) || re.test(n.desc));
+    if (has(/Chrome notifications make things easier/)) await uiTap(ctx, /^Continue$/);
+    else if (has(/Allow .*to send you notifications/)) await uiTap(ctx, /^Allow$/);
+    else if (has(/^(Turn on sync\?|Sign in to Chrome)/)) await uiTap(ctx, /^(No thanks|No, thanks|Cancel)$/);
+    else return;
+    ctx.log("answered a Chrome prompt");
+    await sleep(1500);
+  }
 }
 
 async function signedIn(page: Page): Promise<boolean> {
@@ -140,6 +172,44 @@ async function appPage(ctx: StepContext): Promise<Page> {
     }
     return pages[0] ?? null;
   }, 30_000);
+}
+
+/**
+ * Sets Chrome's Settings > Accessibility > Text scaling (50 to 200 percent) with its slider: tap where the
+ * value should sit, read the shown percentage, and correct until it matches. Leaves Chrome's settings open.
+ */
+async function setChromeTextScale(ctx: StepContext, percent: number): Promise<void> {
+  const onSlider = async (): Promise<boolean> => (await uiNodes(ctx)).some((n) => n.res === "com.android.chrome:id/seekbar");
+  if (!(await onSlider())) {
+    await ctx.adb("shell", "am", "start", "-n", "com.android.chrome/com.google.android.apps.chrome.Main");
+    await sleep(2000);
+    await until("Chrome's menu", () => uiTap(ctx, /(^|\. )More options$|^Customize and control Google Chrome$/), 20_000);
+    await sleep(1500);
+    await until("Settings", () => uiTap(ctx, /^Settings$/), 10_000);
+    await sleep(2500);
+    await until("Accessibility", async () => {
+      if (await uiTap(ctx, /^Accessibility$/)) return true;
+      await ctx.adb("shell", "input", "swipe", "540", "1800", "540", "700", "300");
+      return null;
+    }, 20_000);
+    await sleep(2000);
+  }
+  const bar = (await uiNodes(ctx)).find((n) => n.res === "com.android.chrome:id/seekbar");
+  if (!bar) throw new Error("Chrome's text scaling slider is not on screen");
+  const [x1, y1, x2, y2] = bar.bounds;
+  const y = Math.round((y1 + y2) / 2);
+  let x = Math.round(x1 + ((percent - 50) / 150) * (x2 - x1));
+  for (let i = 0; i < 8; i++) {
+    await ctx.adb("shell", "input", "tap", String(Math.min(x2 - 1, Math.max(x1 + 1, x))), String(y));
+    await sleep(800);
+    const shown = Number((await uiNodes(ctx)).find((n) => /^\d+%$/.test(n.text))?.text.replace("%", "") ?? "NaN");
+    if (shown === percent) {
+      ctx.log(`Chrome text scaling set to ${String(percent)} percent`);
+      return;
+    }
+    x += shown < percent ? 15 : -15;
+  }
+  throw new Error(`could not set Chrome's text scaling to ${String(percent)} percent`);
 }
 
 async function apiJobs(ctx: StepContext): Promise<{ id: string; prompt: string | null; upload: string | null; state: string; kind: string }[]> {
@@ -175,9 +245,10 @@ async function tapNotification(ctx: StepContext, prompt: string): Promise<void> 
   if (!(await uiTap(ctx, new RegExp(short)))) throw new Error("the notification is not in the shade");
 }
 
+/** The Chrome and installed-app tasks in the recent apps (the installed app runs as Chrome's web app activity). */
 async function appTasks(ctx: StepContext): Promise<number> {
   const out = await ctx.adb("shell", "dumpsys", "activity", "recents");
-  return out.split("\n").filter((l) => /Recent #\d+/.test(l) && /(webapk|Asset Studio|chrome)/i.test(l)).length;
+  return out.split("\n").filter((l) => /^\s*\* Recent #\d+/.test(l) && /(webapk|webapp|com\.android\.chrome)/i.test(l)).length;
 }
 
 // ---- steps --------------------------------------------------------------------------------------------
@@ -190,10 +261,11 @@ export const STEPS: Step[] = [
     async run(ctx) {
       // Chrome's menu: Install app (a WebAPK) or Add to Home screen (a shortcut, without a Google account).
       await ctx.page.goto(ctx.baseUrl);
-      await sleep(3000);
-      await ctx.adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", ctx.baseUrl, "-n", "com.android.chrome/com.google.android.apps.chrome.Main");
-      await sleep(3000);
-      await until("Chrome's menu", () => uiTap(ctx, /^(More options|Customize and control Google Chrome)$/), 20_000);
+      await ctx.page.bringToFront();
+      await sleep(4000);
+      await chromePrompts(ctx);
+      // The menu button's label gains a prefix such as "Update available." when Chrome has news.
+      await until("Chrome's menu", () => uiTap(ctx, /(^|\. )More options$|^Customize and control Google Chrome$/), 20_000);
       await sleep(1500);
       const item = await until("Install app or Add to Home screen", async () => {
         if (await uiTap(ctx, /^Install app$/)) return "Install app";
@@ -262,15 +334,22 @@ export const STEPS: Step[] = [
     submits: false,
     runs: [1],
     async run(ctx) {
-      // Android's font scale drives Chrome's accessibility text scaling (Chrome's default follows the system).
-      await ctx.adb("shell", "settings", "put", "system", "font_scale", "2.0");
+      // Chrome's own accessibility text scaling (Settings > Accessibility > Text scaling) at 200 percent, checked
+      // in a Chrome tab on the app; the installed app shares Chrome's settings.
+      await setChromeTextScale(ctx, 200);
+      await ctx.adb("shell", "input", "keyevent", "KEYCODE_BACK");
+      await ctx.adb("shell", "input", "keyevent", "KEYCODE_BACK");
+      await sleep(1000);
+      const tab = await ctx.context.newPage();
+      let failure: unknown = null;
       try {
-        await sleep(2000);
-        await ctx.page.reload();
+        await tab.goto(ctx.baseUrl);
+        await tab.bringToFront();
+        await tab.getByRole("navigation", { name: "Screens" }).waitFor();
         for (const name of ["Create", "Queue", "Library"]) {
-          await ctx.page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name, exact: true }).click();
-          await sleep(1000);
-          const report = await ctx.page.evaluate(() => {
+          await tab.getByRole("navigation", { name: "Screens" }).getByRole("link", { name, exact: true }).dispatchEvent("click");
+          await sleep(1200);
+          const report = await tab.evaluate(() => {
             const problems: string[] = [];
             const doc = document.documentElement;
             if (doc.scrollWidth > doc.clientWidth + 1) problems.push(`horizontal overflow ${String(doc.scrollWidth)}`);
@@ -278,28 +357,43 @@ export const STEPS: Step[] = [
               const r = el.getBoundingClientRect();
               if (r.width > 0 && el.scrollWidth > el.clientWidth + 1) problems.push(`clipped: ${el.textContent.trim().slice(0, 30)}`);
             }
-            return { problems, textZoom: getComputedStyle(document.body).fontSize };
+            const h1 = document.querySelector("h1");
+            return { problems, heading: h1 ? getComputedStyle(h1).fontSize : "?" };
           });
-          ctx.log(`${name} at 200 percent text (body ${report.textZoom}): ${report.problems.length === 0 ? "no clipped label, no overflow" : report.problems.join("; ")}`);
+          ctx.log(`${name} at 200 percent text (heading ${report.heading}): ${report.problems.length === 0 ? "no clipped label, no overflow" : report.problems.join("; ")}`);
           await ctx.shot(`zoom-${name.toLowerCase()}`);
           if (report.problems.length > 0) throw new Error(`layout problems at 200 percent: ${report.problems.join("; ")}`);
           if (name === "Create") {
-            const generate = ctx.page.getByRole("button", { name: /^Generate/ });
+            // A disabled Generate takes no pointer events, so a prompt is typed first, as a person would.
+            await tab.getByLabel("Prompts").fill("zoom check");
+            const generate = tab.getByRole("button", { name: /^Generate/ });
             await generate.evaluate((el) => { el.scrollIntoView({ block: "nearest" }); });
-            const covered = await generate.evaluate((el) => {
+            await sleep(600);
+            const hit = await generate.evaluate((el) => {
               const r = el.getBoundingClientRect();
-              const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-              return !(hit && (hit === el || el.contains(hit)));
+              const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+              return { ok: at !== null && (at === el || el.contains(at)), top: Math.round(r.top), bottom: Math.round(r.bottom), height: window.innerHeight, over: at ? `${at.tagName}.${at.className.slice(0, 40)}` : "nothing" };
             });
-            ctx.log(`Generate at 200 percent: ${covered ? "covered" : "uncovered"}`);
-            if (covered) throw new Error("Generate is covered at 200 percent");
+            ctx.log(`Generate at 200 percent: ${hit.ok ? "uncovered" : `covered by ${hit.over}`} (${String(hit.top)}-${String(hit.bottom)} of ${String(hit.height)})`);
+            await ctx.shot("zoom-generate");
+            await tab.getByLabel("Prompts").fill("");
+            // Closes the on-screen keyboard the typing opened, so the tab bar is back on screen.
+            await tab.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+            await sleep(1500);
+            if (!hit.ok) throw new Error("Generate is covered at 200 percent");
           }
         }
-      } finally {
-        await ctx.adb("shell", "settings", "put", "system", "font_scale", "1.0");
-        await sleep(1000);
-        await ctx.page.reload();
+      } catch (e) {
+        failure = e;
+        ctx.log(`zoom check failed: ${e instanceof Error ? e.message : String(e)}`);
+        await ctx.shot("zoom-failure");
       }
+      await tab.close().catch(() => undefined);
+      await setChromeTextScale(ctx, 100);
+      await ctx.adb("shell", "input", "keyevent", "KEYCODE_BACK");
+      await ctx.adb("shell", "input", "keyevent", "KEYCODE_BACK");
+      await ctx.page.bringToFront().catch(() => undefined);
+      if (failure) throw failure instanceof Error ? failure : new Error("the zoom check failed");
     },
   },
   {
@@ -310,6 +404,9 @@ export const STEPS: Step[] = [
       const page = ctx.page;
       await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Create" }).click();
       await tapElement(ctx, page.getByLabel("Prompts"));
+      await sleep(1500);
+      // A screen touch as well when the CDP tap focused the field without raising the keyboard.
+      if (!/mInputShown=true|isInputViewShown=true/.test(await ctx.adb("shell", "dumpsys", "input_method"))) await screenTap(ctx, page.getByLabel("Prompts"));
       await until("the on-screen keyboard", async () => /mInputShown=true|isInputViewShown=true/.test(await ctx.adb("shell", "dumpsys", "input_method")), 15_000);
       await page.keyboard.type("keyboard check");
       const generate = page.getByRole("button", { name: /^Generate/ });
@@ -366,13 +463,18 @@ export const STEPS: Step[] = [
       await ctx.adb("logcat", "-c");
       await ctx.shot("ar-button");
       await tapElement(ctx, asset.getByRole("button", { name: "View in your room" }));
+      // logcat shows the launch with its data shortened (dat=https://arvr.google.com/...); the recent tasks
+      // keep the whole intent, file parameter included.
       const line = await until("Scene Viewer's intent in logcat", async () => {
-        const log = await ctx.adb("logcat", "-d", "-s", "ActivityTaskManager:I", "ActivityManager:I");
-        return log.split("\n").find((l) => l.includes("android.intent.action.VIEW") && l.includes("arvr.google.com/scene-viewer")) ?? null;
+        const log = await ctx.adb("logcat", "-d", "-s", "ActivityTaskManager:I");
+        return log.split("\n").find((l) => l.includes("START u0") && l.includes("android.intent.action.VIEW") && l.includes("arvr.google.com")) ?? null;
       }, 20_000);
-      ctx.log(`logcat: ${line.trim().slice(0, 300)}`);
-      const file = /file=([^ &}]+)/.exec(line)?.[1];
+      ctx.log(`logcat: ${line.trim().slice(0, 260)}`);
+      const recents = await ctx.adb("shell", "dumpsys", "activity", "recents");
+      const full = recents.split("\n").find((l) => l.includes("arvr.google.com/scene-viewer") && l.includes("file=")) ?? "";
+      const file = /[?&]file=([^ &}]+)/.exec(full)?.[1];
       const decoded = file ? decodeURIComponent(file) : "";
+      ctx.log(`intent: ${(/dat=(\S+)/.exec(full)?.[1] ?? "").replace(/sig%3D[^ &]+/, "sig%3D<signature>").slice(0, 300)}`);
       ctx.log(`decoded file: ${decoded.replace(/sig=[^&]+/, "sig=<signature>")}`);
       await sleep(4000);
       await ctx.shot("ar-launch");
@@ -423,10 +525,12 @@ export const STEPS: Step[] = [
       const firstId = await submitPrompt(ctx, first);
       await waitDone(ctx, firstId);
       await until("the foreground notification", async () => (await notifications(ctx)).includes(`${first} is ready.`) || null, 60_000);
+      const before = await appTasks(ctx);
       await tapNotification(ctx, first);
       await until("the open app on the asset", () => Promise.resolve(ctx.page.url().includes(`asset=${firstId}`) ? true : null), 20_000);
       const tasks = await appTasks(ctx);
-      ctx.log(`foreground tap opened /?asset=${firstId}; Asset Studio tasks in recents: ${String(tasks)}`);
+      ctx.log(`foreground tap moved the open app to /?asset=${firstId}; Chrome and app tasks in recents before ${String(before)}, after ${String(tasks)}`);
+      if (tasks !== before) throw new Error("the notification tap opened a second window");
       await ctx.shot("notify-foreground");
 
       // Swiped away from the recent apps, the device still gets the notification, and a tap opens the asset.
@@ -560,7 +664,9 @@ async function main(): Promise<number> {
     },
     adb,
   };
-  const steps = STEPS.filter((s) => (values.only ? s.name === values.only : s.runs.includes(runNo)));
+  const steps = STEPS.filter((s) => (values.only ? values.only.split(",").includes(s.name) : s.runs.includes(runNo)));
+  // A run that skips install (re-running chosen steps with --only) works in a Chrome tab on the app.
+  if (steps[0]?.name !== "install") await page.goto(baseUrl);
   let failed = 0;
   for (const step of steps) {
     report.step(step.name);
