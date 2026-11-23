@@ -64,7 +64,7 @@ function fakePushService(): { sent: Sent[]; status: Map<string, number>; fetch: 
   const sent: Sent[] = [];
   const status = new Map<string, number>();
   const fake = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const req = new Request(input, init);
+    const req = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
     sent.push({ url: req.url, headers: req.headers, body: new Uint8Array(await req.arrayBuffer()) });
     return new Response(null, { status: status.get(req.url) ?? 201 });
   };
@@ -216,7 +216,7 @@ describe("subscriptions and sending", () => {
     await p.jobDone(fakeJob({ prompt }));
     const { plaintext } = sub.decrypt(service.sent[0]?.body ?? new Uint8Array());
     expect(plaintext.length).toBeLessThan(3993);
-    expect((JSON.parse(plaintext.toString()) as { name: string }).name).toBe([...prompt].slice(0, 80).join(""));
+    expect((JSON.parse(plaintext.toString()) as { name: string }).name).toBe(Array.from(prompt).slice(0, 80).join(""));
   });
 
   test("subscribing is an upsert by endpoint, keeps at most 20 and DELETE removes one", async () => {

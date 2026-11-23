@@ -3,6 +3,7 @@ import type { Config } from "./config.ts";
 import { ComfyClient } from "./comfy.ts";
 import { assetRoutes } from "./export.ts";
 import { createServer, type ExtraRoutes, type RunningServer } from "./http.ts";
+import { createPush } from "./push.ts";
 import { pageRoute } from "./static.ts";
 import { Tracker } from "./tracker.ts";
 
@@ -23,11 +24,15 @@ export async function startServer(config: Config): Promise<RunningServer> {
     throw new Error("the development token only works against the fake ComfyUI; set a real token in config.yaml");
   }
   const assets = assetRoutes(config);
-  const routes: ExtraRoutes = { api: (req, url, store) => assets.api?.(req, url, store) ?? null, page: pageRoute };
+  const push = createPush({ dataDir: config.dataDir, token: config.token });
+  const routes: ExtraRoutes = {
+    api: async (req, url, store) => (url.pathname.startsWith("/api/push/") ? push.route(req, url) : null) ?? assets.api?.(req, url, store) ?? null,
+    page: pageRoute,
+  };
   return createServer(config, {
     routes,
     tracker: (store) => {
-      const t = new Tracker({ store, config, comfy: new ComfyClient(config.comfyuiUrl) });
+      const t = new Tracker({ store, config, comfy: new ComfyClient(config.comfyuiUrl), onDone: (job) => { void push.jobDone(job); } });
       t.start();
       return t;
     },
