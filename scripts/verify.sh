@@ -72,5 +72,9 @@ step "image start check" env IMAGE="$IMAGE" EXPECT_VERSION="$VERSION" EXPECT_COM
 step "memory check" env IMAGE="$IMAGE" bun test ./app/memory
 step "dev readiness" bun run dev -- --check
 step "docs check" docs_tests
+# A host without WebKit's libraries may leave the WebKit projects out; such a run is never WebKit evidence.
+if [[ "${E2E_SKIP_WEBKIT:-}" == "1" ]]; then
+  report_skip "WebKit journeys skipped (E2E_SKIP_WEBKIT=1)"
+fi
 step "browser journeys" env E2E_IMAGE="$IMAGE" bunx playwright test
 report_pass "verify finished"
