@@ -639,7 +639,8 @@ opens the app.
 
 ## Tasks
 
-- [ ] T1 `app/pipeline/presets.test.ts` - failing tests: every Quality maps to its table pair and passes `validPairing`; the label function returns each name, `Custom (5k, 2048)` and `Custom (10k)`; `remixQuality` gives Fast for 5000 with 2048, Standard for 10000 with no texture, High for 20000 with 4096 and Standard for 15000 with 2048; they fail because the exports do not exist (AC-03, AC-04)
+- [x] T1 `app/pipeline/presets.test.ts` - failing tests: every Quality maps to its table pair and passes `validPairing`; the label function returns each name, `Custom (5k, 2048)` and `Custom (10k)`; `remixQuality` gives Fast for 5000 with 2048, Standard for 10000 with no texture, High for 20000 with 4096 and Standard for 15000 with 2048; they fail because the exports do not exist (AC-03, AC-04)
+      Evidence: `bun test app/pipeline/presets.test.ts` fails as intended: `SyntaxError: Export named 'QUALITIES' not found in module app/pipeline/presets.ts` (0 pass, 1 fail, 1 error).
 
 - [ ] T2 `app/pipeline/presets.ts` - `QUALITIES`, the Quality label function and `remixQuality`; T1 passes (AC-03, AC-04)
 
