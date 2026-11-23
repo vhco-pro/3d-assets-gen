@@ -7,6 +7,7 @@ import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
 import { Progress } from "./components/ui/progress.tsx";
 import { formatDuration } from "./queue.ts";
+import { ShareButton } from "./share.tsx";
 
 type Status = "loading" | "ready" | "failed";
 
@@ -193,6 +194,7 @@ export function Viewer({ job, name, opener, onClose, onRemix }: { job: Job; name
         </div>
         {error && <div className="px-4"><ErrorText>{error}</ErrorText></div>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-border px-4 py-3">
+          <ShareButton job={job} />
           <Button type="button" onClick={onRemix}>Remix</Button>
           <Button type="button" variant="delete" disabled={busy} onClick={remove}>Delete</Button>
           <Button type="button" onClick={() => { window.location.assign(`/api/assets/${job.id}/model.glb`); }}>Download GLB</Button>

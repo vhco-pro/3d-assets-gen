@@ -6,6 +6,7 @@ import { deleteJob, type Job } from "./api.ts";
 import { dateFormat, ErrorText, label, qualityText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { formatDuration } from "./queue.ts";
+import { ShareButton } from "./share.tsx";
 import { ModelStage, timing } from "./Viewer.tsx";
 
 export const GONE_MESSAGE = "This asset is no longer available.";
@@ -50,6 +51,7 @@ export function AssetPage({ job, onLibrary, onRemix }: { job: Job; onLibrary: ()
         <Fact term="Created">{dateFormat.format(job.createdAt)}</Fact>
       </dl>
       <div className="grid grid-cols-2 gap-2">
+        <ShareButton job={job} size="lg" />
         <Button type="button" size="lg" onClick={() => { window.location.assign(`/api/assets/${job.id}/model.glb`); }}>Download</Button>
         <Button type="button" size="lg" onClick={onRemix}>Remix</Button>
         <Button type="button" size="lg" variant="delete" disabled={busy} onClick={remove}>Delete</Button>
