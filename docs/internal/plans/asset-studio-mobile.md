@@ -604,6 +604,51 @@ None.
 | 2026-11-23 | R-5 | spec | `52d44c8` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix |
 | 2026-11-23 | R-6 | spec | `61367c4` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit; all applied |
 | 2026-11-23 | R-7 | spec | `490eb4c` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied |
+| 2026-11-23 | R-8 | spec | `8ce3ce4` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 1 nit |
+
+### R-8
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (phone shell paragraph: "a top bar with the screen title, the content of one screen, and a fixed bottom tab bar"; URL paragraph: "opening an asset uses `history.pushState`, so the browser's Back (and Android's back gesture) returns from the Asset page to the Library"; Asset page paragraph: "Delete goes back to the Library after the job is deleted"); Scope ("a full-screen Asset page opened from the Library"); Context > Owner summary ("opens a full-screen Asset page from the Library"); Acceptance Criteria AC-03 ("Back returns to the Library"); Test Plan AC-03 ("asset page": "`page.goBack()` shows the Library")
+EVIDENCE: Design gives the gone message "a button back to the Library", but never says whether the Asset page keeps the bottom tab bar or has an on-screen back control. It only calls the page "full-screen" and relies on the browser's Back. Two common ways in have no earlier history entry: the notification tap (`clients.openWindow('/?asset=<job id>')`, Design > Notifications) and a direct `?asset=` link. From there, Back on Android leaves Asset Studio. On iPhone the installed app runs `display` `standalone` (Design > Manifest), so there is no browser Back button at all. If "full-screen" hides the tab bar, the client who opens an asset from a notification cannot reach the Library except by closing the app. "Delete goes back to the Library" has the same gap if it is built with `history.back()`. One implementer keeps the tab bar on the Asset page, one hides it and adds a back arrow, and one hides it with nothing. All three pass the AC-03 row, which only checks `page.goBack()` after tapping a tile.
+PROPOSAL: State the Asset page's way back: either the tab bar stays visible, or the top bar has a Back to Library control that uses `history.back()` when the page was pushed from the Library and otherwise replaces the URL with `?tab=library`. Add a check to the AC-03 "asset page" journey: open `/?asset=<seeded id>` directly from `about:blank`, then reach the Library through that control.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Notifications (switch paragraph: "When permission is denied the switch is disabled with `Notifications are blocked in the browser settings.` When `PushManager` is missing from `window`: on iOS or iPadOS ... outside an installed app ... `Add Asset Studio to your Home Screen to get notifications.`"; "On each signed-in load the switch shows the browser's state"); Test Plan AC-06 ("In `phone-webkit` (iPhone user agent, not standalone) with `PushManager` deleted from `window` by an init script before load, the Home Screen message shows"); Test Plan intro ("the AC-06 Home Screen check")
+EVIDENCE: The page shows this Home Screen case in Safari on iOS before the app is installed. There the Notification API is not exposed either: Web Push and `Notification` are available only to Home Screen web apps (Sources: WebKit, Web Push for web apps on iOS and iPadOS), so `window.Notification` is undefined as well as `PushManager`. The R-7 F-01 revision made the phone-webkit check delete only `PushManager`, which leaves `Notification` defined. Design lists the denied-permission check, which reads `Notification.permission`, before the `PushManager` check, and the load-time "browser's state" reads permission too. A page that reads `Notification.permission` without first checking that `Notification` exists passes this journey but throws a ReferenceError on a real iPhone outside the installed app. Depending on where it runs, that loses the Home Screen message or breaks the Queue screen. Only the owner's iPhone check, which the merge does not wait for, would catch it.
+PROPOSAL: Say that the page checks for `Notification` and `PushManager` before reading permission, and that either one missing leads to the Home Screen or unsupported message. Have the phone-webkit Home Screen check delete both `window.Notification` and `window.PushManager` in its init script.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Notifications (server bullet: "A corrupt or missing file starts empty with new keys, and the page re-subscribes when the key it subscribed with differs from `GET /api/push/key`"; switch paragraph: "On each signed-in load ... when the browser has a subscription the page posts it again ... so a subscription the server dropped ... comes back"); Acceptance Criteria AC-06 ("a subscription the server dropped is restored on the next signed-in load while the switch is on"); Test Plan AC-06 ("after the test deletes the subscription on the server, a reload posts it again")
+EVIDENCE: A corrupt or lost `push.json` is a case where the server drops every subscription and also changes its VAPID key. A browser subscription is bound to the `applicationServerKey` it was made with, and the push service rejects messages signed with another key. Design's sending bullet then logs that failure and keeps the subscription ("any other failure is logged with the push service's host and status and dropped"; only 404 or 410 deletes). The only fix is the key comparison on load. That comparison appears in the server bullet alone. The page's load steps in the switch paragraph do not mention it, and no Test Plan row checks it: the AC-06 reload journey deletes the subscription while keeping the same key. A page that only re-posts passes AC-06's proof and puts the subscription back in `push.json`, but that device never gets another notification after a key change.
+PROPOSAL: Put the key comparison into the load steps of the switch paragraph: read `subscription.options.applicationServerKey`, compare it with `GET /api/push/key`, and on a mismatch unsubscribe, subscribe again and post. Add to the "notifications switch" journey a reload after the stubbed subscription's key is changed so that it differs from the server key, and assert that `unsubscribe`, a new `subscribe` and one POST follow.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Notifications (sending bullet: "it encrypts the payload `{"jobId", "batchId", "name"}` with RFC 8291 (aes128gcm)"; service worker paragraph: "body `<name> is ready.` (the name cut to 80 characters)"); Test Plan AC-06 (`app/server/push.test.ts`)
+EVIDENCE: The page's asset name is the full prompt for a prompt job (`label`, app/web/App.tsx:47-49). A prompt may be 2000 UTF-16 code units (MAX_PROMPT_CHARS, app/pipeline/presets.ts; checked with `p.length` in app/server/batches.ts:266). Non-ASCII prompts are expected: the fixture has `木箱` (app/server/seed.ts:54) and a 1990-character prompt (seed.ts:43-45). In UTF-8 a 2000-character CJK prompt is about 6000 bytes. RFC 8030 section 7.2 only requires push services to accept 4096-byte payloads, and RFC 8291 then leaves at most 3993 bytes of plaintext. Over that limit the push service answers 413, which Design logs and drops, so the notification is lost. Design never says how the server derives `name` or bounds it. Cutting it to 80 characters happens only in the service worker, after decryption. One implementer sends the full prompt, another truncates on the server, and no row tests a long name.
+PROPOSAL: Define `name` on the server as the prompt, or the upload name for an image job, cut to 80 characters before encryption, so the service worker's cut is no longer needed. Add a push.test.ts case where a 2000-character non-ASCII prompt yields a payload under 3993 bytes that decrypts to the cut name.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications ("The page has a Notifications switch on the Queue screen (and below the queue on the desktop)"); Design > Layout and navigation ("When the queue is empty it shows `Nothing in the queue.` instead of hiding (the desktop queue still hides)"); Test Plan AC-02 (visual record: "the Notifications switch on the desktop queue"); Test Plan AC-06 ("notifications switch" in `chromium` and `firefox`)
+EVIDENCE: The desktop `Queue` returns null when no job is unfinished (app/web/App.tsx:518-520, `if (!loading && !failedLoad && rows.length === 0) return null;`), and Design keeps that. That is the usual state once a batch is done. Design places the switch "below the queue" but does not say whether it stays visible when the queue is hidden. One implementer puts it inside the Queue card, so it disappears whenever nothing is queued. Another puts it after the Queue in the right column, so it is always visible. The desktop journeys run against the seed, which always has a submitted job (app/server/seed.ts:63), so both builds pass.
+PROPOSAL: Say whether the desktop switch shows when the queue is hidden (for example, always shown in the right column above the Library), and add that empty-queue state to the "notifications switch" journey or to the AC-02 visual record.
+
+FINDING: F-06
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Notifications (sending bullet: "right after the tracker marks a job `done` (`app/server/tracker.ts:398`), it calls `push.jobDone(job)`"); Design > Upgrade, rollback and concurrency ("Two tracker ticks cannot mark the same job done, since `update` checks the expected state (`app/server/tracker.ts:398`), so a job notifies once")
+EVIDENCE: `update` returns whether a row changed (app/server/tracker.ts:203-205), and the call at tracker.ts:398 ignores the result. "A job notifies once" depends on `jobDone` running only when that call returns true. Design does not say this. In practice ticks are already serialized through `inFlight` (tracker.ts:128), so building it either way changes nothing that can be observed today.
+PROPOSAL: Say that `push.jobDone(job)` is called only when the `done` update returns true.
 
 ### R-7
 
