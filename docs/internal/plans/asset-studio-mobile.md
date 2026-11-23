@@ -642,6 +642,16 @@ None.
 | 2026-11-23 | R-10 | spec | `fed6bf1` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied with the owner's answer; F-01 revisited the R-9 history rule |
 | 2026-11-23 | R-11 | spec | `09015b5` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix; met by removing the pending-history rule (R-10) and keeping desktop tiles state-only, as the owner chose |
 | 2026-11-23 | R-12 | spec | `da24564` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; F-01 met by removing asset carry-over across 1024 pixels, as the owner chose; nits applied |
+| 2026-11-23 | R-13 | spec | `1e6b63b` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix |
+
+### R-13
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (two-column paragraph: "widening from an open Asset page shows the two-column page with no dialog (the URL replaced without `?asset=`). Neither adds a history entry."; URL paragraph: "`?tab=create` (the default when absent)"); Context > Owner summary ("crossing that width closes the open asset view"); Acceptance Criteria AC-03 ("a layout change across 1024 pixels closes the open asset view"); Test Plan AC-03 ("asset page": "with the Asset page open, resize from 768x1024 to 1024x768 and assert no dialog is open and the URL has no `?asset=`; with a tile's Preview dialog open at 1024x768, resize to 768x1024 and assert the Library tab shows with `?tab=library`")
+EVIDENCE: The R-12 revision added this rule. The narrowing direction names its exact URL (`?tab=library`), but the widening direction only says the URL is "replaced without `?asset=`". The Asset page's own URL is `?asset=<job id>`, pushed from the Library, so one implementer drops the parameter and leaves `/`, while another writes `?tab=library` to match the Library tab that the Asset page marks as current. In the two-column layout `?tab=` is ignored, so the two builds look the same until the window narrows again, for example a tablet rotated 768x1024 to 1024x768 and back. Then the first build shows Create (the default when `?tab` is absent) and the second shows Library. The proof asserts only "no dialog is open and the URL has no `?asset=`" and never resizes back, so both builds pass. "Neither adds a history entry" is also unchecked in both resize steps, so a build that uses `pushState` here passes. In that build, Back after widening returns to the `?asset=` entry and opens the Preview dialog again, the carry-over the owner chose to drop.
+PROPOSAL: State the widening URL exactly, for example `replaceState` to `?tab=library`, so the two directions are symmetric. In the AC-03 "asset page" step, resize back to 768x1024 after widening and assert the chosen tab shows, and assert that `history.length` is unchanged across each of the two resizes.
 
 ### R-12
 
