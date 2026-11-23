@@ -603,6 +603,23 @@ None.
 | 2026-11-23 | R-4 | spec | `3d878f2` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit |
 | 2026-11-23 | R-5 | spec | `52d44c8` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix |
 | 2026-11-23 | R-6 | spec | `61367c4` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix, 1 nit; all applied |
+| 2026-11-23 | R-7 | spec | `490eb4c` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied |
+
+### R-7
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-06 ("In `phone-webkit` (iPhone user agent, not standalone, no `PushManager`) the Home Screen message shows; in `phone-chromium` with `PushManager` deleted before load, `This browser cannot show notifications.` shows"); Design > Notifications ("When `PushManager` is missing from `window`: on iOS or iPadOS ... outside an installed app ... the switch is replaced by `Add Asset Studio to your Home Screen to get notifications.`"); Test Plan intro ("the AC-06 Home Screen check")
+EVIDENCE: The phone-chromium case removes `PushManager` with an init script, but the phone-webkit case takes "no `PushManager`" as a given of the project. Nothing in the document or its Sources backs that up. Playwright's WebKit is the Linux port built from WebKit trunk, not Safari on iOS, and the iPhone 15 device profile only changes the user agent, viewport and touch. It does not remove Web APIs. Whether that build exposes `window.PushManager` is not shown anywhere. I could not check it either: WebKit is not installed on this host (`ls ~/.cache/ms-playwright` lists only chromium, chromium_headless_shell, firefox and ffmpeg), which the document also notes in Context > Background. If the build does expose `PushManager`, a correct page shows the switch and not the Home Screen message, and the check fails. Two implementers end up with different journeys: one relies on the engine, the other deletes the API. Only the second one passes for certain.
+PROPOSAL: Have the phone-webkit Home Screen check remove `PushManager` from `window` in an init script before load, the same way the phone-chromium unsupported-browser check does, so the result does not depend on how the WebKit build is configured.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Test Plan intro (first sentence: "`phone-chromium` (Pixel 7) and `phone-webkit` (iPhone 15) run journeys tagged `@phone`, and `phone-chromium` also `@android`"); Design > Testing and the Android emulator ("`phone-webkit` runs those tagged `@phone` or `@ios` (`grep: /@phone|@ios/`)")
+EVIDENCE: The R-6 F-01 revision added `@ios` to the `phone-webkit` grep in Design and added a later sentence about it in the Test Plan intro. The intro's first sentence still lists only `@android` as the extra tag for a phone project. The later sentence in the same paragraph and Design both state the selection correctly, so an implementer builds the same thing either way.
+PROPOSAL: Change the first sentence to "and `phone-chromium` also `@android`, `phone-webkit` also `@ios`".
 
 ### R-6
 
