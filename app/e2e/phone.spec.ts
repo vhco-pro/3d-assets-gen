@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expandBatches, expect, shared, signIn, test, uniquePrompt } from "./fixtures.ts";
+import { startStack } from "./harness.ts";
 
 test.describe("installable", () => {
   test("the image serves the manifest, its icons and /sw.js, and Chromium reports no installability errors", async ({ request }) => {
@@ -563,4 +564,194 @@ test.describe("share", () => {
       }
     });
   }
+});
+
+// ---- Notifications switch (AC-06) -----------------------------------------------------------------------
+
+const SWITCH = "Notify me when assets are ready";
+const NOT_ON = "Notifications could not be turned on. Try again.";
+const BLOCKED = "Notifications are blocked in the browser settings.";
+const UNREACHABLE = "Could not reach Asset Studio; notifications may not arrive.";
+const HOME_SCREEN = "Add Asset Studio to your Home Screen to get notifications.";
+const NO_NOTIFICATIONS = "This browser cannot show notifications.";
+
+/**
+ * Headless browsers cannot grant notifications, so the permission and pushManager are stubbed. The stub's
+ * subscription lives in localStorage so a reload finds it, and every Push API call and /api/push request is
+ * recorded in order in window.__calls.
+ */
+const PUSH_STUB = `(() => {
+  const w = window; const ls = localStorage;
+  w.__calls = [];
+  if (!("Notification" in window) || !("PushManager" in window)) return;
+  const perm = () => ls.getItem("stub:perm") || "granted";
+  Object.defineProperty(Notification, "permission", { configurable: true, get: () => perm() });
+  Notification.requestPermission = () => { w.__calls.push("requestPermission"); return Promise.resolve(perm()); };
+  const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  const unb64 = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const p256dh = b64(Uint8Array.from({ length: 65 }, (_, i) => (i === 0 ? 4 : i)));
+  const auth = b64(Uint8Array.from({ length: 16 }, (_, i) => i + 1));
+  const make = (rec) => ({
+    endpoint: rec.endpoint,
+    options: { applicationServerKey: unb64(rec.key).buffer, userVisibleOnly: true },
+    toJSON: () => ({ endpoint: rec.endpoint, expirationTime: null, keys: { p256dh, auth } }),
+    unsubscribe: () => { w.__calls.push("unsubscribe"); ls.removeItem("stub:sub"); return Promise.resolve(true); },
+  });
+  PushManager.prototype.getSubscription = function () { const r = ls.getItem("stub:sub"); return Promise.resolve(r ? make(JSON.parse(r)) : null); };
+  PushManager.prototype.subscribe = function (opts) {
+    const key = b64(opts.applicationServerKey);
+    w.__calls.push("subscribe " + key);
+    if (ls.getItem("stub:subscribeFails")) return Promise.reject(new DOMException("refused", "AbortError"));
+    const rec = { endpoint: "https://fcm.googleapis.com/fcm/send/stub-" + Math.random().toString(36).slice(2), key };
+    ls.setItem("stub:sub", JSON.stringify(rec));
+    return Promise.resolve(make(rec));
+  };
+  const original = w.fetch;
+  w.fetch = function (input, init) {
+    const u = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (u.includes("/api/push/")) w.__calls.push(((init && init.method) || "GET") + " " + new URL(u, location.href).pathname);
+    return original.apply(this, arguments);
+  };
+})();`;
+
+const calls = (page: Page): Promise<string[]> => page.evaluate(() => (window as unknown as { __calls: string[] }).__calls);
+const stubSub = (page: Page): Promise<{ endpoint: string; key: string } | null> =>
+  page.evaluate(() => { const r = localStorage.getItem("stub:sub"); return r ? (JSON.parse(r) as { endpoint: string; key: string }) : null; });
+
+/** Signs in with the stub installed and shows the switch: the Queue screen on a phone, the right column on a desktop. */
+async function notifySwitch(page: Page, phone: boolean, perm: "granted" | "denied" = "granted"): Promise<Locator> {
+  await page.addInitScript(PUSH_STUB);
+  await page.addInitScript(`localStorage.setItem("stub:perm", ${JSON.stringify(perm)});`);
+  const { url, token } = shared();
+  if (phone) {
+    await phoneSignIn(page);
+    await tab(page, "Queue").click();
+  } else {
+    await signIn(page, url, token);
+  }
+  return page.getByLabel(SWITCH, { exact: true });
+}
+
+async function serverKey(): Promise<string> {
+  const { url, token } = shared();
+  const res = await fetch(`${url}/api/push/key`, { headers: { authorization: `Bearer ${token}` } });
+  return ((await res.json()) as { publicKey: string }).publicKey;
+}
+
+test.describe("notifications switch", () => {
+  test("notifications switch: on asks permission first and posts the subscription; off deletes it @android @firefox", async ({ page }, testInfo) => {
+    const sw = await notifySwitch(page, testInfo.project.name.startsWith("phone-"));
+    await expect(sw).not.toBeChecked();
+    const posted = page.waitForResponse((r) => r.url().endsWith("/api/push/subscriptions") && r.request().method() === "POST");
+    await sw.click();
+    expect((await posted).status()).toBe(204);
+    await expect(sw).toBeChecked();
+    const log = await calls(page);
+    expect(log[0]).toBe("requestPermission");
+    expect(log).toContain(`subscribe ${await serverKey()}`);
+    const endpoint = (await stubSub(page))?.endpoint;
+    const deleted = page.waitForRequest((r) => r.url().endsWith("/api/push/subscriptions") && r.method() === "DELETE");
+    await sw.click();
+    expect((await deleted).postDataJSON()).toEqual({ endpoint });
+    await expect(sw).not.toBeChecked();
+    expect(await calls(page)).toContain("unsubscribe");
+  });
+
+  test("notifications switch: a denied permission disables the switch with the blocked message @android @firefox", async ({ page }, testInfo) => {
+    const sw = await notifySwitch(page, testInfo.project.name.startsWith("phone-"), "denied");
+    await expect(sw).toBeDisabled();
+    await expect(page.getByText(BLOCKED)).toBeVisible();
+  });
+
+  test("notifications switch: a failing POST undoes the new subscription and turns the switch off @android @firefox", async ({ page }, testInfo) => {
+    const sw = await notifySwitch(page, testInfo.project.name.startsWith("phone-"));
+    await page.route(/\/api\/push\/subscriptions$/, (route) => (route.request().method() === "POST" ? route.fulfill({ status: 500, body: "{}" }) : route.fallback()));
+    await sw.click();
+    await expect(page.getByText(NOT_ON)).toBeVisible();
+    await expect(sw).not.toBeChecked();
+    expect(await calls(page)).toContain("unsubscribe");
+    expect(await stubSub(page)).toBeNull();
+  });
+
+  test("notifications switch: a reload posts again a subscription the server dropped, and re-subscribes after a key change @android @firefox", async ({ page }, testInfo) => {
+    const { url, token } = shared();
+    const sw = await notifySwitch(page, testInfo.project.name.startsWith("phone-"));
+    await sw.click();
+    await expect(sw).toBeChecked();
+    const endpoint = (await stubSub(page))?.endpoint ?? "";
+    await fetch(`${url}/api/push/subscriptions`, { method: "DELETE", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ endpoint }) });
+    const reposted = page.waitForResponse((r) => r.url().endsWith("/api/push/subscriptions") && r.request().method() === "POST");
+    await page.reload();
+    expect((await reposted).request().postDataJSON()).toMatchObject({ endpoint });
+    await expect(page.getByLabel(SWITCH, { exact: true })).toBeChecked();
+
+    // The server's key no longer matches the one the browser subscribed with (push.json was lost).
+    await page.evaluate(() => {
+      const rec = JSON.parse(localStorage.getItem("stub:sub") ?? "{}") as { key: string };
+      rec.key = "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      localStorage.setItem("stub:sub", JSON.stringify(rec));
+    });
+    await page.reload();
+    await expect.poll(async () => (await calls(page)).filter((c) => c === "POST /api/push/subscriptions").length).toBe(1);
+    const log = await calls(page);
+    const key = await serverKey();
+    expect(log.indexOf("unsubscribe")).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf("unsubscribe")).toBeLessThan(log.indexOf(`subscribe ${key}`));
+    expect(log.indexOf(`subscribe ${key}`)).toBeLessThan(log.indexOf("POST /api/push/subscriptions"));
+    await expect(page.getByLabel(SWITCH, { exact: true })).toBeChecked();
+
+    // The same change when subscribing again fails: the switch is off with its message.
+    await page.evaluate(() => {
+      const rec = JSON.parse(localStorage.getItem("stub:sub") ?? "{}") as { key: string };
+      rec.key = "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      localStorage.setItem("stub:sub", JSON.stringify(rec));
+      localStorage.setItem("stub:subscribeFails", "1");
+    });
+    await page.reload();
+    await expect(page.getByText(NOT_ON)).toBeVisible();
+    await expect(page.getByLabel(SWITCH, { exact: true })).not.toBeChecked();
+  });
+
+  test("notifications switch: a failing re-post on load keeps the switch on with the could-not-reach message @android @firefox", async ({ page }, testInfo) => {
+    const sw = await notifySwitch(page, testInfo.project.name.startsWith("phone-"));
+    await sw.click();
+    await expect(sw).toBeChecked();
+    await page.route(/\/api\/push\/subscriptions$/, (route) => (route.request().method() === "POST" ? route.fulfill({ status: 503, body: "{}" }) : route.fallback()));
+    await page.reload();
+    await expect(page.getByText(UNREACHABLE)).toBeVisible();
+    await expect(page.getByLabel(SWITCH, { exact: true })).toBeChecked();
+  });
+
+  test("notifications switch on the desktop sits above the Library even with no queue (empty stack)", async ({ page }) => {
+    const stack = await startStack("notify-empty", "empty");
+    try {
+      await page.addInitScript(PUSH_STUB);
+      await signIn(page, stack.url, stack.token);
+      await expect(page.getByTestId("queue")).toHaveCount(0);
+      const sw = page.getByLabel(SWITCH, { exact: true });
+      await expect(sw).toBeVisible();
+      const s = await sw.boundingBox();
+      const lib = await page.getByRole("heading", { name: "Library" }).boundingBox();
+      expect(s && lib && s.y < lib.y).toBeTruthy();
+    } finally {
+      await stack.stop();
+    }
+  });
+
+  test("iPhone Safari outside the installed app shows the Home Screen message @ios @mobile-only", async ({ page, consoleErrors }) => {
+    await page.addInitScript(`delete window.Notification; delete window.PushManager;`);
+    await phoneSignIn(page);
+    await tab(page, "Queue").click();
+    await expect(page.getByText(HOME_SCREEN)).toBeVisible();
+    await expect(page.getByLabel(SWITCH, { exact: true })).toHaveCount(0);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("a browser without PushManager says it cannot show notifications @android @mobile-only", async ({ page }) => {
+    await page.addInitScript(`delete window.PushManager;`);
+    await phoneSignIn(page);
+    await tab(page, "Queue").click();
+    await expect(page.getByText(NO_NOTIFICATIONS)).toBeVisible();
+    await expect(page.getByLabel(SWITCH, { exact: true })).toHaveCount(0);
+  });
 });
