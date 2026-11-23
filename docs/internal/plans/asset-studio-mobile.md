@@ -454,6 +454,128 @@ None.
 
 | Date | Review | Kind | Commit | Model | Isolation | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-23 | R-1 | spec | `8a89924` | claude-opus-5-5 | procedural | 1 blocking, 14 should-fix, 2 nits |
+
+### R-1
+
+FINDING: F-01
+KIND: factual
+SEVERITY: blocking
+WHERE: Test Plan, AC-06 row (emulator run 1 step "notify")
+EVIDENCE: The row passes when "tapping it through `adb shell cmd notification` opens `/?asset=<that job id>`". AOSP NotificationShellCmd.java (frameworks/base main, fetched from android.googlesource.com) lists the subcommands allow_listener, disallow_listener, allow_assistant, remove_assistant, set_dnd, allow_dnd, disallow_dnd, reset_assistant_user_set, get_approved_assistant, post/notify, list, get, snooze, unsnooze, snoozed, set_bubbles, set_bubbles_channel and set_exempt_th_force_grouping. None of them taps or clicks a posted notification, so this step cannot be run as written.
+PROPOSAL: Replace the tap with a command that exists, for example `adb shell cmd statusbar expand-notifications` and then a tap on the notification found through `uiautomator dump` and `adb shell input tap`. Keep the same pass condition: the page opens `/?asset=<that job id>`.
+
+FINDING: F-02
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > AR: View in your room; Acceptance Criteria AC-05; Test Plan AC-05
+EVIDENCE: The page fetches `ar-link` once and uses the signed URL as the viewer's `src`, with `exp` 15 minutes ahead. model-viewer builds the Scene Viewer intent from the current `src` at tap time (node_modules/@google/model-viewer/lib/features/ar.js, `new URL(firstSrc, location)` followed by `'&file=' + encodeURIComponent(modelUrl.toString())`). If the Asset page or Preview dialog stays open for more than 15 minutes, View in your room hands Scene Viewer an expired link and gets 401, and that 401 also counts toward the failure limit. The document does not say whether the link is refreshed before activation, on a timer, or never.
+PROPOSAL: Say when a fresh link is fetched, for example right before activating AR when fewer than N minutes are left, and how that avoids reloading the visible model. Add a proof step that activates AR after the clock passes the first link's `exp`.
+
+FINDING: F-03
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications (switch paragraph; push.ts State bullet; Sending bullet); Design > Upgrade, rollback and concurrency; AC-06
+EVIDENCE: "The switch shows the browser's state on load", and the page re-subscribes only "when the key it subscribed with differs from `GET /api/push/key`". The server can still drop a subscription while the browser keeps it: a token rotation (old fingerprints are deleted at send time), a 404 or 410, eviction past 20, or a failed `POST /api/push/subscriptions` after `pushManager.subscribe` succeeded. In each case the switch shows on and the device silently gets nothing. After a rotation the client signs in again and still sees the switch on.
+PROPOSAL: Define how the page brings the server back in line, for example by re-posting its current subscription (an idempotent upsert) on each signed-in load while the switch is on, and say what the switch shows when that POST fails. Add a check that a subscription deleted on the server comes back after a reload.
+
+FINDING: F-04
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Notifications (State bullet: "the https origin the page was served from (used as the VAPID `sub` claim)"); Design > Testing and the Android emulator (Run 1)
+EVIDENCE: Run 1 serves the page as `http://localhost:8790`, which is not an https origin, and the whole notify step is proven only in run 1. In production the server sits behind `tailscale serve`, and the document does not say where the origin comes from (the request's Origin header, Host, or forwarded headers). One implementer may reject or skip a subscription whose origin is not https, which breaks run 1. Another may send `sub: http://localhost:8790`. RFC 8292 expects a mailto: or https: URI in `sub`.
+PROPOSAL: State the source of the stored origin and the `sub` value for a non-https origin, for example a fixed `mailto:` or https contact URL from configuration, so run 1 and win-main both send a valid claim.
+
+FINDING: F-05
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation; Design > Notifications (notificationclick navigates to `/?asset=<job id>`); AC-03; AC-06
+EVIDENCE: The URL query (`?tab=`, `?asset=`) is defined only for the phone shell. A notification click on desktop Chrome, or on a tablet that is 1024 pixels or wider, opens `/?asset=<job id>` in the two-column layout, and the document does not say whether that opens the Preview dialog, is ignored, or shows the gone message. Rotating a 768x1024 tablet to 1024x768 while an Asset page is open crosses the breakpoint with `?asset=` in the URL, and that case is undefined too.
+PROPOSAL: Define what `?asset=` and `?tab=` do in the two-column layout, for example by opening the Preview dialog for a done asset, and what happens on a layout change while one is open. Add a Test Plan step at 1280x720 that opens `/?asset=<seeded id>`.
+
+FINDING: F-06
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (Remix sentence); Design > Quality
+EVIDENCE: "Remix fills Create's prompt, Quality, Game-asset style and Shared style from the asset." Create offers only the four levels, but older jobs can have a pair that matches none (the document's own example is 5000 with 2048), and a job can have no texture (`tex: number | null`, app/server/jobs.ts:19, which the document shows as `Custom (<k>k)`). Which Quality Remix selects for those jobs is undefined. One implementer would pick Standard, another the nearest level, another would leave Quality unchanged.
+PROPOSAL: State the rule for a Custom job, for example by selecting the level with the same triangle count and otherwise Standard, and add it to the AC-03 Remix check or to presets.test.ts.
+
+FINDING: F-07
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-02; Acceptance Criteria AC-02; Design > Layout and navigation ("apply to the phone shell at every matrix size")
+EVIDENCE: The project matrix is `[[320, 568], [390, 844], [390, 667], [844, 390], [768, 1024], [1024, 768], [1280, 720], [1440, 900], [640, 450]]` (app/e2e/layout.spec.ts:7). 640x450, the 200 percent zoom reflow equivalent of 1280x900 that docs/internal/plans/asset-studio.md AC-09 covers, is below 1024, so it renders the phone shell with a top bar and a fixed bottom bar at 450 pixels high. The AC-02 row lists only the other phone sizes, so the proof can pass while AC-02 ("every phone and tablet size of the matrix") fails there. conventions/frontend-testing.md also asks for 200 percent zoom, an orientation change while a dialog or scene is open, actions that stay reachable with the on-screen keyboard (the Create form above a fixed tab bar), and a before and after image pair in the pull request. The row has only "captures ... attached to the PR".
+PROPOSAL: Add 640x450 to the phone-shell list in the AC-02 row. Add steps for an orientation change with the Asset page open and for Generate staying reachable with the keyboard open. Ask for before and after captures as frontend-testing.md defines them.
+
+FINDING: F-08
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Testing and the Android emulator (setup-emulator.sh and android-journey.ts bullets); Sources (Playwright Android API)
+EVIDENCE: The Playwright Android page lists its requirements as: "Chrome 105 or newer installed on the device" and "'Enable command line on non-rooted devices' enabled in chrome://flags" (fetched from https://playwright.dev/docs/api/class-android). setup-emulator.sh installs a `google_apis_playstore` image, which is a non-rooted user build, and the document never mentions this flag or another way to let Playwright pass Chrome its command line. Without it, `launchBrowser()` cannot attach and no emulator step runs.
+PROPOSAL: Make setup-emulator.sh (or android-journey.ts before launch) enable that flag, or use an equivalent such as `am set-debug-app --persistent com.android.chrome`, and say so in the bullet, with its check in the printed setup report.
+
+FINDING: F-09
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan AC-09 (written procedure after emulator run 2); Context > Owner summary (prerelease deploys "replace the running v0.2.0 for the client while testing")
+EVIDENCE: The procedure records "the `GET /api/jobs` count" and "the sha256 of `push.json`", then asserts that both are unchanged after a rollback and a redeploy on the live win-main that the client is using. If the client queues or deletes a job, or turns notifications on, during that window, a correct implementation fails. If one job is lost and another added, a wrong implementation passes, because the count stays the same.
+PROPOSAL: Record the set of job IDs and check that every recorded ID is still present, and compare the VAPID public key and the recorded subscription endpoints rather than the file hash, or agree a quiet window with the owner and state it in the procedure.
+
+FINDING: F-10
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Testing and the Android emulator (android-journey.ts bullet; Run 2 paragraph); AC-12; Test Plan AC-12
+EVIDENCE: One script, android-journey.ts, "takes the base URL and the token from the environment". Run 1 includes steps that submit generations (notify, camera), and "Run 2 submits no generation to the deployed app" is an owner decision. The document does not say how the script leaves those steps out against win-main. The existing guard (app/docs/docs.test.ts:53-57, `submitsBatches`) only catches `/api/batches` near an HTTP client call. It does not catch a Playwright tap on Generate, so nothing in the repository would stop a real GPU job.
+PROPOSAL: Define the mechanism, for example a step list per run where the submitting steps refuse to run unless the base URL is localhost, and add a check of that refusal.
+
+FINDING: F-11
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Context > Background (Related work); Context > Owner summary; Design > Glossary (introductory sentence); Design > Quality (last sentence)
+EVIDENCE: docs/internal/plans/asset-studio.md is `in-progress` on `branch: main` and covers `app/`. Its met AC-18 requires the page to label "the preset fields (Detail, Texture, ...)" and its met AC-29 requires "Detail offers Ultra ... and its chip reads `Ultra`". This feature removes Detail and Texture, so both criteria become false. This document also says that document's Glossary "keeps its rows except Detail and Texture, which this feature removes", which edits that document's Design section, a normative revision of an in-progress document. Background only says the earlier reviews go stale and that "does not block this feature". The Owner summary does not mention it.
+PROPOSAL: Raise an Open Question on what happens to asset-studio.md (marked superseded in part, revised to point at this document, or left as it is with its Glossary unchanged) and add the answer to the Owner summary and to Tasks.
+
+FINDING: F-12
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Test Plan AC-05 (emulator run 1 step "AR"); Test Plan AC-12
+EVIDENCE: Run 1 passes when logcat shows the VIEW intent and "the dev server answers that URL with 200 to a request without a cookie". That request may come from any client, and run 2 uses "`curl` from fedora-43 of the logged signed URL". No step observes Scene Viewer itself fetching or showing the model, so the proofs pass even when Scene Viewer cannot load the link, for example a cleartext `http://localhost` URL in run 1 or the GLB served as `content-disposition: attachment` (app/server/assets.ts:25-27). Getting the model into the room is the problem the signed link exists to solve.
+PROPOSAL: Pass only on a server log entry, made after the tap, of a cookieless GET for that signed URL from the emulator with a non-Chrome user agent, plus a screenshot of Scene Viewer showing the model, in both runs.
+
+FINDING: F-13
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Acceptance Criteria AC-06; Test Plan AC-06
+EVIDENCE: AC-06 requires the notification "also with the app closed". The emulator step only says "press Home so Chrome is in the background", which leaves the app open in the background. No step closes the installed app or removes its task before the job finishes, so the "closed" half of the criterion is never observed.
+PROPOSAL: Before the fake finishes the job, remove the installed app's task from recents (not force-stop, which blocks delivery), and keep the 60-second notification assertion.
+
+FINDING: F-14
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Notifications (Routes bullet); Design > AR: View in your room (`GET /api/assets/<id>/ar-link`)
+EVIDENCE: `POST /api/push/subscriptions` "checks the endpoint is `https` and the keys decode to 65 and 16 bytes" but does not give the status or error for a failed check. conventions/http-api.md at the pin says a malformed value answers 422 and the error names the invalid field. The document also does not give the answer of `ar-link` for an unknown job or one that is not done.
+PROPOSAL: State 422 with the field name for an invalid subscription body and 404 for `ar-link` on a job that is not done, and cover both in the unit tests.
+
+FINDING: F-15
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-03, AC-04, AC-06, AC-07, AC-08; Design > Testing and the Android emulator
+EVIDENCE: Only the AC-02 row names its Playwright projects. The rows for the photo inputs (file upload), Share GLB and Download (file transfer), the notifications switch (browser API) and Remix do not say whether they run in phone-chromium, phone-webkit, desktop Chromium or Firefox. The desktop layout gains the same photo buttons and the new Preview dialog actions. conventions/react.md asks for Chromium and Firefox for "storage, redirects, clipboard, file transfer, or reported engine-specific behavior", and conventions/frontend-testing.md asks to "name the journeys, themes and browser projects exercised at each size".
+PROPOSAL: Name the projects for each phone.spec.ts journey in its row, including a Firefox run (tagged `@firefox`) for the desktop photo and download paths.
+
+FINDING: F-16
+KIND: judgement
+SEVERITY: nit
+WHERE: Test Plan AC-10; Design > Glossary
+EVIDENCE: The AC-10 row asserts "the four Asset actions", while the Asset page has five actions (View in your room, Share GLB, Download, Remix, Delete) and the Glossary lists View in your room as a new term. No automated row asserts the View in your room label.
+PROPOSAL: Name the actions the glossary test asserts, and cover View in your room where the button renders, for example in phone-chromium with its Android user agent.
+
+FINDING: F-17
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Images from the camera; Design > Notifications (last bullet)
+EVIDENCE: "Keeping the explicit type list makes iPhone convert HEIC photos to JPEG on upload" and "which Docker Desktop allows by default" are external claims with no citation and no Sources entry. The standard asks Context and Design to cite their claims.
+PROPOSAL: Add a source for each claim to Sources, or mark it as unverified and give the check that will confirm it.
 
 ## Sources
 
