@@ -771,6 +771,44 @@ None.
 | 2026-11-23 | R-18 | spec | `5ce2f43` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
 | 2026-11-23 | R-19 | spec | `145dc76` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
 | 2026-11-23 | R-19 | spec | `145dc76` | n/a | n/a | accepted by owner |
+| 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits |
+
+### R-20
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Share GLB ("So on Android the page prefetches the file, the share is refused, and the download path runs from the rejection."; "A rejection with `NotAllowedError` ... starts the download of `/api/assets/<id>/model.glb` as Download does"); Context > Owner summary (the new paragraph "During implementation the Android emulator showed ..." and "Share GLB falls back to a download on Android" in Your decisions); Test Plan AC-08 (the `NotAllowedError` case)
+EVIDENCE: This revision (`git show 90c0f6b`) brings back the cost that R-3 F-04 removed. R-3 F-04 is stored in this document: "Chrome on Android prefetches the whole GLB on every Asset page open ... The client's main device is Android, and a 4096-texture GLB is several megabytes." That finding is why the empty-file `canShare` probe exists. Under the new text, Chrome 124 answers the probe true, so every Asset page or Preview dialog open on Android fetches the whole GLB a second time, next to the viewer's own load. `app/server/assets.ts:25-27` serves `model.glb` with no `cache-control`, so nothing is reused. The share tap is then always refused and triggers a third full fetch for the download (`app/web/share.tsx:50` uses `window.location.assign` on the URL, as the Design says). The Owner summary tells the owner only that "a refused share downloads the file". It never says Android now prefetches every GLB it opens, so the owner chose without seeing that cost. Two simpler options would avoid it. One: treat the browser as unable to share where model-viewer's AR mode is `scene-viewer`, the same Android test the AR section already uses, so there is no prefetch and the download starts on tap. The `NotAllowedError` download stays for any other browser. Two: keep the prefetch and save the prefetched `File` through a blob URL, which drops the third fetch but not the prefetch.
+PROPOSAL: Raise an Open Question that puts the per-open Android prefetch cost against these options. Then state the chosen rule in Design > Share GLB, the AC-08 row (for example, no `model.glb` request before the tap with an Android user agent if option one is chosen) and the Owner summary.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: should-fix
+WHERE: Tasks (T20, T21 and the unchecked tail T28 to T32)
+EVIDENCE: The revision changes the rule for a `NotAllowedError` rejection, and the AC-08 row adds a `DataError` case. No new task carries that change. T20 and T21 are still ticked, and their evidence describes the old behaviour. T21: "`AbortError` shows nothing and `NotAllowedError` shows its message". T20 lists only the stub modes accept, AbortError, NotAllowedError, refuse and absent, with no other-rejection case. At 90c0f6b, `app/web/share.tsx:61-64` still shows `Sharing did not work. Use Download instead.` for every rejection except `AbortError`. `app/e2e/phone.spec.ts` (the `not-allowed` branch of the "share" journey) still expects that message. The feature-documents standard says "Re-planning keeps checked tasks and changes only the unchecked tail; new requirements get new task IDs". None of T28 to T32 touches `app/web/share.tsx` or the share journey, so an implementer who follows the Tasks never makes the change.
+PROPOSAL: Append new tasks: a failing share-journey task (the `NotAllowedError` case expects the download and `Saved to your downloads.`, plus a new `DataError` case), then the `app/web/share.tsx` change that makes it pass, each naming AC-08. Leave T20 and T21 as history.
+
+FINDING: F-03
+KIND: factual
+SEVERITY: should-fix
+WHERE: Design > Share GLB ("Only when that is true does it fetch the GLB ... Share GLB is enabled once that file is ready (`Preparing…` until then)."); Test Plan AC-08
+EVIDENCE: The Design never says what happens when the prefetch fails, for example a network error, a non-2xx answer or an asset deleted meanwhile. Read literally, Share GLB stays disabled at `Preparing…` for as long as the view is open. The code at 90c0f6b does something else: `app/web/share.tsx:38` sets the state to `"download"` on a failed fetch, so Share GLB is enabled and downloads. Two careful implementers would build different things. Under this revision the prefetch now runs on every Android open (F-01), so this path covers the client's main device. The AC-08 row has no failing-prefetch case. The gap predates this revision.
+PROPOSAL: State the failed-prefetch behaviour in Design > Share GLB, for example that Share GLB is enabled and starts the download with `Saved to your downloads.` Add a case to the AC-08 row with the prefetch route failing.
+
+FINDING: F-04
+KIND: factual
+SEVERITY: nit
+WHERE: Context > Owner summary ("Planned proof: ... None of this has run yet.")
+EVIDENCE: The new paragraph in the same summary says "During implementation the Android emulator showed ...". Tasks T1 to T27 are ticked with observed evidence, for example the full Playwright suite at T23 ("129 passed, 1 skipped") and the setup-emulator run at T26. The standard asks the summary to "distinguish planned checks from observed proof" and to be refreshed when proof changes. The sentence was true at R-19 (`145dc76`, before implementation) and this revision left it unchanged.
+PROPOSAL: Replace the sentence with a short line on what has run (the unit, Playwright and emulator setup evidence under T1 to T27) and what is still planned (emulator runs 1 and 2, the rollback procedure and the iPhone check).
+
+FINDING: F-05
+KIND: factual
+SEVERITY: nit
+WHERE: Design > Share GLB ("(`scripts/phone` probe run on 2026-11-23, output `[...]`)")
+EVIDENCE: `git ls-tree -r 90c0f6b scripts/phone` lists `android-journey.ts`, `check-chrome.ts`, `journey.test.ts`, `lib.sh` and `setup-emulator.sh`. `git grep -n -i "canShare\|NotAllowed\|probe" 90c0f6b -- scripts/phone` finds nothing. The citation names neither a command nor a committed file that produced the quoted output. The standard asks for "a command and its output". I did not run the emulator, so I did not observe the output myself.
+PROPOSAL: Name the exact command, or the script and step that ran the probe, next to the quoted output.
 
 ### R-19
 
