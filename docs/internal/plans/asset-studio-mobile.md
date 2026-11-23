@@ -638,7 +638,69 @@ opens the app.
 
 ## Tasks
 
-None yet; written once the document is planned.
+- [ ] T1 `app/pipeline/presets.test.ts` - failing tests: every Quality maps to its table pair and passes `validPairing`; the label function returns each name, `Custom (5k, 2048)` and `Custom (10k)`; `remixQuality` gives Fast for 5000 with 2048, Standard for 10000 with no texture, High for 20000 with 4096 and Standard for 15000 with 2048; they fail because the exports do not exist (AC-03, AC-04)
+
+- [ ] T2 `app/pipeline/presets.ts` - `QUALITIES`, the Quality label function and `remixQuality`; T1 passes (AC-03, AC-04)
+
+- [ ] T3 `app/server/arlink.test.ts`, `app/server/store.test.ts` - failing AC-05 server tests: a link from `ar-link` fetches the GLB with no cookie and logs one line with the job ID and user agent; the link answers 401 after `exp`, with one changed `sig` character, for another job and after a token change; a bad signature counts toward the failure limit; `ar-link` answers 404 for an unknown or failed job; plus the guard that the migration list still has 2 entries; the link tests fail because the route does not exist (AC-05, AC-09)
+
+- [ ] T4 `app/server/arlink.ts`, `app/server/http.ts`, `app/server/export.ts` - `GET /api/assets/<id>/ar-link` and the signed `model.glb` served without a session, with `cache-control: private, no-store` and its log line, while an invalid or expired signature answers 401 through the failure limiter; T3 passes (AC-05)
+
+- [ ] T5 `app/server/push.test.ts` - failing tests against a local fake push service that decrypts with the subscriber's key: the RFC 8291 section 5 example, the VAPID JWT and its `sub`, one encrypted message per job done, 410 deletion, old token fingerprints, 422 naming the field, the 2000-character CJK prompt, no send on an unchanged `done` update, concurrent subscribe and delete, and "reload" with an existing `push.json`; they fail because `push.ts` does not exist (AC-06, AC-09)
+
+- [ ] T6 `app/server/push.ts`, `app/server/tracker.ts`, `app/server/serve.ts`, `app/server/http.ts` - `push.json` with the serialized writer, the key and subscription routes, aes128gcm encryption and the ES256 VAPID JWT with WebCrypto, and `jobDone` called without awaiting when the tracker's `done` update changes a row; T5 passes and `bun test app/server` passes (AC-06, AC-09)
+
+- [ ] T7 `playwright.config.ts`, `package.json`, `.github/workflows/ci.yml`, `scripts/verify.sh` - the `phone-chromium`, `phone-webkit` and `webkit-desktop` projects with the tag selection in Design, `@mobile-only` left out of `chromium`, WebKit in `bun run bootstrap` and CI, and `E2E_SKIP_WEBKIT=1` with its warning line in the verify report; `bunx playwright test --list` shows the projects and the existing journeys still pass (AC-02, AC-03, AC-05, AC-06, AC-07, AC-08)
+
+- [ ] T8 `app/server/seed.ts`, `app/server/seed.test.ts`, `app/e2e/` - two more done fixture assets with GLBs and thumbnails, one at High (20000 with 2048) and one at 5000 with 2048, and the existing journeys that count Library assets or the summary strip updated for them; the seed test and those journeys pass (AC-03, AC-04)
+
+- [ ] T9 `app/e2e/phone.spec.ts` - the failing "installable" journey (manifest, icons and `/sw.js` with their content types, `Page.getInstallabilityErrors` empty on the page and non-empty on `/api/health`) and the `navigator.serviceWorker.controller` check in `chromium`; they fail because nothing is served at those paths (AC-01, AC-06)
+
+- [ ] T10 `app/web/public/`, `app/web/sw.ts`, `app/web/index.html`, `app/web/main.tsx`, `vite.config.ts`, `app/server/static.ts`, `tsconfig.web.json` - the manifest, the generated icons and touch icon, the worker built to `/sw.js` with its four handlers, registration on load in a secure context, and exact-name serving with the stated types; T9 passes and `bun run size` stays in budget (AC-01, AC-06, AC-11)
+
+- [ ] T11 `app/e2e/phone.spec.ts` - the failing "tabs", "keyboard", "asset page", "asset link desktop", "export gone", "delete" and "reduced motion" journeys with the tags the Test Plan gives them; they fail against the current single-layout page (AC-02, AC-03)
+
+- [ ] T12 `app/web/App.tsx`, `app/web/nav.ts`, `app/web/Shell.tsx`, `app/web/AssetPage.tsx`, `app/web/Viewer.tsx`, `app/web/styles.css` - the phone shell below 1024 pixels: top bar, tab bar with `aria-current` and the accent bar, the URL rules with `replaceState`, `pushState` and `popstate`, the `‹ Library` rule, the gone message, `export=gone` read once, the close-on-crossing rule, the Library grid with Select mode, the empty Queue text and the Asset page with its facts, Download and Delete; on the desktop, `?asset=` opens the Preview dialog; T11 passes (AC-02, AC-03)
+
+- [ ] T13 `app/e2e/layout.spec.ts`, `app/web/styles.css` - the phone shell sizes and the 44-pixel hit-area rule in the matrix for `chromium` and `webkit-desktop`, and the two-column layout asserted at 1024x768, 1280x720 and 1440x900; any rule the shell misses fails first and passes after the style fix (AC-02)
+
+- [ ] T14 `app/e2e/phone.spec.ts`, `app/e2e/glossary.spec.ts` - the failing "quality" and "remix" journeys and the glossary checks for the new terms with no `Detail` or `Texture`; they fail because the page still shows Detail and Texture (AC-03, AC-04, AC-10)
+
+- [ ] T15 `app/web/App.tsx`, `app/web/AssetPage.tsx`, `app/web/Viewer.tsx`, `app/e2e/` - the Quality segmented group with the Ultra note, `Quality: <name>` or `Custom (...)` on job rows, the Asset page, the Preview dialog and the Library, and Remix filling Create; existing journeys that named Detail or Texture move to Quality; T14 passes (AC-03, AC-04, AC-10)
+
+- [ ] T16 `app/e2e/phone.spec.ts` - the failing "photos" journey for both inputs' attributes, appended picks, the GIF refusal and two image jobs; it fails because the buttons do not exist (AC-07)
+
+- [ ] T17 `app/web/App.tsx` - Take photo and From photos on Create (and beside the desktop drop zone), picks appended to the chosen images, and other types refused with `Only PNG, JPEG or WebP photos can be used.`; T16 passes (AC-07)
+
+- [ ] T18 `app/e2e/phone.spec.ts`, `app/e2e/glossary.spec.ts` - the failing "ar link" journey (one `ar-link` per open and per 10 minutes, one `intent:` request whose `file` is the latest absolute link, the native listener, the disabled button), no View in your room in the desktop projects, no `ar-link` in `phone-webkit`, and the glossary's View in your room check; they fail because the page has no AR (AC-05, AC-10)
+
+- [ ] T19 `app/web/ar.ts`, `app/web/AssetPage.tsx`, `app/web/Viewer.tsx`, `app/web/api.ts`, `app/web/model-viewer.d.ts` - `ar`, `ar-modes` and `ar-scale` on `<model-viewer>`, the slot button with its native click listener, the link refresh every 10 minutes and on return to visible, the intent URL built as model-viewer 4.4.0 builds it, and `activateAR()` for Quick Look; T18 passes (AC-05, AC-10)
+
+- [ ] T20 `app/e2e/phone.spec.ts` - the failing "share" journey for the prefetch after `canShare`, the synchronous `navigator.share`, the `AbortError` and `NotAllowedError` cases and the download fallback; it fails because Share GLB does not exist (AC-08)
+
+- [ ] T21 `app/web/share.ts`, `app/web/AssetPage.tsx`, `app/web/Viewer.tsx` - Share GLB with the empty-file `canShare` probe, the prefetched `File`, `Preparing…`, the share call in the tap handler and the download fallback with `Saved to your downloads.`; T20 passes (AC-08)
+
+- [ ] T22 `app/e2e/phone.spec.ts` - the failing "notifications switch" journeys: permission first, post and delete, blocked, the failed POST, the re-post on load, the key mismatch and its failure, the empty-stack desktop row, the could-not-reach message, the Home Screen and unsupported messages; they fail because the switch does not exist (AC-06)
+
+- [ ] T23 `app/web/notify.ts`, `app/web/App.tsx`, `app/web/Shell.tsx`, `app/web/api.ts` - the `Notify me when assets are ready` switch on the Queue screen and above the desktop Library, with the load-time checks, the re-post and re-subscribe rules and each message in Design; T22 passes (AC-06)
+
+- [ ] T24 `scripts/phone/journey.test.ts` - failing test that every submitting step refuses `https://win-main.tail6948f.ts.net` and runs for `http://localhost:8790`; it fails because the journey module does not exist (AC-12)
+
+- [ ] T25 `scripts/phone/android-journey.ts`, `tsconfig.scripts.json`, `tsconfig.json`, `scripts/verify.sh` - the emulator journey with run 1 and run 2 steps, each declared submitting or not, the host guard, the install fallback and the transcript and screenshots in `.artifacts/phone/`; verify runs `bun test ./scripts/phone` and shellchecks `scripts/phone/*.sh`; T24 passes and `bun run typecheck` covers the scripts (AC-12, AC-01, AC-05, AC-06, AC-07, AC-08)
+
+- [ ] T26 `scripts/phone/setup-emulator.sh` - user-local SDK under `~/.local/share/android-sdk`, the API 35 Play Store image, the `asset-studio` AVD, the ARCore emulator APK with its checksum checked, Chrome's command-line flag and the Chrome 105 check; a run on fedora-43 prints every check as passed, a second run changes nothing, and shellcheck passes (AC-01, AC-05, AC-12)
+
+- [ ] T27 `README.md`, `AGENTS.md` - installing on Android and iPhone through the browser menu, signing in once inside the installed iPhone app, the notifications switch, and the `scripts/phone/` commands; both files name them (Design)
+
+- [ ] T28 `docs/internal/plans/asset-studio-mobile.md`, `docs/internal/evidence/asset-studio-mobile/run-1/` - emulator run 1 against `bun run dev` through `adb reverse` (install, zoom, keyboard, AR launch, notify, camera, share), with the transcript and screenshots committed and cited under each criterion (AC-01, AC-02, AC-05, AC-06, AC-07, AC-08)
+
+- [ ] T29 `refs/pr-visuals/<PR number>`, `docs/internal/plans/asset-studio-mobile.md` - once the PR exists, the before-and-after and after-only captures the AC-02 row lists, committed to that ref and linked from the PR; the PR body shows them (AC-02)
+
+- [ ] T30 `docs/internal/plans/asset-studio-mobile.md`, `docs/internal/evidence/asset-studio-mobile/run-2/` - the PR head's prerelease deployed with `scripts/deploy/deploy.sh <version>`, then emulator run 2 against `https://win-main.tail6948f.ts.net` including the 16-minute AR load and the refused submitting steps; transcript, screenshots and the signed-link log line recorded (AC-12, AC-05, AC-01)
+
+- [ ] T31 `docs/internal/plans/asset-studio-mobile.md` - the AC-09 procedure on win-main after run 2: job IDs, both schema versions, the push key and endpoints recorded; rollback to v0.2.0 keeps every job; the prerelease deployed again keeps the jobs, the key and the endpoints; the values recorded under AC-09 (AC-09)
+
+- [ ] T32 `docs/internal/plans/asset-studio-mobile.md` - after the merge, v0.3.0 deployed with `scripts/deploy/deploy.sh` and `/api/health` checked as in the earlier feature's AC-10; the result recorded (Design)
 
 ## Open Questions
 
