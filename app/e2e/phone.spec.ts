@@ -366,3 +366,47 @@ test.describe("quality", () => {
     await expect(page.getByLabel("Prompts")).toHaveValue("an old iron key");
   });
 });
+
+// ---- Take photo and From photos (AC-07) -----------------------------------------------------------------
+
+const photo = (name: string, fill: number, type: "png" | "gif" = "png"): { name: string; mimeType: string; buffer: Buffer } => {
+  const magic = type === "png" ? [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] : [0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
+  const buffer = Buffer.alloc(2048, fill);
+  Buffer.from(magic).copy(buffer);
+  return { name, mimeType: type === "png" ? "image/png" : "image/gif", buffer };
+};
+
+test.describe("photos", () => {
+  test("photos: Take photo and From photos add to the chosen images, a GIF is refused, Generate makes one job per photo @phone @firefox", async ({ page }, testInfo) => {
+    const phone = testInfo.project.name.startsWith("phone-");
+    const { url, token } = shared();
+    if (phone) await phoneSignIn(page);
+    else await signIn(page, url, token);
+    const take = page.getByLabel("Take photo", { exact: true });
+    const pick = page.getByLabel("From photos", { exact: true });
+    for (const input of [take, pick]) await expect(input).toHaveAttribute("accept", "image/png,image/jpeg,image/webp");
+    await expect(take).toHaveAttribute("capture", "environment");
+    expect(await take.getAttribute("multiple")).toBeNull();
+    expect(await pick.getAttribute("multiple")).not.toBeNull();
+    expect(await pick.getAttribute("capture")).toBeNull();
+
+    const tag = uniquePrompt("photo").replace(" ", "-");
+    await take.setInputFiles(photo(`${tag}-1.png`, 1));
+    await take.setInputFiles(photo(`${tag}-2.png`, 2));
+    await expect(page.getByText("2 images chosen")).toBeVisible();
+    await page.getByRole("button", { name: "Clear images" }).click();
+    await take.setInputFiles(photo(`${tag}-3.png`, 3));
+    await pick.setInputFiles([photo(`${tag}-4.png`, 4), photo(`${tag}-5.png`, 5)]);
+    await expect(page.getByText("3 images chosen")).toBeVisible();
+
+    await pick.setInputFiles(photo(`${tag}.gif`, 6, "gif"));
+    await expect(page.getByRole("alert").filter({ hasText: "Only PNG, JPEG or WebP photos can be used." })).toBeVisible();
+    await expect(page.getByText("3 images chosen")).toBeVisible();
+
+    await page.getByRole("button", { name: "Clear images" }).click();
+    await take.setInputFiles(photo(`${tag}-6.png`, 7));
+    await take.setInputFiles(photo(`${tag}-7.png`, 8));
+    await page.getByRole("button", { name: /^Generate/ }).click();
+    await expect(page.getByRole("status").filter({ hasText: "2 jobs added" })).toBeVisible();
+  });
+});
