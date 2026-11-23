@@ -662,6 +662,16 @@ None.
 | 2026-11-23 | R-15 | spec | `33ad841` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; applied with the owner's answer, nit applied |
 | 2026-11-23 | R-16 | spec | `083ecbb` | claude-opus-5-5 | procedural | 1 blocking, 1 should-fix; met by removing the URL marker rules of R-14 and R-15, as the owner chose |
 | 2026-11-23 | R-17 | spec | `e770962` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; all applied |
+| 2026-11-23 | R-18 | spec | `5ce2f43` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
+
+### R-18
+
+FINDING: F-01
+KIND: factual
+SEVERITY: should-fix
+WHERE: Test Plan AC-03 ("asset link desktop" in `chromium`, `firefox` (`@firefox`) and `webkit-desktop`: "from `about:blank` open the page, open a tile's Preview dialog (the URL does not change), close it, and `page.goBack()` returns to `about:blank`"; "export gone" in `phone-chromium` and `phone-webkit`: "from `about:blank`, read `history.length`, open `/?export=gone` ... and that `history.length` is exactly one more than on `about:blank`"; "asset page": "open `/?asset=<seeded id>` directly from `about:blank` ... `page.goBack()` afterwards returns to `about:blank`" and "from `about:blank` open the Library ... a second `page.goBack()` returns to `about:blank`"); Test Plan AC-02 ("tabs": "after opening the page from `about:blank` and switching Create, Queue, Library, `page.goBack()` returns to `about:blank`")
+EVIDENCE: The rows never say how a step gets to `about:blank`. A new Playwright page already sits on its initial `about:blank`, so the obvious way to write "from `about:blank`" is to call `page.goto(url)` on a fresh page. I ran Playwright 1.65.1 from the main checkout's node_modules against a local server whose page calls `history.replaceState`. On a fresh page in Firefox, `page.goto` replaced the initial `about:blank` entry: `history.length` was 1 before and 1 after, and `page.goBack()` left the page where it was (`fresh page goBack url http://localhost:.../`). With an explicit `page.goto('about:blank')` first, Firefox gave 1 then 2, and `page.goBack()` returned to `about:blank`. Chromium gave 1 then 2 and returned to `about:blank` both ways. WebKit is not installed on this host, so I did not observe it there. Written the obvious way, the "asset link desktop" step fails a correct build in `firefox`, and the "export gone", "tabs" and "asset page" steps depend on how WebKit treats the initial entry, which nobody has checked. The "export gone" baseline came in with the R-17 revision (`git diff 479237b 5ce2f43`). The Firefox `goBack` step dates from the R-11 revision.
+PROPOSAL: In the Test Plan's project-names paragraph (or in each step), state that "from `about:blank`" means the step first calls `page.goto("about:blank")` so that a committed `about:blank` entry exists, then reads any `history.length` baseline and opens the app.
 
 ### R-17
 
