@@ -9,6 +9,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: "app/web",
   base: "/",
+  // The page's own TypeScript settings. Without this, Vite follows tsconfig.json's references, which name
+  // configs (the worker's, the phone scripts') that the image build does not copy.
+  tsconfig: fileURLToPath(new URL("./tsconfig.web.json", import.meta.url)),
   plugins: [react(), tailwindcss()],
   // shadcn/ui components import from "@/", which is app/web.
   resolve: { alias: { "@": fileURLToPath(new URL("./app/web", import.meta.url)) } },
