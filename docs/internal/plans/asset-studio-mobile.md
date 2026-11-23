@@ -649,6 +649,23 @@ None.
 | 2026-11-23 | R-12 | spec | `da24564` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 2 nits; F-01 met by removing asset carry-over across 1024 pixels, as the owner chose; nits applied |
 | 2026-11-23 | R-13 | spec | `1e6b63b` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer |
 | 2026-11-23 | R-14 | spec | `600a13d` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer |
+| 2026-11-23 | R-15 | spec | `33ad841` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit |
+
+### R-15
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Layout and navigation (URL paragraph: "the notice shows above the screen content like the ComfyUI banners. A tab switch keeps `export=gone` until the notice is dismissed, and Dismiss replaces the URL with the current `?tab=` (or `/` in the two-column layout) and no `export`"; URL paragraph: "opening an asset uses `history.pushState`"; Asset page paragraph: the `{ from: "library" }` rule for `‹ Library`); Context > Owner summary ("on a phone the changed-selection notice after a failed zip download opens on the Library tab"); Test Plan AC-03 ("export gone")
+EVIDENCE: The R-14 revision added this text. On the phone shell the notice shows above the screen content on every screen, as the ComfyUI banners do, and it stays until dismissed (today it lives in component state that is set once from the URL, app/web/App.tsx:159). So a client who lands on `/?export=gone` can open an asset from a Library tile and tap Dismiss on the Asset page. That page's URL is `?asset=<job id>` with no `tab`, and its history entry carries `{ from: "library" }`. Design does not say what "the current `?tab=`" is there, or whether the pushed `?asset=` URL keeps `export=gone`. One implementer writes `?tab=library` with `replaceState(null, ...)` as today's handler does (app/web/App.tsx:189). The Asset page then closes, history holds two `?tab=library` entries, so the next Back seems to do nothing, and the `{ from: "library" }` state is gone. Another implementer keeps `?asset=<id>`, drops only `export`, and keeps the history state, so the Asset page stays and Back still returns to the Library. The "export gone" step opens `/?export=gone` and dismisses on the Library tab only, so both builds pass.
+PROPOSAL: State that Dismiss on the Asset page removes only `export` from the URL and keeps `?asset=` and the entry's history state, or that the notice is not shown on the Asset page. Add that case to the AC-03 "export gone" step: open `/?export=gone`, open a tile, dismiss on the Asset page, assert the Asset page still shows, then `page.goBack()` shows the Library.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-03; Test Plan AC-03 ("export gone" in `phone-chromium` and `phone-webkit`); Design > Layout and navigation (URL paragraph on `?export=gone`); Context > Owner summary ("on a phone the changed-selection notice after a failed zip download opens on the Library tab")
+EVIDENCE: The R-14 revision added the "export gone" journey to the AC-03 row, but AC-03's text names the Asset page, `?asset=`, the 1024-pixel crossing, the gone message and Remix. It says nothing about the changed-selection notice or the tab it opens on, and AC-02 does not either. So the owner's R-14 decision is held only by Design and a proof step, not by any criterion an implementation review gives a verdict on. Design and the step fix the behaviour, so an implementer builds the same thing.
+PROPOSAL: Add a clause to AC-03 (or AC-02), for example "below 1024 pixels the changed-selection notice opens on the Library tab and Dismiss keeps the current tab".
 
 ### R-14
 
