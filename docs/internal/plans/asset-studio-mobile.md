@@ -637,7 +637,7 @@ None.
 | 2026-11-23 | R-8 | spec | `8ce3ce4` | claude-opus-5-5 | procedural | 0 blocking, 5 should-fix, 1 nit; all applied with the owner's two answers |
 | 2026-11-23 | R-9 | spec | `5abb796` | claude-opus-5-5 | procedural | 1 blocking, 2 should-fix; all applied with the owner's two answers; F-01 replaced the R-8 shared-stack cancel step |
 | 2026-11-23 | R-10 | spec | `fed6bf1` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix, 1 nit; all applied with the owner's answer; F-01 revisited the R-9 history rule |
-| 2026-11-23 | R-11 | spec | `09015b5` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix |
+| 2026-11-23 | R-11 | spec | `09015b5` | claude-opus-5-5 | procedural | 0 blocking, 2 should-fix; met by removing the pending-history rule (R-10) and keeping desktop tiles state-only, as the owner chose |
 
 ### R-11
 
