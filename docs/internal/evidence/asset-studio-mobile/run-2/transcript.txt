@@ -1,0 +1,36 @@
+2026-11-23T20:28:41.751Z run 2 against https://win-main.tail6948f.ts.net on sdk_gphone64_x86_64 (serial emulator-5554)
+2026-11-23T20:28:46.376Z step install (submits nothing)
+2026-11-23T20:29:00.375Z   menu item: Install app
+2026-11-23T20:30:17.679Z   Chrome made a home-screen shortcut; tapping the Asset Studio launcher icon
+2026-11-23T20:30:22.967Z   display-mode standalone: true
+2026-11-23T20:30:23.932Z   screenshot .artifacts/phone/run-2/01-installed.png
+2026-11-23T20:30:23.932Z PASS install
+2026-11-23T20:30:23.933Z step sign in (submits nothing)
+2026-11-23T20:30:24.107Z   signed in; the tab bar shows
+2026-11-23T20:30:24.793Z   screenshot .artifacts/phone/run-2/02-signed-in.png
+2026-11-23T20:30:24.793Z PASS sign in
+2026-11-23T20:30:24.793Z step tabs (submits nothing)
+2026-11-23T20:30:25.021Z   Create screen shows
+2026-11-23T20:30:25.524Z   screenshot .artifacts/phone/run-2/03-tab-create.png
+2026-11-23T20:30:25.761Z   Queue screen shows
+2026-11-23T20:30:26.430Z   screenshot .artifacts/phone/run-2/04-tab-queue.png
+2026-11-23T20:30:26.843Z   Library screen shows
+2026-11-23T20:30:27.964Z   screenshot .artifacts/phone/run-2/05-tab-library.png
+2026-11-23T20:30:27.964Z PASS tabs
+2026-11-23T20:30:27.964Z step notifications on (submits nothing)
+2026-11-23T20:30:28.398Z   notifications already on
+2026-11-23T20:30:28.398Z PASS notifications on
+2026-11-23T20:30:28.398Z step ar load (submits nothing)
+2026-11-23T20:30:57.248Z   Asset page open for 6c8f7d6b-713d-44ee-8913-7c4e0e81cc6d; waiting 16 minutes, past the first link's lifetime
+2026-11-23T20:47:00.474Z   tapping View in your room at 2026-11-23T20:47:00.474Z
+2026-11-23T20:47:25.586Z   screenshot .artifacts/phone/run-2/06-scene-viewer.png
+2026-11-23T20:47:25.726Z   resumed activity: 
+2026-11-23T20:47:25.726Z   the server log line for the signed link is read on win-main with docker logs after this run
+2026-11-23T20:47:28.863Z PASS ar load
+2026-11-23T20:47:28.864Z step notify (submits a job)
+2026-11-23T20:47:28.864Z REFUSED notify: notify refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-23T20:47:28.864Z step camera (submits a job)
+2026-11-23T20:47:28.864Z REFUSED camera: camera refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-23T20:47:28.864Z step share (submits a job)
+2026-11-23T20:47:28.864Z REFUSED share: share refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-23T20:47:28.879Z run 2 passed

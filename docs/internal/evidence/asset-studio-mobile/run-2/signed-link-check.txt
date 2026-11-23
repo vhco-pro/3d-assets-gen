@@ -1,0 +1,6 @@
+link: /api/assets/6c8f7d6b-713d-44ee-8913-7c4e0e81cc6d/model.glb?exp=1795467837&sig=<signature>
+signed fetch, no cookie: 200, 19135844 bytes, model/gltf-binary
+plain model.glb, no cookie: 401
+changed signature (last character c to A): 401
+› signed GLB 6c8f7d6b-713d-44ee-8913-7c4e0e81cc6d for <tailnet ip> (curl/8.15.0)
+› signed GLB 6c8f7d6b-713d-44ee-8913-7c4e0e81cc6d for <tailnet ip> (asset-studio-link-check/1.0)
