@@ -491,7 +491,7 @@ test.describe("view in your room", () => {
 
 // ---- Share GLB (AC-08) ----------------------------------------------------------------------------------
 
-type ShareMode = "accept" | "abort" | "not-allowed" | "refuse" | "absent";
+type ShareMode = "accept" | "abort" | "not-allowed" | "data-error" | "refuse" | "absent";
 
 /** Stubs the Web Share API before load and records every call, with the page's resource count at share time. */
 const shareStub = (mode: ShareMode): string => `(() => {
@@ -506,6 +506,7 @@ const shareStub = (mode: ShareMode): string => `(() => {
     w.__shared.push({ files: (data.files || []).map((f) => ({ name: f.name, type: f.type, size: f.size, isFile: f instanceof File })), title: data.title, resources: performance.getEntriesByType("resource").length });
     if (${JSON.stringify(mode)} === "abort") return Promise.reject(new DOMException("closed", "AbortError"));
     if (${JSON.stringify(mode)} === "not-allowed") return Promise.reject(new DOMException("no", "NotAllowedError"));
+    if (${JSON.stringify(mode)} === "data-error") return Promise.reject(new DOMException("bad", "DataError"));
     return Promise.resolve();
   } });
 })();`;
@@ -518,7 +519,35 @@ const shareLog = (page: Page): Promise<ShareLog> => page.evaluate(() => {
 const GLB_NAME = "a-wooden-treasure-chest-00000000.glb";
 
 test.describe("share", () => {
-  for (const mode of ["accept", "abort", "not-allowed", "refuse", "absent"] as const) {
+  test("share (failed prefetch): Share GLB is enabled and downloads when the advance fetch fails @ios @firefox @no-chromium", async ({ page }, testInfo) => {
+    const phone = testInfo.project.name.startsWith("phone-");
+    const { url, token } = shared();
+    await page.addInitScript(shareStub("accept"));
+    await page.route(/\/assets\/viewer-[^/]+\.js$/, (route) => route.abort());
+    let failed = false;
+    await page.route(/\/model\.glb$/, async (route) => {
+      if (!failed) {
+        failed = true;
+        await route.fulfill({ status: 500, body: "{}" });
+        return;
+      }
+      await route.fallback();
+    });
+    if (phone) await phoneSignIn(page);
+    else await signIn(page, url, token);
+    await page.goto(`${url}/?asset=${CHEST}`);
+    const scope = phone ? page.getByTestId("asset-page") : page.getByRole("dialog");
+    const share = scope.getByRole("button", { name: "Share GLB" });
+    await expect(share).toBeEnabled();
+    expect(failed).toBe(true);
+    const download = page.waitForEvent("download");
+    await share.click();
+    expect((await download).suggestedFilename()).toBe(GLB_NAME);
+    await expect(page.getByText("Saved to your downloads.")).toBeVisible();
+    expect((await shareLog(page)).shared).toEqual([]);
+  });
+
+  for (const mode of ["accept", "abort", "not-allowed", "data-error", "refuse", "absent"] as const) {
     test(`share (${mode}): Share GLB shares the prepared file or falls back to a download @phone @firefox`, async ({ page }, testInfo) => {
       const phone = testInfo.project.name.startsWith("phone-");
       const { url, token } = shared();
@@ -533,10 +562,14 @@ test.describe("share", () => {
       const scope = phone ? page.getByTestId("asset-page") : page.getByRole("dialog");
       const share = scope.getByRole("button", { name: "Share GLB" });
       await expect(share).toBeVisible();
-      if (mode === "refuse" || mode === "absent") {
+      // Chromium-based browsers (phone-chromium's Chrome on Android, chromium's desktop Chrome) never try the
+      // share sheet: Chromium refuses .glb shares and its canShare does not check the type.
+      const chromiumUa = testInfo.project.name === "phone-chromium" || testInfo.project.name === "chromium";
+      if (chromiumUa || mode === "refuse" || mode === "absent") {
         await expect(share).toBeEnabled();
         await page.waitForTimeout(1000);
         expect(glb).toBe(0);
+        if (chromiumUa) expect((await shareLog(page)).canShare).toEqual([]);
         const download = page.waitForEvent("download");
         await share.click();
         expect((await download).suggestedFilename()).toBe(GLB_NAME);
@@ -548,6 +581,8 @@ test.describe("share", () => {
       expect(log.canShare[0]).toEqual([{ name: GLB_NAME, type: "model/gltf-binary", size: 0 }]);
       expect(glb).toBe(1);
       const before = await page.evaluate(() => performance.getEntriesByType("resource").length);
+      // A share the browser refuses (NotAllowedError, as Chrome on Android does for .glb) downloads instead.
+      const download = mode === "not-allowed" ? page.waitForEvent("download") : null;
       await share.click();
       await expect.poll(async () => (await shareLog(page)).shared.length).toBe(1);
       const call = (await shareLog(page)).shared[0];
@@ -556,8 +591,14 @@ test.describe("share", () => {
       expect(call?.files[0]?.size).toBeGreaterThan(0);
       expect(call?.title).toBe("a wooden treasure chest");
       expect(call?.resources).toBe(before);
+      if (download) {
+        expect((await download).suggestedFilename()).toBe(GLB_NAME);
+        await expect(page.getByText("Saved to your downloads.")).toBeVisible();
+        await expect(page.getByText("Sharing did not work. Use Download instead.")).toHaveCount(0);
+        return;
+      }
       expect(glb).toBe(1);
-      if (mode === "not-allowed") await expect(page.getByText("Sharing did not work. Use Download instead.")).toBeVisible();
+      if (mode === "data-error") await expect(page.getByText("Sharing did not work. Use Download instead.")).toBeVisible();
       else {
         await page.waitForTimeout(500);
         await expect(page.getByText("Sharing did not work. Use Download instead.")).toHaveCount(0);
