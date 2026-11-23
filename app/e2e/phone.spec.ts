@@ -5,7 +5,7 @@ import { chromium, type Locator, type Page } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, shared, signIn, test, uniquePrompt } from "./fixtures.ts";
+import { expandBatches, expect, shared, signIn, test, uniquePrompt } from "./fixtures.ts";
 
 test.describe("installable", () => {
   test("the image serves the manifest, its icons and /sw.js, and Chromium reports no installability errors", async ({ request }) => {
@@ -302,5 +302,67 @@ test.describe("asset links on the desktop", () => {
     await page.getByRole("button", { name: "Dismiss" }).click();
     await expect(page.getByText(EXPORT_GONE)).toHaveCount(0);
     expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe("/");
+  });
+});
+
+// ---- Quality and Remix (AC-03, AC-04) -------------------------------------------------------------------
+
+const LEVELS = [["Fast", 5000, 1024], ["Standard", 10000, 2048], ["High", 20000, 2048], ["Ultra", 30000, 4096]] as const;
+
+test.describe("quality", () => {
+  test("quality: each level submits its pair, Detail and Texture are gone, jobs show their level or Custom @android", async ({ page }, testInfo) => {
+    const phone = testInfo.project.name === "phone-chromium";
+    const { url, token } = shared();
+    if (phone) await phoneSignIn(page);
+    else await signIn(page, url, token);
+    const quality = page.getByLabel("Quality", { exact: true });
+    await expect(quality.getByRole("radio", { name: "Standard" })).toHaveAttribute("data-state", "on");
+    const base = uniquePrompt("quality");
+    for (const [name] of LEVELS) {
+      if (phone) await tab(page, "Create").click();
+      await page.getByLabel("Prompts").fill(`${base} ${name}`);
+      await quality.getByRole("radio", { name }).click();
+      if (name === "Ultra") await expect(page.getByText("Ultra: best quality, about 10 min per job.")).toBeVisible();
+      await page.getByRole("button", { name: /^Generate/ }).click();
+      await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
+    }
+    const res = await fetch(`${url}/api/jobs`, { headers: { authorization: `Bearer ${token}` } });
+    const jobs = ((await res.json()) as { jobs: { prompt: string | null; faces: number; tex: number | null }[] }).jobs;
+    for (const [name, faces, tex] of LEVELS) {
+      expect(jobs.find((j) => j.prompt === `${base} ${name}`), name).toMatchObject({ faces, tex });
+    }
+    await expect(page.getByText("Detail", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Texture", { exact: true })).toHaveCount(0);
+    if (phone) await tab(page, "Queue").click();
+    await expandBatches(page);
+    await expect(page.getByTestId("job").filter({ hasText: "an ornate dragon statue" })).toContainText("Quality: Ultra");
+    await expect(page.getByText("Detail", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Texture", { exact: true })).toHaveCount(0);
+    if (!phone) {
+      await page.getByRole("button", { name: "Preview an old iron key" }).click();
+      await expect(page.getByRole("dialog")).toContainText("Custom (5k, 2048)");
+    }
+  });
+
+  test("remix: Remix fills Create from the asset and picks High, or Fast for the 5k Custom asset @android @mobile-only", async ({ page }) => {
+    await phoneSignIn(page);
+    await page.goto(`${shared().url}/?tab=library`);
+    await page.getByRole("button", { name: "Open a carved wooden totem" }).click();
+    const asset = page.getByTestId("asset-page");
+    await expect(asset).toContainText("Quality: High");
+    for (const action of ["Download", "Remix", "Delete"]) await expect(asset.getByRole("button", { name: action, exact: true })).toBeVisible();
+    await asset.getByRole("button", { name: "Remix", exact: true }).click();
+    await expect(screen(page)).toHaveAttribute("data-screen", "create");
+    expect(query(page).get("tab")).toBe("create");
+    await expect(page.getByLabel("Prompts")).toHaveValue("a carved wooden totem");
+    await expect(page.getByLabel("Quality", { exact: true }).getByRole("radio", { name: "High" })).toHaveAttribute("data-state", "on");
+
+    await tab(page, "Library").click();
+    await expect(page.getByTestId("asset").filter({ hasText: "an old iron key" })).toContainText("Custom (5k, 2048)");
+    await page.getByRole("button", { name: "Open an old iron key" }).click();
+    await expect(asset).toContainText("Custom (5k, 2048)");
+    await asset.getByRole("button", { name: "Remix", exact: true }).click();
+    await expect(page.getByLabel("Quality", { exact: true }).getByRole("radio", { name: "Fast" })).toHaveAttribute("data-state", "on");
+    await expect(page.getByLabel("Prompts")).toHaveValue("an old iron key");
   });
 });
