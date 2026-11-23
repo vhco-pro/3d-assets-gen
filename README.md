@@ -53,7 +53,7 @@ The Android emulator journey is run by hand (never by CI), on a host with KVM:
 | --- | --- |
 | `scripts/phone/setup-emulator.sh` | Installs the Android SDK, the API 35 Play Store image and the `asset-studio` AVD under `~/.local/share/android-sdk`, Google Play Services for AR (checksum checked) and Chrome's command-line flag; idempotent; `--keep-running` leaves the emulator up |
 | `bun scripts/phone/android-journey.ts --run 1` | With `PHONE_BASE_URL=http://localhost:8790` and `PHONE_TOKEN`, runs the whole journey against `bun run dev` through `adb reverse` |
-| `bun scripts/phone/android-journey.ts --run 2` | With `PHONE_BASE_URL` set to the deployed app, runs the journey without submitting any job; steps that would submit one refuse to run unless the host is `localhost` |
+| `bun scripts/phone/android-journey.ts --run 2` | With `PHONE_BASE_URL` set to the deployed app, runs the journey without submitting any job; steps that would submit one refuse to run unless the host is `localhost`. Step "ar load" also needs `PHONE_LOG_COMMAND`, a shell command that prints the app's log (for win-main, `ssh win-main docker logs --since 30m asset-studio-app-1`) |
 
 Each run writes a transcript and screenshots to `.artifacts/phone/run-<n>/`.
 

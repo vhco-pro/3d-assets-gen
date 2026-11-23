@@ -4,7 +4,8 @@
 // input tap). Run by the agent, never by CI:
 //
 //   PHONE_BASE_URL=http://localhost:8790 PHONE_TOKEN=... bun scripts/phone/android-journey.ts --run 1
-//   PHONE_BASE_URL=https://win-main.tail6948f.ts.net PHONE_TOKEN=... bun scripts/phone/android-journey.ts --run 2
+//   PHONE_BASE_URL=https://win-main.tail6948f.ts.net PHONE_TOKEN=... \
+//     PHONE_LOG_COMMAND='ssh win-main docker logs --since 30m asset-studio-app-1' bun scripts/phone/android-journey.ts --run 2
 //
 // The token comes from the environment and is never printed. Every step is declared as submitting a
 // generation or not; a submitting step refuses to run, and fails, unless the base URL's host is localhost, so
@@ -240,9 +241,16 @@ async function waitDone(ctx: StepContext, id: string): Promise<void> {
 /** Opens the notification shade and taps the Asset Studio notification whose text holds the prompt. */
 async function tapNotification(ctx: StepContext, prompt: string): Promise<void> {
   await ctx.adb("shell", "cmd", "statusbar", "expand-notifications");
-  await sleep(1500);
   const short = prompt.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (!(await uiTap(ctx, new RegExp(short)))) throw new Error("the notification is not in the shade");
+  await until("the notification in the shade", async () => (await uiTap(ctx, new RegExp(short))) || null, 15_000, 1500).catch(() => {
+    throw new Error("the notification is not in the shade");
+  });
+}
+
+/** The activity Android shows on top, from dumpsys (empty when none is resumed). */
+async function resumedActivity(ctx: StepContext): Promise<string> {
+  const top = await ctx.adb("shell", "dumpsys", "activity", "activities");
+  return /(?:mResumedActivity|topResumedActivity)[^{]*\{[^}]*\}/.exec(top)?.[0] ?? "";
 }
 
 /** The Chrome and installed-app tasks in the recent apps (the installed app runs as Chrome's web app activity). */
@@ -454,8 +462,10 @@ export const STEPS: Step[] = [
       await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Queue" }).click();
       const sw = page.getByLabel("Notify me when assets are ready", { exact: true });
       if ((await sw.getAttribute("aria-checked")) === "true") {
-        ctx.log("notifications already on");
-        return;
+        // Left on by an earlier run: turn it off and on again so this run sees the subscription saved.
+        ctx.log("notifications already on; turning them off and on again");
+        await tapElement(ctx, sw);
+        await page.waitForFunction(() => document.querySelector('[aria-label="Notify me when assets are ready"]')?.getAttribute("aria-checked") === "false", undefined, { timeout: 30_000 });
       }
       const posted = page.waitForResponse((r) => r.url().endsWith("/api/push/subscriptions") && r.request().method() === "POST", { timeout: 60_000 });
       await tapElement(ctx, sw);
@@ -526,15 +536,35 @@ export const STEPS: Step[] = [
       }
       ctx.state.arTapAt = new Date().toISOString();
       ctx.log(`tapping View in your room at ${ctx.state.arTapAt}`);
+      await ctx.adb("logcat", "-c");
       await tapElement(ctx, asset.getByRole("button", { name: "View in your room" }));
+      const line = await until("Scene Viewer's intent in logcat", async () => {
+        const log = await ctx.adb("logcat", "-d", "-s", "ActivityTaskManager:I");
+        return log.split("\n").find((l) => l.includes("START u0") && l.includes("android.intent.action.VIEW") && l.includes("arvr.google.com")) ?? null;
+      }, 20_000);
+      ctx.log(`logcat: ${line.trim().slice(0, 260)}`);
       await sleep(20_000);
       await ctx.shot("scene-viewer");
-      const top = await ctx.adb("shell", "dumpsys", "activity", "activities");
-      const focused = /mResumedActivity.*?\{[^}]*\}/.exec(top)?.[0] ?? "";
-      ctx.log(`resumed activity: ${focused.slice(0, 200)}`);
-      ctx.log("the server log line for the signed link is read on win-main with docker logs after this run");
+      const focused = await resumedActivity(ctx);
+      ctx.log(`resumed activity: ${focused.slice(0, 200) || "none"}`);
+      // Scene Viewer runs in the Google app (or ARCore); anything else on top means it is not showing the model.
+      const showing = /googlequicksearchbox|com\.google\.ar\.core/.test(focused) && !/crash|ErrorActivity/i.test(focused);
+      // The server's log line, read with PHONE_LOG_COMMAND (a shell command printing the app's log), e.g.
+      // `ssh win-main docker logs --since 5m asset-studio-app-1`.
+      const logCommand = process.env.PHONE_LOG_COMMAND ?? "";
+      let logged = "";
+      if (logCommand) {
+        const out = await run("sh", ["-c", logCommand], { maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout + r.stderr).catch(() => "");
+        logged = out.split("\n").filter((l) => l.includes(`signed GLB ${id}`)).pop() ?? "";
+        ctx.log(`server log: ${logged.replace(/for \S+ \(/, "for <client> (") || "no signed GLB line for this job"}`);
+      } else {
+        ctx.log("server log: not read (PHONE_LOG_COMMAND is not set)");
+      }
       await ctx.adb("shell", "input", "keyevent", "KEYCODE_BACK");
       await sleep(3000);
+      if (!showing) throw new Error(`Scene Viewer is not showing the model (resumed: ${focused.slice(0, 120) || "none"})`);
+      if (!logCommand) throw new Error("the server log was not read; set PHONE_LOG_COMMAND");
+      if (!logged || /Chrome\//.test(logged)) throw new Error("the server logged no signed GLB fetch from Scene Viewer for this job");
     },
   },
   {
@@ -553,6 +583,7 @@ export const STEPS: Step[] = [
       const tasks = await appTasks(ctx);
       ctx.log(`foreground tap moved the open app to /?asset=${firstId}; Chrome and app tasks in recents before ${String(before)}, after ${String(tasks)}`);
       if (tasks !== before) throw new Error("the notification tap opened a second window");
+      await ctx.page.getByTestId("asset-page").waitFor({ timeout: 20_000 });
       await ctx.shot("notify-foreground");
 
       // Swiped away from the recent apps, the device still gets the notification, and a tap opens the asset.
@@ -573,7 +604,8 @@ export const STEPS: Step[] = [
       ctx.log(`dumpsys notification lists "Asset Studio" with "${prompt} is ready." ${String(Math.round((Date.now() - doneAt) / 1000))} s after the job finished${listed.includes("Asset Studio") ? "" : " (title not found)"}`);
       await tapNotification(ctx, prompt);
       ctx.page = await until("the reopened app", () => Promise.resolve(ctx.context.pages().find((p) => p.url().includes(`asset=${id}`)) ?? null), 30_000);
-      ctx.log(`the tap opened /?asset=${id}`);
+      await ctx.page.getByTestId("asset-page").waitFor({ timeout: 20_000 });
+      ctx.log(`the tap opened /?asset=${id} and the Asset page shows`);
       await ctx.shot("notify-closed");
 
       // Turned off, a finished job brings no notification.
@@ -709,6 +741,10 @@ async function main(): Promise<number> {
       write(`FAIL ${step.name}: ${message}`);
       report.fail(`${step.name}: ${message}`);
       await ctx.shot(`fail-${step.name.replace(/\s+/g, "-")}`).catch(() => undefined);
+      // A failure can leave the notification shade or a system sheet open over the app; clear it so the next step
+      // starts on the app.
+      await adb("shell", "cmd", "statusbar", "collapse").catch(() => "");
+      await ctx.page.bringToFront().catch(() => undefined);
     }
   }
   await context.close().catch(() => undefined);
