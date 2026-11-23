@@ -786,6 +786,16 @@ None.
 | 2026-11-23 | R-19 | spec | `145dc76` | n/a | n/a | accepted by owner |
 | 2026-11-23 | R-20 | spec | `90c0f6b` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied with the owner's answer (Android downloads on tap, no prefetch) |
 | 2026-11-23 | R-21 | spec | `88427a5` | claude-opus-5-5 | procedural | 0 blocking, 3 should-fix, 2 nits; all applied |
+| 2026-11-23 | R-22 | spec | `0bf380e` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix |
+
+### R-22
+
+FINDING: F-01
+KIND: judgement
+SEVERITY: should-fix
+WHERE: Design > Share GLB ("On other browsers, when the Asset page or the Preview dialog opens and the browser has `navigator.share` and `navigator.canShare`, the page first asks `navigator.canShare(...)` with an empty file. Only when that is true does it fetch the GLB"; "A rejection with `NotAllowedError` (the browser refuses to share this file) starts the download"); Context > Owner summary ("so opening an asset on the phone does not fetch the GLB twice. On other browsers a share the browser refuses also downloads the file"); Test Plan AC-08 (the `chromium` and `firefox` Preview dialog cases, which stub `canShare`)
+EVIDENCE: The Design's own observation weakens the reason for the empty-file probe. Chrome 124 answered `canShare` true for a `.glb` `File` and also for one typed `application/octet-stream`, then `navigator.share` rejected with `NotAllowedError: Permission denied`. Neither of those files is on the Chromium list in Sources (FILE_TYPES.md). So Chrome's `canShare` does not check file types; the type check happens only in `share`. The probe exists because of R-3 F-04, to stop prefetching where the browser cannot share `.glb` files. This revision handles Android by user agent, but the Design gives no reason to think desktop Chromium browsers that have `navigator.share` (Chrome or Edge on Windows, macOS, ChromeOS) answer the probe differently. If they behave like Chrome 124, every Preview dialog open in those browsers fetches the whole GLB a second time, next to the viewer's own load. R-20 F-01 cited `app/server/assets.ts:25-27`: `model.glb` is served with no `cache-control`, so nothing is reused. The share tap is always refused, and the `NotAllowedError` path then fetches the file a third time through `window.location.assign` (`app/web/share.tsx:50` at 0bf380e). The outcome is still right (a download and `Saved to your downloads.`), and AC-08 holds. But the owner chose the Android rule specifically so that opening an asset "does not fetch the GLB twice", and the Owner summary does not tell them the same cost remains on desktop Chromium. The harm is smaller than on the phone (desktop over the tailnet, a few megabytes per open), but it happens on every open and does not go away by itself. Limitation: I did not run desktop Chrome on Windows or macOS; this host's Linux Chrome has no `navigator.share`. The conclusion is inferred from the quoted Chrome 124 output and the FILE_TYPES.md source.
+PROPOSAL: Either state this cost in Design > Share GLB and the Owner summary as accepted, or raise an Open Question that weighs it against the cheaper options: on a `NotAllowedError` rejection, save the prefetched `File` through a blob URL so the third fetch goes away, or skip the probe and prefetch for every Chromium user agent, not only Android.
 
 ### R-21
 
