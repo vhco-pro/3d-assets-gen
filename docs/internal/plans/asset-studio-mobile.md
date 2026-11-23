@@ -1,6 +1,6 @@
 ---
-status: draft
-status_description: "Revising Share GLB after the emulator showed Chrome on Android refusing .glb shares; waiting for spec review."
+status: planned
+status_description: "Share GLB revision accepted by the owner on R-24; implementation resumes on feat/asset-studio-mobile."
 issue: https://github.com/vhco-pro/3d-assets-gen/issues/12
 branch: feat/asset-studio-mobile
 goal: "The client installs Asset Studio on an Android phone or iPhone, queues prompts or camera photos with one Quality choice, gets a notification when an asset is ready, and opens it in their room through AR or shares the GLB."
@@ -796,6 +796,7 @@ None.
 | 2026-11-23 | R-22 | spec | `0bf380e` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied with the owner's answer (no share attempt in Chromium-based browsers) |
 | 2026-11-23 | R-23 | spec | `571f9e0` | claude-opus-5-5 | procedural | 0 blocking, 1 should-fix; applied |
 | 2026-11-23 | R-24 | spec | `baed690` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
+| 2026-11-23 | R-24 | spec | `baed690` | n/a | n/a | accepted by owner |
 
 ### R-24
 
