@@ -757,7 +757,8 @@ opens the app.
 
 - [ ] T28 `docs/internal/plans/asset-studio-mobile.md`, `docs/internal/evidence/asset-studio-mobile/run-1/` - emulator run 1 against `bun run dev` through `adb reverse` (install, zoom, keyboard, AR launch, notify, camera, share), with the transcript and screenshots committed and cited under each criterion (AC-01, AC-02, AC-05, AC-06, AC-07, AC-08)
 
-- [ ] T29 `refs/pr-visuals/<PR number>`, `docs/internal/plans/asset-studio-mobile.md` - once the PR exists, the before-and-after and after-only captures the AC-02 row lists, committed to that ref and linked from the PR; the PR body shows them (AC-02)
+- [x] T29 `refs/pr-visuals/<PR number>`, `docs/internal/plans/asset-studio-mobile.md` - once the PR exists, the before-and-after and after-only captures the AC-02 row lists, committed to that ref and linked from the PR; the PR body shows them (AC-02)
+      Evidence: Captured with a Playwright script against two seeded stacks: the base tree at the claim for before, and the head `bdf3725` with the default and empty profiles for after. The script waits for each state, then saves 5 before-and-after pairs and 19 after-only images. They are committed to `refs/pr-visuals/13` at `befe086`, and the PR #13 body shows them at that commit (https://github.com/vhco-pro/3d-assets-gen/pull/13). The enabled View in your room button is left out, as the AC-02 row says.
 
 - [ ] T30 `docs/internal/plans/asset-studio-mobile.md`, `docs/internal/evidence/asset-studio-mobile/run-2/` - the PR head's prerelease deployed with `scripts/deploy/deploy.sh <version>`, then emulator run 2 against `https://win-main.tail6948f.ts.net` including the 16-minute AR load and the refused submitting steps; transcript, screenshots and the signed-link log line recorded (AC-12, AC-05, AC-01)
 
