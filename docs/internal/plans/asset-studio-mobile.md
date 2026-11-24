@@ -625,6 +625,7 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
       Residual: https://github.com/vhco-pro/3d-assets-gen/issues/16
       Evidence: R-25 returned not verified.
       Evidence: R-26 returned not met.
+      Evidence: R-27 returned not verified.
 - [x] AC-06: With notifications turned on, a device receives a notification titled `Asset Studio` with
       `<name> is ready.` within a minute of a job finishing, also after the app was removed from the recent
       apps; tapping it opens that asset's Asset page; a subscription the server dropped is restored on the
@@ -638,13 +639,12 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
 - [x] AC-08: Share GLB opens the system share sheet with the GLB file where the browser can share files of
       that type and is not Chromium-based, and otherwise downloads the GLB and says `Saved to your downloads.`
       Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): the six per-mode "share" journeys passed in `phone-chromium`, `phone-webkit`, `chromium` and `firefox`, and "share (failed prefetch)" in `phone-webkit` and `firefox`. Emulator run 1 step share passed: Chrome on Android downloaded the GLB to `/sdcard/Download` at its full size (`18-share.png`).
-- [ ] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed
+- [x] AC-09: Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed
       before the rollback, and rolling forward again keeps the push key and the existing notification
       subscriptions.
       Evidence: Done on win-main with 0.3.0-feat-asset-studio-mobile.2 (no schema change since, migrations untouched). Image and database schema stayed 2 and 2 at every stage. The same 100 jobs (SHA-256 prefix `fa235a1e772e`) were there before the deploy, on the prerelease, after `scripts/deploy/rollback.sh` to v0.2.0 and after deploying the prerelease again. That last deploy kept push key `644b62b9fe1c` and the same 2 endpoints (`5fa142105c4a`). The full record is under T31.
-      Evidence: R-25 returned not verified.
       Evidence: `docs/internal/evidence/asset-studio-mobile/rollback/transcript.txt` (T37): the procedure ran on win-main through the committed `scripts/deploy/check-rollback.sh`. Rolled back from 0.3.0-feat-asset-studio-mobile.3 to v0.2.0, the app kept every one of the 100 recorded jobs (`fa235a1e772e`), image and database schema 2 and 2, and both push endpoints. Deployed forward again, it kept the jobs, the push key `644b62b9fe1c` and both endpoints. `app/server/store.test.ts` (2 migrations) and `push.test.ts` "reload" pass in `bun run verify`.
-      Evidence: R-26 returned not verified.
+      Evidence: R-27 returned met. On the owner's authority, the reviewer ran the procedure on win-main itself (2026-11-24, 08:48 to 09:46 UTC): v0.2.0, the prerelease, `rollback.sh` to 0.2.0, then the prerelease again. `check-rollback.sh` found all 115 jobs, schema 2 and 2, push key `644b62b9fe1c` and both endpoints after the rollback and after the deploy forward.
 - [x] AC-10: The page uses the Glossary terms of this document for Quality, the tabs and the new actions.
       Evidence: `bun run verify` at `c9d4e6f` (135 journeys passed): `glossary.spec.ts` "the phone layout uses the Glossary terms for the tabs, Quality and the Asset page's actions" and the existing Glossary check passed.
 - [x] AC-11: The initial page load stays within 150 KiB of JavaScript after gzip at level 9.
@@ -655,6 +655,7 @@ version) is deployed the same way and `/api/health` is checked as in AC-10 of th
       Residual: https://github.com/vhco-pro/3d-assets-gen/issues/16
       Evidence: R-25 returned not verified.
       Evidence: R-26 returned not met.
+      Evidence: R-27 returned not verified.
 
 ## Test Plan
 
@@ -836,6 +837,88 @@ None.
 | 2026-11-23 | R-24 | spec | `baed690` | n/a | n/a | accepted by owner |
 | 2026-11-23 | R-25 | implementation | `fbca583` | claude-opus-5-5 | procedural | AC-05, AC-09 and AC-12 not verified, the rest met; 2 should-fix, 3 nits |
 | 2026-11-24 | R-26 | implementation | `23f35ae` | claude-opus-5-5 | procedural | AC-05 and AC-12 not met (residual #16), AC-09 not verified, the rest met; 2 should-fix, 1 nit; owner's answer to F-03: the next reviewer runs the AC-09 procedure on win-main itself |
+| 2026-11-24 | R-27 | implementation | `0197485` | claude-opus-5-5 | procedural | AC-05 and AC-12 not verified (residual #16), the rest met, AC-09 with the reviewer's own rollback on win-main; 2 nits |
+
+### R-27
+
+TARGET: 0197485d62dd9e5c395938b44bf55f6e79593ff5
+
+CRITERION: AC-01 The built page serves a valid web app manifest, its icons and `/sw.js`, and Chromium reports no installability errors for it; on the Android emulator, Chrome installs Asset Studio from its menu and the home-screen icon opens it without browser chrome.
+VERDICT: met
+EVIDENCE: In a scratch copy of 0197485 (git archive plus a clone's metadata, dev ports moved to 8791 and 8199), `bash scripts/verify.sh` with IMAGE=asset-studio:review3-0197485 passed every step. The browser journeys ran against that image: 135 passed, 1 skipped (Firefox "thumbnails load and the selected GLB renders"). "the image serves the manifest, its icons and /sw.js, and Chromium reports no installability errors" and "the service worker controls the page after its first registration, without a reload" passed in chromium. I also ran emulator run 1 (`bun scripts/phone/android-journey.ts --run 1`) against my own dev stack from a second scratch copy on localhost:8793. Install logged `menu item: Install app`, Chrome made a shortcut, the launcher icon was tapped, `display-mode standalone: true`, PASS install. Limitation: shortcut path only (no WebAPK), Chrome 124 on the API 35 AVD. The install fallback took 6.5 minutes because the launcher holds 13 stale Asset Studio shortcuts (see F-01).
+
+CRITERION: AC-02 Below 1024 CSS pixels the page shows the bottom tab bar with Create, Queue and Library, shows one screen at a time with Create first, marks the current tab by more than colour, keeps the screen across reload, adds no history entry for a tab switch, keeps Generate reachable while the on-screen keyboard is open, and meets the layout rules (text at least 14 pixels, no clipped text, no horizontal overflow, the contrast rules, hit areas at least 44 by 44 pixels) at every matrix size below 1024 pixels in Chromium and WebKit; at 1024 pixels and wider the two-column layout remains.
+VERDICT: met
+EVIDENCE: Same image run. "tabs" and "keyboard" passed in phone-chromium and phone-webkit. `layout.spec.ts` "sign-in, each tab and the Asset page in the phone shell" passed at 320x568, 390x844, 390x667, 844x390, 768x1024 and 640x450 in both chromium and webkit-desktop. "sign-in, submit, queue and library in two columns" passed at 1024x768, 1280x720 and 1440x900 in both. In my emulator run 1, zoom passed on the first try in the full run: `Generate at 200 percent: uncovered (663-707 of 783)`, and Create, Queue and Library showed no clipped label and no overflow. Keyboard passed: `Generate bottom 763 of visible 839, tappable`. Limitation: WebKit is Playwright's Ubuntu build on fedora-43 with PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1; E2E_SKIP_WEBKIT was not set. Chrome 124's text scaling enlarges only the blocks its autosizer picks.
+
+CRITERION: AC-03 Tapping a Library tile opens the Asset page with the 3D model, name, Quality, generation time, seed and creation time and the actions View in your room (where AR is available), Share GLB, Download, Remix and Delete, with the tab bar still shown; Back returns to the Library, and the `‹ Library` button reaches the Library from inside the app even when the asset was opened directly; `?asset=<id>` opens that asset directly, as the Asset page below 1024 pixels and as the Preview dialog at 1024 and wider; a layout change across 1024 pixels closes the open asset view; an unknown or unfinished asset shows `This asset is no longer available.` with a way back; below 1024 pixels the changed-selection notice after a failed zip download opens on the Library tab, the address no longer carries its marker, and Dismiss hides it for good; and Remix fills Create from the asset, choosing for a Custom asset the level with its triangle count, otherwise Standard.
+VERDICT: met
+EVIDENCE: Same image run. These journeys passed in their Test Plan projects: "asset page" and "export gone" in phone-chromium and phone-webkit; "asset link desktop" in chromium, firefox and webkit-desktop; "delete", "reduced motion" and "remix" in phone-chromium. `bun test` of presets, arlink, push and store passed 33 of 33, including "Remix picks the level with the same triangle count, otherwise Standard". My emulator screenshot 15-notify-closed.png shows a real Asset page with all of these: the model, name, `Quality: Fast`, Generated in, Seed, Created, View in your room, Share GLB, Download, Remix, Delete, and the tab bar with Library current. Limitation: headless browsers; viewport resizes stand in for rotation.
+
+CRITERION: AC-04 Create offers one Quality control with Fast, Standard (selected first), High and Ultra, a batch created with each level gets the triangles and texture of the Quality table, Detail and Texture appear nowhere on the page, and jobs show their Quality name, or `Custom (...)` when their settings match no level.
+VERDICT: met
+EVIDENCE: Same image run. "quality" passed in chromium and phone-chromium. These passed in chromium: `submit.spec.ts` "Quality Ultra shows its note and submits 30000 with 4096", `queue-board.spec.ts` "the cancelled Ultra fixture job's chip reads Quality: Ultra" and "finishes against the fake and its preview shows Quality: Ultra". The presets unit tests for the level pairs and the Custom labels passed. Limitation: headless browsers only.
+
+CRITERION: AC-05 On Android, View in your room opens Scene Viewer showing the model, loaded through a link that needs no session, also when the page has been open longer than the first link's lifetime; that link answers 401 once expired, with a changed signature, for another job or after a token rotation; and on a browser without AR support the button is not shown.
+VERDICT: not verified
+EVIDENCE: Observed passing: `app/server/arlink.test.ts` 5 of 5 (no-cookie fetch, uncached, logged; 401 when expired, with a changed signature, for another job and after a token change; the failure limit; the 404s). In the image run, "ar link" and "ar link failing" passed in phone-chromium, "iPhone: opening the Asset page asks for no signed link" in phone-webkit, and "desktop browsers show no View in your room" in chromium, firefox and webkit-desktop. My emulator run 1 ar launch logged a Scene Viewer VIEW intent whose decoded `file` was `http://localhost:8793/api/assets/<id>/model.glb?exp=...&sig=<signature>`. Not observed: Scene Viewer loading the model on win-main after 16 minutes (run 2 "ar load"). The dispatch authorized only the AC-09 procedure on win-main, so I did not run it. The criterion carries Residual https://github.com/vhco-pro/3d-assets-gen/issues/16.
+
+CRITERION: AC-06 With notifications turned on, a device receives a notification titled `Asset Studio` with `<name> is ready.` within a minute of a job finishing, also after the app was removed from the recent apps; tapping it opens that asset's Asset page; a subscription the server dropped is restored on the next signed-in load while the switch is on; and after turning notifications off, or after a token rotation without a new load, that device receives none.
+VERDICT: met
+EVIDENCE: `app/server/push.test.ts` passed 14 of 14, including the RFC 8291 section 5 example, the VAPID subject, one message per done job, "a subscription saved under an old token gets nothing and is deleted", the 410 delete and reload. In the image run, all five "notifications switch" journeys passed in phone-chromium, chromium and firefox, including "a reload posts again a subscription the server dropped, and re-subscribes after a key change". The empty-stack desktop row (chromium), the Home Screen message (phone-webkit) and the no-PushManager message (phone-chromium) also passed. My emulator run 1:
+- notifications on: permission Allow tapped, `POST /api/push/subscriptions answered 204`.
+- notify, app in the foreground: the tap moved the open app to `/?asset=<id>` with the same task count (9 before, 9 after).
+- notify, app swiped from recents: dumpsys listed `Asset Studio` with `notify closed r9tky is ready.` 0 s after the job finished. The tap opened that asset's Asset page with the model (15-notify-closed.png).
+- notifications off: no notification within 60 s.
+Limitation: the headless switch journeys stub the permission and pushManager. Emulator delivery went through FCM from a local stack.
+
+CRITERION: AC-07 Take photo opens the camera and each photo taken is added to the chosen images; From photos adds several images; a batch made this way creates one image job per photo; and a file of another type is refused with `Only PNG, JPEG or WebP photos can be used.`
+VERDICT: met
+EVIDENCE: In the image run, "photos" passed in chromium, firefox, phone-chromium and phone-webkit. My emulator run 1 camera step passed: `1 image chosen after the camera`, then `Generate added 1 job; newest kind image`. Limitation: the emulated camera; one photo on the device.
+
+CRITERION: AC-08 Share GLB opens the system share sheet with the GLB file where the browser can share files of that type and is not Chromium-based, and otherwise downloads the GLB and says `Saved to your downloads.`
+VERDICT: met
+EVIDENCE: In the image run, the per-mode "share" journeys passed in phone-chromium, phone-webkit, chromium and firefox, and "share (failed prefetch)" passed in phone-webkit and firefox. My emulator run 1 share step passed: Chrome on Android saved `notify-off-kt4ad-b02258bc.glb` to /sdcard/Download at 924 bytes, the GLB's size. Limitation: the share sheet is proven only with a stubbed navigator.share; no real Safari share was observed.
+
+CRITERION: AC-09 Deploying this version runs no migration, rolling back to v0.2.0 keeps every job that existed before the rollback, and rolling forward again keeps the push key and the existing notification subscriptions.
+VERDICT: met
+EVIDENCE: The owner authorized this reviewer to run the procedure on win-main, and I ran it once from the scratch copy of 0197485 between 08:48 and 09:46 UTC on 2026-11-24. Every command exited 0, in order:
+- `scripts/deploy/deploy.sh 0.2.0`: v0.2.0 knows schema 2; the database is at schema 2.
+- `scripts/deploy/deploy.sh 0.3.0-feat-asset-studio-mobile.3`: image d897ec33 from bdf3725, signature verified, schema 2 and 2, so no migration.
+- `check-rollback.sh r27-1-prerelease`: `115 jobs (06287b207ff1), image schema 2, database schema 2, push key 644b62b9fe1c, 2 endpoints (b2b30957f8f5)`.
+- `scripts/deploy/rollback.sh`: `rolled back to 0.2.0`, with no backup restored; health reported 0.2.0.
+- `check-rollback.sh r27-2-rolled-back --against r27-1-prerelease`: 115 jobs with the same digest, schema 2 and 2, both endpoints, and the check passed.
+- `deploy.sh 0.3.0-feat-asset-studio-mobile.3` again.
+- `check-rollback.sh r27-3-rolled-forward --against r27-1-prerelease`: the same jobs, key `644b62b9fe1c` and endpoints, and the check passed.
+win-main ends on 0.3.0-feat-asset-studio-mobile.3 (health commit bdf3725). `git diff --stat bdf3725 0197485` touches nothing under app/. `store.test.ts` "the migration list still has 2 entries" and push.test.ts "reload" passed. Limitation: the prerelease is the CI build of bdf3725, not of 0197485 itself. Jobs are compared by ID only.
+
+CRITERION: AC-10 The page uses the Glossary terms of this document for Quality, the tabs and the new actions.
+VERDICT: met
+EVIDENCE: In the image run, `glossary.spec.ts` "the phone layout uses the Glossary terms for the tabs, Quality and the Asset page's actions" passed in phone-chromium, and "job states, preset fields, banners and the library heading use the Glossary terms" passed in chromium. Limitation: none.
+
+CRITERION: AC-11 The initial page load stays within 150 KiB of JavaScript after gzip at level 9.
+VERDICT: met
+EVIDENCE: In the same verify run, the bundle budgets step printed `initial 122.7 KiB, viewer 280.5 KiB (gzip level 9)` and `bundle budgets met`. Limitation: none.
+
+CRITERION: AC-12 The prerelease deployed on win-main passes the Android emulator journey run 2 against `https://win-main.tail6948f.ts.net`: install, sign in, the three tabs, an existing asset shown in Scene Viewer, and notifications turned on, without submitting any job.
+VERDICT: not verified
+EVIDENCE: Observed: `bun test ./scripts/phone` passed in verify (each submitting step refuses win-main and runs for localhost). Not observed: emulator run 2 against win-main. The dispatch authorized only the AC-09 procedure there, and turning notifications on would write a production subscription. The committed T38 run-2 transcript records the ar load failure. The criterion carries Residual https://github.com/vhco-pro/3d-assets-gen/issues/16.
+
+FINDING: F-01
+KIND: factual
+SEVERITY: nit
+WHERE: scripts/phone/android-journey.ts step "install" (the launcher-icon fallback, lines 309 to 319)
+EVIDENCE: The fallback taps every `Asset Studio` icon in `uiautomator dump` in turn and waits up to 30 s for a standalone page on each. The AVD's launcher now holds 13 Asset Studio shortcuts left by earlier runs on other ports. In my run, the transcript shows `tapping the Asset Studio launcher icon` at 08:55:26 and `display-mode standalone: true` at 09:02:06, so install took about 6.5 minutes. Each run adds another shortcut, so the delay grows run by run.
+PROPOSAL: Remove stale Asset Studio shortcuts before installing, or tap the newest icon first. Alternatively, document in the README that old shortcuts should be cleared.
+
+FINDING: F-02
+KIND: factual
+SEVERITY: nit
+WHERE: Acceptance Criteria AC-09 (Evidence lines "R-25 returned not verified." and "R-26 returned not verified.")
+EVIDENCE: AC-09 is ticked, yet two of its four Evidence lines record earlier reviews' not verified verdicts. R-26 F-03 already asked to drop the R-25 line. This pass observed the procedure itself.
+PROPOSAL: Replace the two stale lines with one line citing this review's observed rollback run.
+
+Notes: scratch files are under /home/m/.claude/jobs/60e2a143/tmp/review3/ (verify3.log, run-1 transcript and screenshots in src2/.artifacts/phone/run-1/, the deploy and rollback logs step2.log and step6.log, and the rollback records in src/.artifacts/rollback-check/r27-*.json). The worktree is unchanged (`git status --short` is empty, HEAD 0197485). The dev stack on 8790 and its adb reverse are untouched. I stopped my own 8793 stack and removed its reverse; the run added one more Asset Studio shortcut on the emulator's launcher.
 
 ### R-26
 
