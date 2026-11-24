@@ -1,69 +1,68 @@
-2026-11-23T20:10:24.269Z run 1 against http://localhost:8790 on sdk_gphone64_x86_64 (serial emulator-5554)
-2026-11-23T20:10:24.274Z adb reverse tcp:8790 tcp:8790: the emulator reaches the host's server as http://localhost:8790
-2026-11-23T20:10:31.069Z step install (submits nothing)
-2026-11-23T20:10:46.370Z   menu item: Install app
-2026-11-23T20:12:04.413Z   Chrome made a home-screen shortcut; tapping the Asset Studio launcher icon
-2026-11-23T20:12:42.872Z   display-mode standalone: true
-2026-11-23T20:12:43.452Z   screenshot .artifacts/phone/run-1/01-installed.png
-2026-11-23T20:12:43.452Z PASS install
-2026-11-23T20:12:43.452Z step sign in (submits nothing)
-2026-11-23T20:12:44.656Z   signed in; the tab bar shows
-2026-11-23T20:12:45.434Z   screenshot .artifacts/phone/run-1/02-signed-in.png
-2026-11-23T20:12:45.434Z PASS sign in
-2026-11-23T20:12:45.434Z step tabs (submits nothing)
-2026-11-23T20:12:45.758Z   Create screen shows
-2026-11-23T20:12:46.241Z   screenshot .artifacts/phone/run-1/03-tab-create.png
-2026-11-23T20:12:46.633Z   Queue screen shows
-2026-11-23T20:12:47.374Z   screenshot .artifacts/phone/run-1/04-tab-queue.png
-2026-11-23T20:12:47.751Z   Library screen shows
-2026-11-23T20:12:48.645Z   screenshot .artifacts/phone/run-1/05-tab-library.png
-2026-11-23T20:12:48.645Z PASS tabs
-2026-11-23T20:12:48.645Z step zoom (submits nothing)
-2026-11-23T20:13:16.381Z   Chrome text scaling set to 200 percent
-2026-11-23T20:13:23.247Z   Create at 200 percent text (heading 19.2px): no clipped label, no overflow
-2026-11-23T20:13:24.390Z   screenshot .artifacts/phone/run-1/06-zoom-create.png
-2026-11-23T20:13:25.753Z   Generate at 200 percent: uncovered (663-707 of 783)
-2026-11-23T20:13:27.017Z   screenshot .artifacts/phone/run-1/07-zoom-generate.png
-2026-11-23T20:13:30.024Z   Queue at 200 percent text (heading 19.2px): no clipped label, no overflow
-2026-11-23T20:13:30.639Z   screenshot .artifacts/phone/run-1/08-zoom-queue.png
-2026-11-23T20:13:31.892Z   Library at 200 percent text (heading 19.2px): no clipped label, no overflow
-2026-11-23T20:13:32.766Z   screenshot .artifacts/phone/run-1/09-zoom-library.png
-2026-11-23T20:14:10.420Z   Chrome text scaling set to 100 percent
-2026-11-23T20:14:11.412Z PASS zoom
-2026-11-23T20:14:11.412Z step keyboard (submits nothing)
-2026-11-23T20:14:23.008Z   keyboard open; Generate bottom 763 of visible 839, tappable
-2026-11-23T20:14:23.664Z   screenshot .artifacts/phone/run-1/10-keyboard.png
-2026-11-23T20:14:24.548Z PASS keyboard
-2026-11-23T20:14:24.548Z step notifications on (submits nothing)
-2026-11-23T20:14:30.864Z   a notification permission prompt appeared; tapped Allow
-2026-11-23T20:14:43.554Z   POST /api/push/subscriptions answered 204
-2026-11-23T20:14:44.020Z   screenshot .artifacts/phone/run-1/11-notifications-on.png
-2026-11-23T20:14:44.020Z PASS notifications on
-2026-11-23T20:14:44.020Z step ar launch (submits nothing)
-2026-11-23T20:15:16.865Z   signed link held: fetched before the wait
-2026-11-23T20:15:18.238Z   screenshot .artifacts/phone/run-1/12-ar-button.png
-2026-11-23T20:15:18.536Z   logcat: 11-23 21:15:18.187   581  1363 I ActivityTaskManager: START u0 {act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https://arvr.google.com/... flg=0x14000000 pkg=com.google.android.googlequicksearchbox cmp=com.google.android.googlequick
-2026-11-23T20:15:18.647Z   intent: https://arvr.google.com/scene-viewer/1.2?mode=ar_preferred&disable_occlusion=true&file=http%3A%2F%2Flocalhost%3A8790%2Fapi%2Fassets%2Fa240f581-80d9-4827-9977-282dba31b627%2Fmodel.glb%3Fexp%3D1795465786%26sig%3D<signature>
-2026-11-23T20:15:18.649Z   decoded file: http://localhost:8790/api/assets/a240f581-80d9-4827-9977-282dba31b627/model.glb?exp=1795465786&sig=<signature>
-2026-11-23T20:15:23.667Z   screenshot .artifacts/phone/run-1/13-ar-launch.png
-2026-11-23T20:15:25.711Z PASS ar launch
-2026-11-23T20:15:25.712Z step notify (submits a job)
-2026-11-23T20:15:39.318Z   foreground tap moved the open app to /?asset=39aa0536-9168-483e-913b-00ef17770da5; Chrome and app tasks in recents before 3, after 3
-2026-11-23T20:15:40.525Z   screenshot .artifacts/phone/run-1/14-notify-foreground.png
-2026-11-23T20:15:51.381Z   Asset Studio swiped away from the recent apps
-2026-11-23T20:15:51.445Z   dumpsys notification lists "Asset Studio" with "notify closed 6y1qw is ready." 0 s after the job finished
-2026-11-23T20:15:56.940Z   the tap opened /?asset=c5f3ba83-83c5-4d7b-9924-4e49b7cb039c
-2026-11-23T20:15:58.597Z   screenshot .artifacts/phone/run-1/15-notify-closed.png
-2026-11-23T20:17:12.229Z   notifications off: no notification within 60 s
-2026-11-23T20:17:12.229Z PASS notify
-2026-11-23T20:17:12.229Z step camera (submits a job)
-2026-11-23T20:17:21.925Z   screenshot .artifacts/phone/run-1/16-camera.png
-2026-11-23T20:17:31.661Z   1 image chosen after the camera
-2026-11-23T20:17:32.286Z   Generate added 1 job; newest kind image
-2026-11-23T20:17:32.957Z   screenshot .artifacts/phone/run-1/17-camera-job.png
-2026-11-23T20:17:32.957Z PASS camera
-2026-11-23T20:17:32.958Z step share (submits a job)
-2026-11-23T20:17:40.142Z   /sdcard/Download: -rwxrwx--- 1 u0_a204 media_rw 924 2026-11-23 21:17 notify-off-fsk7i-ec3f55bc.glb (the GLB is 924 bytes)
-2026-11-23T20:17:41.872Z   screenshot .artifacts/phone/run-1/18-share.png
-2026-11-23T20:17:41.873Z PASS share
-2026-11-23T20:17:41.882Z run 1 passed
+2026-11-24T07:20:38.082Z run 1 against http://localhost:8790 on sdk_gphone64_x86_64 (serial emulator-5554)
+2026-11-24T07:20:38.087Z adb reverse tcp:8790 tcp:8790: the emulator reaches the host's server as http://localhost:8790
+2026-11-24T07:20:42.704Z step install (submits nothing)
+2026-11-24T07:20:55.943Z   menu item: Install app
+2026-11-24T07:22:10.583Z   Chrome made a home-screen shortcut; tapping the Asset Studio launcher icon
+2026-11-24T07:22:47.105Z   display-mode standalone: true
+2026-11-24T07:22:47.849Z   screenshot .artifacts/phone/run-1/01-installed.png
+2026-11-24T07:22:47.849Z PASS install
+2026-11-24T07:22:47.849Z step sign in (submits nothing)
+2026-11-24T07:22:48.103Z   signed in; the tab bar shows
+2026-11-24T07:22:48.647Z   screenshot .artifacts/phone/run-1/02-signed-in.png
+2026-11-24T07:22:48.647Z PASS sign in
+2026-11-24T07:22:48.648Z step tabs (submits nothing)
+2026-11-24T07:22:48.966Z   Create screen shows
+2026-11-24T07:22:49.405Z   screenshot .artifacts/phone/run-1/03-tab-create.png
+2026-11-24T07:22:49.685Z   Queue screen shows
+2026-11-24T07:22:50.342Z   screenshot .artifacts/phone/run-1/04-tab-queue.png
+2026-11-24T07:22:50.839Z   Library screen shows
+2026-11-24T07:22:51.614Z   screenshot .artifacts/phone/run-1/05-tab-library.png
+2026-11-24T07:22:51.614Z PASS tabs
+2026-11-24T07:22:51.614Z step zoom (submits nothing)
+2026-11-24T07:23:18.989Z   Chrome text scaling set to 200 percent
+2026-11-24T07:23:22.870Z   Create at 200 percent text (heading 19.2px): no clipped label, no overflow
+2026-11-24T07:23:23.943Z   screenshot .artifacts/phone/run-1/06-zoom-create.png
+2026-11-24T07:23:24.971Z   Generate at 200 percent: uncovered (663-707 of 783)
+2026-11-24T07:23:25.826Z   screenshot .artifacts/phone/run-1/07-zoom-generate.png
+2026-11-24T07:23:28.981Z   Queue at 200 percent text (heading 19.2px): no clipped label, no overflow
+2026-11-24T07:23:29.516Z   screenshot .artifacts/phone/run-1/08-zoom-queue.png
+2026-11-24T07:23:30.760Z   Library at 200 percent text (heading 19.2px): no clipped label, no overflow
+2026-11-24T07:23:31.169Z   screenshot .artifacts/phone/run-1/09-zoom-library.png
+2026-11-24T07:24:01.332Z   Chrome text scaling set to 100 percent
+2026-11-24T07:24:01.979Z PASS zoom
+2026-11-24T07:24:01.980Z step keyboard (submits nothing)
+2026-11-24T07:24:07.847Z   keyboard open; Generate bottom 763 of visible 839, tappable
+2026-11-24T07:24:08.231Z   screenshot .artifacts/phone/run-1/10-keyboard.png
+2026-11-24T07:24:08.837Z PASS keyboard
+2026-11-24T07:24:08.838Z step notifications on (submits nothing)
+2026-11-24T07:24:27.210Z   POST /api/push/subscriptions answered 204
+2026-11-24T07:24:27.723Z   screenshot .artifacts/phone/run-1/11-notifications-on.png
+2026-11-24T07:24:27.723Z PASS notifications on
+2026-11-24T07:24:27.723Z step ar launch (submits nothing)
+2026-11-24T07:25:02.701Z   signed link held: fetched before the wait
+2026-11-24T07:25:04.199Z   screenshot .artifacts/phone/run-1/12-ar-button.png
+2026-11-24T07:25:04.743Z   logcat: 11-24 08:25:04.192   581  1909 I ActivityTaskManager: START u0 {act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https://arvr.google.com/... flg=0x14000000 pkg=com.google.android.googlequicksearchbox cmp=com.google.android.googlequick
+2026-11-24T07:25:04.880Z   intent: https://arvr.google.com/scene-viewer/1.2?mode=ar_preferred&disable_occlusion=true&file=http%3A%2F%2Flocalhost%3A8790%2Fapi%2Fassets%2Fce257682-211d-4c58-b7e4-d8b6eb0d7775%2Fmodel.glb%3Fexp%3D1795505972%26sig%3D<signature>
+2026-11-24T07:25:04.880Z   decoded file: http://localhost:8790/api/assets/ce257682-211d-4c58-b7e4-d8b6eb0d7775/model.glb?exp=1795505972&sig=<signature>
+2026-11-24T07:25:09.449Z   screenshot .artifacts/phone/run-1/13-ar-launch.png
+2026-11-24T07:25:11.486Z PASS ar launch
+2026-11-24T07:25:11.486Z step notify (submits a job)
+2026-11-24T07:25:23.409Z   foreground tap moved the open app to /?asset=c6f17601-372c-4809-a07f-3897a3ad007b; Chrome and app tasks in recents before 3, after 3
+2026-11-24T07:25:28.342Z   screenshot .artifacts/phone/run-1/14-notify-foreground.png
+2026-11-24T07:25:35.678Z   Asset Studio swiped away from the recent apps
+2026-11-24T07:25:35.736Z   dumpsys notification lists "Asset Studio" with "notify closed xtfhn is ready." 0 s after the job finished
+2026-11-24T07:25:46.296Z   the tap opened /?asset=9f70dd29-c8b9-434a-9912-48bfa573b9fc and its Asset page shows the model
+2026-11-24T07:25:47.535Z   screenshot .artifacts/phone/run-1/15-notify-closed.png
+2026-11-24T07:26:58.985Z   notifications off: no notification within 60 s
+2026-11-24T07:26:58.985Z PASS notify
+2026-11-24T07:26:58.985Z step camera (submits a job)
+2026-11-24T07:27:08.827Z   screenshot .artifacts/phone/run-1/16-camera.png
+2026-11-24T07:27:18.169Z   1 image chosen after the camera
+2026-11-24T07:27:19.151Z   Generate added 1 job; newest kind image
+2026-11-24T07:27:19.806Z   screenshot .artifacts/phone/run-1/17-camera-job.png
+2026-11-24T07:27:19.806Z PASS camera
+2026-11-24T07:27:19.806Z step share (submits a job)
+2026-11-24T07:27:27.092Z   /sdcard/Download: -rwxrwx--- 1 u0_a204 media_rw 924 2026-11-24 08:27 notify-off-s8x5q-401447d0.glb (the GLB is 924 bytes)
+2026-11-24T07:27:28.546Z   screenshot .artifacts/phone/run-1/18-share.png
+2026-11-24T07:27:28.546Z PASS share
+2026-11-24T07:27:28.557Z run 1 passed

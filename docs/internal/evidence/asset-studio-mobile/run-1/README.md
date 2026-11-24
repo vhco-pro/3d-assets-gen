@@ -1,7 +1,8 @@
 # Emulator run 1
 
 `bun scripts/phone/android-journey.ts --run 1` against `bun run dev` (fixture data), through `adb reverse`,
-on the `asset-studio` AVD (API 35, Chrome 124), at commit `bdf3725` on 2026-11-23. Every step passed.
+on the `asset-studio` AVD (API 35, Chrome 124), at commit `6bb7f09` on 2026-11-24. Every step passed. The
+page under test is the same as at `bdf3725`, as later commits change only the journey and docs.
 
 - `transcript.txt` is the run's transcript as written. Its screenshot paths point at
   `.artifacts/phone/run-1/`, and the files here have the same names, at half size and 256 colours to keep
@@ -13,3 +14,5 @@ on the `asset-studio` AVD (API 35, Chrome 124), at commit `bdf3725` on 2026-11-2
   `app/e2e/layout.spec.ts`.
 - Step "share": Chrome on Android takes the download path (AC-08), and the GLB lands in `/sdcard/Download`
   at its full size.
+- Step "notify": `14-notify-foreground.png` and `15-notify-closed.png` show each notification's Asset page.
+  The step waits for the reopened page's model to load before taking the screenshot (review R-25 F-04).
