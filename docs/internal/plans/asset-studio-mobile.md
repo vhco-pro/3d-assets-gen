@@ -794,6 +794,8 @@ opens the app.
       Evidence: `docs/internal/evidence/asset-studio-mobile/rollback/transcript.txt`: v0.2.0, then 0.3.0-feat-asset-studio-mobile.3 deployed. `check-rollback.sh 1-prerelease` recorded 100 jobs (`fa235a1e772e`), schema 2 and 2, push key `644b62b9fe1c` and 2 endpoints (`5fa142105c4a`). `rollback.sh` rolled back to 0.2.0, and `2-rolled-back --against 1-prerelease` passed. The prerelease was deployed again, and `3-rolled-forward --against 1-prerelease` passed with the same key and endpoints. Every command exited 0.
 - [x] T38 `docs/internal/evidence/asset-studio-mobile/run-1/`, `docs/internal/evidence/asset-studio-mobile/run-2/`, `docs/internal/plans/asset-studio-mobile.md` - emulator runs 1 and 2 again with T35's journey, the evidence replaced, the run-2 README stating what "ar load" observed, and the AC-06 evidence's project list corrected (AC-05, AC-06, AC-12)
       Evidence: Emulator run 1 at `6bb7f09` printed `run 1 passed` (all 10 steps; notifications on answered 204, and the closed-app notify screenshot shows the Asset page). Run 2 against 0.3.0-feat-asset-studio-mobile.3 ended `run 2: 1 step(s) failed`. notifications on turned the switch off and on and answered 204. ar load failed honestly: the Scene Viewer intent launched, the Asset Studio window was back on top 20 s later, and no `signed GLB` line was logged, which is the #16 residual. Notify, camera and share were refused. Both evidence folders are replaced, and the run-2 README corrects T30's account. The AC-06 evidence's project list is corrected.
+- [ ] T39 `scripts/phone/android-journey.ts` - step "zoom" scrolls and measures Generate until the keyboard and page settle, and says "below the visible area" apart from "covered by <element>"; `bun test ./scripts/phone` passes and `--only "sign in,zoom"` passes three times (AC-02)
+- [ ] T40 `docs/internal/plans/asset-studio-mobile.md` - AC-06's evidence cites the committed run-1 transcript's notify lines instead of a replaced run; lint passes (AC-06)
 - [ ] T32 `docs/internal/plans/asset-studio-mobile.md` - after the merge, v0.3.0 deployed with `scripts/deploy/deploy.sh` and `/api/health` checked as in the earlier feature's AC-10; the result recorded (Design)
 
 ## Open Questions
@@ -831,7 +833,7 @@ None.
 | 2026-11-23 | R-24 | spec | `baed690` | claude-opus-5-5 | procedural | clean: 1 nit, left unapplied under the nit rule |
 | 2026-11-23 | R-24 | spec | `baed690` | n/a | n/a | accepted by owner |
 | 2026-11-23 | R-25 | implementation | `fbca583` | claude-opus-5-5 | procedural | AC-05, AC-09 and AC-12 not verified, the rest met; 2 should-fix, 3 nits |
-| 2026-11-24 | R-26 | implementation | `23f35ae` | claude-opus-5-5 | procedural | AC-05 and AC-12 not met (residual #16), AC-09 not verified, the rest met; 2 should-fix, 1 nit |
+| 2026-11-24 | R-26 | implementation | `23f35ae` | claude-opus-5-5 | procedural | AC-05 and AC-12 not met (residual #16), AC-09 not verified, the rest met; 2 should-fix, 1 nit; owner's answer to F-03: the next reviewer runs the AC-09 procedure on win-main itself |
 
 ### R-26
 
