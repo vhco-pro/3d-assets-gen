@@ -1,0 +1,117 @@
+# AC-09 on win-main, 2026-11-23T21:39:24Z, check-rollback.sh at d7ba4c8
+$ scripts/deploy/deploy.sh 0.2.0
+› Ensuring Docker Desktop runs in the owner's session on win-main
+✓ Passed: Docker Desktop is running
+› Reading the release record of v0.2.0
+✓ Passed: v0.2.0 is sha256:c97939a4b01734b632ca7205668c6f4fba7d7e4099b97eda03fa449fd68fb2ac from cd1fd8a43b06
+› Verifying the signature and attestations
+
+Verification for ghcr.io/vhco-pro/3d-assets-gen@sha256:c97939a4b01734b632ca7205668c6f4fba7d7e4099b97eda03fa449fd68fb2ac --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - Existence of the claims in the transparency log was verified offline
+  - The code-signing certificate was verified using trusted certificate authority certificates
+✓ Passed: signature, provenance and SBOM verified
+› Loading the image on win-main
+✓ Passed: loaded ghcr.io/vhco-pro/3d-assets-gen:0.2.0 with matching layers
+› Comparing the schema v0.2.0 knows with the database on win-main
+✓ Passed: v0.2.0 knows schema 2; the database is at schema 2
+› Preparing %LOCALAPPDATA%\AssetStudio
+ Container asset-studio-app-1 Recreate 
+ Container asset-studio-app-1 Recreated 
+ Container asset-studio-app-1 Starting 
+ Container asset-studio-app-1 Started 
+✓ Passed: Compose project up on ghcr.io/vhco-pro/3d-assets-gen:0.2.0
+› Waiting for health to report 0.2.0 (cd1fd8a43b06)
+✓ Passed: Asset Studio 0.2.0 is serving through tailscale serve
+(exit 0)
+$ scripts/deploy/deploy.sh 0.3.0-feat-asset-studio-mobile.3
+› Ensuring Docker Desktop runs in the owner's session on win-main
+✓ Passed: Docker Desktop is running
+› Reading the release record of v0.3.0-feat-asset-studio-mobile.3
+✓ Passed: v0.3.0-feat-asset-studio-mobile.3 is sha256:d897ec33940a21c4981bf23569f320e7fdea099cdbe3a2da76d2c80fa2dd73b0 from bdf3725d1471
+› Verifying the signature and attestations
+
+Verification for ghcr.io/vhco-pro/3d-assets-gen@sha256:d897ec33940a21c4981bf23569f320e7fdea099cdbe3a2da76d2c80fa2dd73b0 --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - Existence of the claims in the transparency log was verified offline
+  - The code-signing certificate was verified using trusted certificate authority certificates
+✓ Passed: signature, provenance and SBOM verified
+› Loading the image on win-main
+✓ Passed: loaded ghcr.io/vhco-pro/3d-assets-gen:0.3.0-feat-asset-studio-mobile.3 with matching layers
+› Comparing the schema v0.3.0-feat-asset-studio-mobile.3 knows with the database on win-main
+✓ Passed: v0.3.0-feat-asset-studio-mobile.3 knows schema 2; the database is at schema 2
+› Preparing %LOCALAPPDATA%\AssetStudio
+ Container asset-studio-app-1 Recreate 
+ Container asset-studio-app-1 Recreated 
+ Container asset-studio-app-1 Starting 
+ Container asset-studio-app-1 Started 
+✓ Passed: Compose project up on ghcr.io/vhco-pro/3d-assets-gen:0.3.0-feat-asset-studio-mobile.3
+› Waiting for health to report 0.3.0-feat-asset-studio-mobile.3 (bdf3725d1471)
+✓ Passed: Asset Studio 0.3.0-feat-asset-studio-mobile.3 is serving through tailscale serve
+(exit 0)
+$ scripts/deploy/check-rollback.sh 1-prerelease
+› Recording 1-prerelease on win-main
+✓ Passed: 1-prerelease: 0.3.0-feat-asset-studio-mobile.3: 100 jobs (fa235a1e772e), image schema 2, database schema 2, push key 644b62b9fe1c, 2 endpoints (5fa142105c4a)
+(exit 0)
+$ scripts/deploy/rollback.sh
+› Ensuring Docker Desktop runs in the owner's session on win-main
+✓ Passed: Docker Desktop is running
+› Rolling back to 0.2.0
+ Container asset-studio-app-1 Stopping 
+ Container asset-studio-app-1 Stopped 
+ Container asset-studio-app-1 Removing 
+ Container asset-studio-app-1 Removed 
+ Network asset-studio_default Removing 
+ Network asset-studio_default Removed 
+ Network asset-studio_default Creating 
+ Network asset-studio_default Created 
+ Container asset-studio-app-1 Creating 
+ Container asset-studio-app-1 Created 
+ Container asset-studio-app-1 Starting 
+ Container asset-studio-app-1 Started 
+✓ Passed: rolled back to 0.2.0
+(exit 0)
+$ scripts/deploy/check-rollback.sh 2-rolled-back --against 1-prerelease
+› Recording 2-rolled-back on win-main
+✓ Passed: 2-rolled-back: 0.2.0: 100 jobs (fa235a1e772e), image schema 2, database schema 2, push key none, 2 endpoints (5fa142105c4a)
+› Checking 2-rolled-back against 1-prerelease
+✓ Passed: 2-rolled-back keeps every job, both schema versions, the push key and every endpoint 1-prerelease recorded
+(exit 0)
+$ scripts/deploy/deploy.sh 0.3.0-feat-asset-studio-mobile.3
+› Ensuring Docker Desktop runs in the owner's session on win-main
+✓ Passed: Docker Desktop is running
+› Reading the release record of v0.3.0-feat-asset-studio-mobile.3
+✓ Passed: v0.3.0-feat-asset-studio-mobile.3 is sha256:d897ec33940a21c4981bf23569f320e7fdea099cdbe3a2da76d2c80fa2dd73b0 from bdf3725d1471
+› Verifying the signature and attestations
+
+Verification for ghcr.io/vhco-pro/3d-assets-gen@sha256:d897ec33940a21c4981bf23569f320e7fdea099cdbe3a2da76d2c80fa2dd73b0 --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - Existence of the claims in the transparency log was verified offline
+  - The code-signing certificate was verified using trusted certificate authority certificates
+✓ Passed: signature, provenance and SBOM verified
+› Loading the image on win-main
+✓ Passed: loaded ghcr.io/vhco-pro/3d-assets-gen:0.3.0-feat-asset-studio-mobile.3 with matching layers
+› Comparing the schema v0.3.0-feat-asset-studio-mobile.3 knows with the database on win-main
+✓ Passed: v0.3.0-feat-asset-studio-mobile.3 knows schema 2; the database is at schema 2
+› Preparing %LOCALAPPDATA%\AssetStudio
+ Container asset-studio-app-1 Recreate 
+ Container asset-studio-app-1 Recreated 
+ Container asset-studio-app-1 Starting 
+ Container asset-studio-app-1 Started 
+✓ Passed: Compose project up on ghcr.io/vhco-pro/3d-assets-gen:0.3.0-feat-asset-studio-mobile.3
+› Waiting for health to report 0.3.0-feat-asset-studio-mobile.3 (bdf3725d1471)
+✓ Passed: Asset Studio 0.3.0-feat-asset-studio-mobile.3 is serving through tailscale serve
+(exit 0)
+$ scripts/deploy/check-rollback.sh 3-rolled-forward --against 1-prerelease
+› Recording 3-rolled-forward on win-main
+✓ Passed: 3-rolled-forward: 0.3.0-feat-asset-studio-mobile.3: 100 jobs (fa235a1e772e), image schema 2, database schema 2, push key 644b62b9fe1c, 2 endpoints (5fa142105c4a)
+› Checking 3-rolled-forward against 1-prerelease
+✓ Passed: 3-rolled-forward keeps every job, both schema versions, the push key and every endpoint 1-prerelease recorded
+(exit 0)
+$ curl -fsS https://win-main.tail6948f.ts.net/api/health
+{"version":"0.3.0-feat-asset-studio-mobile.3","commit":"bdf3725d1471226466336379957e8475e114c3cf","comfyui":"reachable","comfyuiVersion":"0.46.2"}(exit 0)
+
+# done 2026-11-23T21:43:36Z
