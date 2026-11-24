@@ -799,7 +799,8 @@ opens the app.
       Evidence: `bun run typecheck`, the lint and `bun test ./scripts/phone` (4 pass) pass. `bun scripts/phone/android-journey.ts --run 1 --only "sign in,zoom"` passed three times in a row, each logging `Generate at 200 percent: uncovered (663-707 of 783)`. The step now retries for up to 8 s and reports an off-screen Generate as `below the visible area`.
 - [x] T40 `docs/internal/plans/asset-studio-mobile.md` - AC-06's evidence cites the committed run-1 transcript's notify lines instead of a replaced run; lint passes (AC-06)
       Evidence: AC-06's evidence now cites the committed run-1 transcript's notify lines (`xtfhn`, `14-notify-foreground.png`, `15-notify-closed.png`), and `vh-adlc lint` passes.
-- [ ] T32 `docs/internal/plans/asset-studio-mobile.md` - after the merge, v0.3.0 deployed with `scripts/deploy/deploy.sh` and `/api/health` checked as in the earlier feature's AC-10; the result recorded (Design)
+- [x] T32 `docs/internal/plans/asset-studio-mobile.md` - after the merge, v0.3.0 deployed with `scripts/deploy/deploy.sh` and `/api/health` checked as in the earlier feature's AC-10; the result recorded (Design)
+      Evidence: After merge commit `e4f73a4`, CI released v0.3.0 (https://github.com/vhco-pro/3d-assets-gen/releases/tag/v0.3.0). `scripts/deploy/deploy.sh 0.3.0` verified the signature, provenance and SBOM, loaded the image, found schema 2 and 2, and reported `Asset Studio 0.3.0 is serving through tailscale serve`. `curl https://win-main.tail6948f.ts.net/api/health` returned `{"version":"0.3.0","commit":"e4f73a4afa954ff7a9fd67d72de72384ecdf4065","comfyui":"reachable","comfyuiVersion":"0.46.2"}`.
 
 ## Open Questions
 
