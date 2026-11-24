@@ -394,20 +394,29 @@ export const STEPS: Step[] = [
             // A disabled Generate takes no pointer events, so a prompt is typed first, as a person would.
             await tab.getByLabel("Prompts").fill("zoom check");
             const generate = tab.getByRole("button", { name: /^Generate/ });
-            await generate.evaluate((el) => { el.scrollIntoView({ block: "nearest" }); });
-            await sleep(600);
-            const hit = await generate.evaluate((el) => {
+            // The keyboard opens and the page resizes over a second or two, so scroll and measure until it settles.
+            type Hit = { ok: boolean; inside: boolean; top: number; bottom: number; height: number; over: string };
+            const measure = (): Promise<Hit> => generate.evaluate((el) => {
+              el.scrollIntoView({ block: "nearest" });
               const r = el.getBoundingClientRect();
-              const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-              return { ok: at !== null && (at === el || el.contains(at)), top: Math.round(r.top), bottom: Math.round(r.bottom), height: window.innerHeight, over: at ? `${at.tagName}.${at.className.slice(0, 40)}` : "nothing" };
+              const inside = r.top >= 0 && r.bottom <= window.innerHeight;
+              const at = inside ? document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) : null;
+              return { ok: inside && at !== null && (at === el || el.contains(at)), inside, top: Math.round(r.top), bottom: Math.round(r.bottom), height: window.innerHeight, over: at ? `${at.tagName}.${at.className.slice(0, 40)}` : "nothing" };
             });
-            ctx.log(`Generate at 200 percent: ${hit.ok ? "uncovered" : `covered by ${hit.over}`} (${String(hit.top)}-${String(hit.bottom)} of ${String(hit.height)})`);
+            let hit = await measure();
+            const settleBy = Date.now() + 8000;
+            while (!hit.ok && Date.now() < settleBy) {
+              await sleep(500);
+              hit = await measure();
+            }
+            const verdict = hit.ok ? "uncovered" : hit.inside ? `covered by ${hit.over}` : "below the visible area";
+            ctx.log(`Generate at 200 percent: ${verdict} (${String(hit.top)}-${String(hit.bottom)} of ${String(hit.height)})`);
             await ctx.shot("zoom-generate");
             await tab.getByLabel("Prompts").fill("");
             // Closes the on-screen keyboard the typing opened, so the tab bar is back on screen.
             await tab.evaluate(() => { (document.activeElement as HTMLElement | null)?.blur(); });
             await sleep(1500);
-            if (!hit.ok) throw new Error("Generate is covered at 200 percent");
+            if (!hit.ok) throw new Error(`Generate at 200 percent: ${verdict}`);
           }
         }
       } catch (e) {
