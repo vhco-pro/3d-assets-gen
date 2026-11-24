@@ -96,15 +96,20 @@ test("the offline banner uses --danger and the incompatible banner --warn", asyn
   await expect(banner).toHaveCount(0, { timeout: 60_000 });
 });
 
-test("two columns from 1024 pixels, one column below", async ({ page }) => {
+test("two columns from 1024 pixels, the phone shell with one screen below", async ({ page }) => {
   await signIn(page, stack.url, stack.token);
   for (const [w, h, side] of [[1280, 720, true], [1024, 768, true], [1023, 768, false], [390, 844, false]] as const) {
     await page.setViewportSize({ width: w, height: h });
     await page.evaluate(() => { window.scrollTo(0, 0); });
     const composer = await box(page, "composer");
-    const queue = await box(page, "queue");
-    if (side) expect(composer.x + composer.width, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.x);
-    else expect(composer.y + composer.height, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.y);
+    if (side) {
+      const queue = await box(page, "queue");
+      expect(composer.x + composer.width, `${String(w)}x${String(h)}`).toBeLessThanOrEqual(queue.x);
+    } else {
+      // Below 1024 pixels Create is one screen; the queue is on its own tab.
+      await expect(page.getByRole("navigation", { name: "Screens" })).toBeVisible();
+      await expect(page.getByTestId("queue")).toHaveCount(0);
+    }
   }
 });
 
@@ -150,11 +155,11 @@ test("controls are shadcn components: data-slot attributes, a primary-coloured s
   await signIn(page, stack.url, stack.token);
   await page.getByLabel("Prompts").fill("slot check");
   await expect(page.getByRole("button", { name: /^Generate/ })).toHaveAttribute("data-slot", "button");
-  await expect(page.getByLabel("Detail", { exact: true })).toHaveAttribute("data-slot", "toggle-group");
+  await expect(page.getByLabel("Quality", { exact: true })).toHaveAttribute("data-slot", "toggle-group");
   await expect(page.getByLabel("Game-asset style", { exact: true })).toHaveAttribute("data-slot", "switch");
   await expect(page.getByTestId("asset").first().getByRole("checkbox")).toHaveAttribute("data-slot", "checkbox");
-  const selected = page.getByLabel("Detail", { exact: true }).locator("[data-state=on]");
-  await expect(selected).toHaveText("10k");
+  const selected = page.getByLabel("Quality", { exact: true }).locator("[data-state=on]");
+  await expect(selected).toHaveText("Standard");
   expect(await selected.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(79, 140, 255)");
   const plain = page.getByRole("button", { name: "Download selected" });
   expect(await plain.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(255, 255, 255, 0.07)");

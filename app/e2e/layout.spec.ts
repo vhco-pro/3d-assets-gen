@@ -3,12 +3,14 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, shared, test } from "./fixtures.ts";
 
-// Viewport matrix from the feature document; 640x450 is the reflow equivalent of 1280x900 at 200 percent.
-const VIEWPORTS: [number, number][] = [[320, 568], [390, 844], [390, 667], [844, 390], [768, 1024], [1024, 768], [1280, 720], [1440, 900], [640, 450]];
+// Viewport matrix from the feature documents; 640x450 is the reflow equivalent of 1280x900 at 200 percent.
+// Below 1024 pixels the page is the phone shell (asset-studio-mobile); from 1024 it keeps the two columns.
+const PHONE_VIEWPORTS: [number, number][] = [[320, 568], [390, 844], [390, 667], [844, 390], [768, 1024], [640, 450]];
+const WIDE_VIEWPORTS: [number, number][] = [[1024, 768], [1280, 720], [1440, 900]];
 const SHOTS = join(import.meta.dirname, "..", "..", ".artifacts", "screens");
 
-async function checkLayout(page: Page): Promise<void> {
-  const report = await page.evaluate(() => {
+async function checkLayout(page: Page, opts: { hitArea?: boolean } = {}): Promise<void> {
+  const report = await page.evaluate((hitArea) => {
     const doc = document.documentElement;
     const problems: string[] = [];
     if (doc.scrollWidth > doc.clientWidth + 1) problems.push(`horizontal overflow ${String(doc.scrollWidth)} > ${String(doc.clientWidth)}`);
@@ -39,8 +41,21 @@ async function checkLayout(page: Page): Promise<void> {
       const named = input.labels?.length || el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || (el.tagName === "BUTTON" && el.textContent.trim());
       if (input.type !== "hidden" && !named) problems.push(`unnamed control: ${el.outerHTML.slice(0, 60)}`);
     }
+    if (hitArea) {
+      // The phone shell: every control's hit area (the control or a label that activates it) is at least 44 by 44.
+      for (const el of document.querySelectorAll("button, a[href], input, select, textarea, [role=checkbox], [role=switch], [role=radio]")) {
+        if (el.closest("[aria-hidden='true']") || (el as HTMLInputElement).type === "hidden" || !visible(el)) continue;
+        if (el.matches("input") && getComputedStyle(el).position === "absolute" && el.getBoundingClientRect().width <= 1) continue;
+        const boxes = [el, ...Array.from((el as HTMLInputElement).labels ?? []), el.closest("label")].filter((x): x is Element => x !== null).map((x) => x.getBoundingClientRect());
+        const ok = boxes.some((b) => b.width >= 44 - 0.5 && b.height >= 44 - 0.5);
+        if (!ok) {
+          const b = el.getBoundingClientRect();
+          problems.push(`hit area below 44x44 (${b.width.toFixed(0)}x${b.height.toFixed(0)}): ${(el.getAttribute("aria-label") ?? el.textContent).trim().slice(0, 30) || el.outerHTML.slice(0, 50)}`);
+        }
+      }
+    }
     return problems;
-  });
+  }, opts.hitArea ?? false);
   expect(report).toEqual([]);
   await checkContrast(page);
 }
@@ -107,14 +122,22 @@ async function checkContrast(page: Page): Promise<void> {
 
 async function primaryActionReachable(page: Page, name: string | RegExp): Promise<void> {
   const action = page.getByRole("button", { name });
-  await action.scrollIntoViewIfNeeded();
-  const box = await action.boundingBox();
   const vp = page.viewportSize();
-  expect(box && vp && box.x >= 0 && box.x + box.width <= vp.width && box.y >= 0 && box.y + box.height <= vp.height).toBeTruthy();
+  // The page may still be laying out (the job list arriving); scroll again until the settled position is inside.
+  // A partly visible button counts as in view for scrollIntoViewIfNeeded, so scroll it fully into view (the
+  // phone shell's scroll padding keeps it above the tab bar) and require it clear of the tab bar too.
+  await expect.poll(async () => {
+    await action.evaluate((el) => { el.scrollIntoView({ block: "nearest" }); });
+    const box = await action.boundingBox();
+    const nav = page.getByRole("navigation", { name: "Screens" });
+    const bar = (await nav.count()) > 0 ? await nav.boundingBox() : null;
+    const bottom = bar ? bar.y : (vp?.height ?? 0);
+    return Boolean(box && vp && box.x >= 0 && box.x + box.width <= vp.width && box.y >= 0 && box.y + box.height <= bottom);
+  }, { message: `${String(name)} inside ${JSON.stringify(vp)} and above the tab bar` }).toBe(true);
 }
 
-for (const [w, h] of VIEWPORTS) {
-  test(`sign-in, submit, queue and library at ${String(w)}x${String(h)}`, async ({ page }) => {
+for (const [w, h] of WIDE_VIEWPORTS) {
+  test(`sign-in, submit, queue and library in two columns at ${String(w)}x${String(h)} @webkit`, async ({ page }) => {
     mkdirSync(SHOTS, { recursive: true });
     const s = shared();
     await page.setViewportSize({ width: w, height: h });
@@ -125,6 +148,11 @@ for (const [w, h] of VIEWPORTS) {
     await page.getByLabel("Access token").fill(s.token);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+    // Two columns: the composer beside the queue and library.
+    const composer = await page.getByTestId("composer").boundingBox();
+    const library = await page.getByRole("heading", { name: "Library" }).boundingBox();
+    expect(composer && library && composer.x + composer.width <= library.x).toBeTruthy();
+    await expect(page.getByRole("navigation", { name: "Screens" })).toHaveCount(0);
     await checkLayout(page);
     await primaryActionReachable(page, /^Generate/);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-main.png`), fullPage: true });
@@ -139,6 +167,42 @@ for (const [w, h] of VIEWPORTS) {
     await checkLayout(page);
     await dialogActionsInside(page);
     await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-preview.png`) });
+  });
+}
+
+for (const [w, h] of PHONE_VIEWPORTS) {
+  test(`sign-in, each tab and the Asset page in the phone shell at ${String(w)}x${String(h)} @webkit`, async ({ page }) => {
+    mkdirSync(SHOTS, { recursive: true });
+    const s = shared();
+    const tabs = page.getByRole("navigation", { name: "Screens" });
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto(s.url);
+    await checkLayout(page);
+    await primaryActionReachable(page, "Sign in");
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-signin.png`), fullPage: true });
+    await page.getByLabel("Access token").fill(s.token);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(tabs).toBeVisible();
+    await checkLayout(page, { hitArea: true });
+    await primaryActionReachable(page, /^Generate/);
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-create.png`), fullPage: true });
+    await page.getByLabel("Prompts").fill(`layout ${String(w)}x${String(h)} ${Math.random().toString(36).slice(2, 8)}`);
+    await page.getByRole("button", { name: /^Generate/ }).click();
+    await expect(page.getByRole("status").filter({ hasText: "1 job added" })).toBeVisible();
+    await checkLayout(page, { hitArea: true });
+    for (const name of ["Queue", "Library"]) {
+      await tabs.getByRole("link", { name }).click();
+      await expect(page.locator(`[data-screen="${name.toLowerCase()}"]`)).toBeVisible();
+      await checkLayout(page, { hitArea: true });
+      await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-${name.toLowerCase()}.png`), fullPage: true });
+    }
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await checkLayout(page, { hitArea: true });
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await page.getByTestId("asset").first().getByRole("button", { name: /^Open / }).click();
+    await expect(page.getByTestId("asset-page").locator("model-viewer")).toBeVisible({ timeout: 60_000 });
+    await checkLayout(page, { hitArea: true });
+    await page.screenshot({ path: join(SHOTS, `${String(w)}x${String(h)}-asset.png`), fullPage: true });
   });
 }
 
@@ -187,7 +251,7 @@ async function dialogActionsInside(page: Page): Promise<void> {
   }
 }
 
-test("the open preview dialog survives resizes with Close and Download inside", async ({ page }) => {
+test("the open preview dialog survives resizes above 1024 pixels with Close and Download inside", async ({ page }) => {
   const s = shared();
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(s.url);
@@ -195,7 +259,8 @@ test("the open preview dialog survives resizes with Close and Download inside", 
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByTestId("asset").first().getByRole("button", { name: /Preview/ }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  for (const [w, h] of [[390, 844], [844, 390]] as const) {
+  // Below 1024 pixels the dialog closes (the phone shell's rule); short and narrow wide sizes keep it.
+  for (const [w, h] of [[1024, 600], [1100, 480]] as const) {
     await page.setViewportSize({ width: w, height: h });
     await dialogActionsInside(page);
     await checkLayout(page);

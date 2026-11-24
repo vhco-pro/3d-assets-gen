@@ -1,11 +1,15 @@
 // HTTP server: routing, authentication and the JSON API. The page and its assets are served by `static.ts`.
 import type { Server } from "bun";
+import { signedModelPath, verifySignedModel } from "./arlink.ts";
+import { downloadAsset } from "./assets.ts";
 import { clientAddress, defaultTrustedPeers, FailureLimiter, makeCookieValue, readCookie, sameSecret, SESSION_COOKIE, sessionCookieHeader, verifyCookieValue } from "./auth.ts";
 import { createBatch } from "./batches.ts";
 import type { Config } from "./config.ts";
+import { completeAsset } from "./files.ts";
 import { getJob, jobView, listJobs, requestCancel, retryJob, type JobRow, type QueueInfo } from "./jobs.ts";
 import { openStore, type Store } from "./store.ts";
 import { APP_COMMIT, APP_VERSION } from "./version.ts";
+import { createReporter } from "../cli/report.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MiB = 1024 * 1024;
@@ -34,6 +38,8 @@ export interface ServerOptions {
   /** false: no tracker (tests of the HTTP layer). A factory: build one around the store. */
   tracker?: false | ((store: Store) => TrackerView);
   routes?: ExtraRoutes;
+  /** Where operational log lines go; the default writes them to standard output. */
+  log?: (line: string) => void;
 }
 
 export interface RunningServer {
@@ -53,6 +59,7 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
   const trusted = opts.trustedPeers ?? defaultTrustedPeers();
   const limiter = new FailureLimiter(now);
   const tracker = opts.tracker ? opts.tracker(store) : null;
+  const log = opts.log ?? ((line: string): void => { createReporter().step(line); });
   const queueInfo = (id: string | null): QueueInfo | null => tracker?.queueInfo(id) ?? null;
   const previewOf = (row: JobRow): string | null => (row.state === "pending" || row.state === "submitted" ? (tracker?.sourcePreview(row) ?? null) : null);
 
@@ -101,6 +108,19 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
       const value = makeCookieValue(config.token, Math.floor(now() / 1000));
       return new Response(null, { status: 204, headers: { "set-cookie": sessionCookieHeader(value) } });
     }
+    // A signed GLB link (Scene Viewer cannot send the cookie): served without a session when the signature
+    // holds; a wrong or expired one counts as a failed authentication.
+    const glbMatch = /^\/api\/assets\/([^/]+)\/model\.glb$/.exec(path);
+    if (glbMatch && req.method === "GET" && (url.searchParams.has("exp") || url.searchParams.has("sig"))) {
+      const id = glbMatch[1] ?? "";
+      if (!UUID.test(id) || !verifySignedModel(config.token, id, url.searchParams.get("exp") ?? "", url.searchParams.get("sig") ?? "", now())) return failed();
+      const res = downloadAsset(store, config, id, "model.glb");
+      if (res.ok) {
+        res.headers.set("cache-control", "private, no-store");
+        log(`signed GLB ${id} for ${client} (${req.headers.get("user-agent") ?? "no user agent"})`);
+      }
+      return res;
+    }
     if (!authorised(req)) {
       return presentedCredentials(req) ? failed() : err(401, "Sign in with the access token.");
     }
@@ -132,6 +152,13 @@ export function createServer(config: Config, opts: ServerOptions = {}): RunningS
         const result = action === "cancel" ? requestCancel(store, id) : retryJob(store, config, id, now());
         return result.ok ? new Response(null, { status: 202 }) : err(result.status, result.error);
       }
+    }
+    const arMatch = /^\/api\/assets\/([^/]+)\/ar-link$/.exec(path);
+    if (arMatch && req.method === "GET") {
+      const id = arMatch[1] ?? "";
+      const job = UUID.test(id) ? getJob(store, id) : null;
+      if (!job || job.state !== "done" || !completeAsset(config, id)) return err(404, "No such asset.");
+      return Response.json({ url: signedModelPath(config.token, id, now()) }, { headers: { "cache-control": "no-store" } });
     }
     const extra = await opts.routes?.api?.(req, url, store);
     if (extra) return extra;

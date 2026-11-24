@@ -1,0 +1,40 @@
+2026-11-24T07:27:53.550Z run 2 against https://win-main.tail6948f.ts.net on sdk_gphone64_x86_64 (serial emulator-5554)
+2026-11-24T07:27:58.603Z step install (submits nothing)
+2026-11-24T07:28:12.128Z   menu item: Install app
+2026-11-24T07:29:29.005Z   Chrome made a home-screen shortcut; tapping the Asset Studio launcher icon
+2026-11-24T07:29:33.387Z   display-mode standalone: true
+2026-11-24T07:29:33.955Z   screenshot .artifacts/phone/run-2/01-installed.png
+2026-11-24T07:29:33.955Z PASS install
+2026-11-24T07:29:33.955Z step sign in (submits nothing)
+2026-11-24T07:29:34.156Z   signed in; the tab bar shows
+2026-11-24T07:29:34.693Z   screenshot .artifacts/phone/run-2/02-signed-in.png
+2026-11-24T07:29:34.693Z PASS sign in
+2026-11-24T07:29:34.693Z step tabs (submits nothing)
+2026-11-24T07:29:34.903Z   Create screen shows
+2026-11-24T07:29:35.339Z   screenshot .artifacts/phone/run-2/03-tab-create.png
+2026-11-24T07:29:35.665Z   Queue screen shows
+2026-11-24T07:29:36.484Z   screenshot .artifacts/phone/run-2/04-tab-queue.png
+2026-11-24T07:29:37.032Z   Library screen shows
+2026-11-24T07:29:38.297Z   screenshot .artifacts/phone/run-2/05-tab-library.png
+2026-11-24T07:29:38.298Z PASS tabs
+2026-11-24T07:29:38.298Z step notifications on (submits nothing)
+2026-11-24T07:29:38.679Z   notifications already on; turning them off and on again
+2026-11-24T07:29:57.910Z   POST /api/push/subscriptions answered 204
+2026-11-24T07:29:58.387Z   screenshot .artifacts/phone/run-2/06-notifications-on.png
+2026-11-24T07:29:58.387Z PASS notifications on
+2026-11-24T07:29:58.387Z step ar load (submits nothing)
+2026-11-24T07:30:46.935Z   Asset page open for 536e38f6-5136-4fbb-8bea-487a9a30cea8; waiting 16 minutes, past the first link's lifetime
+2026-11-24T07:46:48.315Z   tapping View in your room at 2026-11-24T07:46:48.315Z
+2026-11-24T07:46:49.329Z   logcat: 11-24 08:46:48.752   581  2019 I ActivityTaskManager: START u0 {act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https://arvr.google.com/... flg=0x14000000 pkg=com.google.android.googlequicksearchbox cmp=com.google.android.googlequick
+2026-11-24T07:47:11.184Z   screenshot .artifacts/phone/run-2/07-scene-viewer.png
+2026-11-24T07:47:11.265Z   resumed activity: topResumedActivity=ActivityRecord{927a5d8 u0 com.android.chrome/org.chromium.chrome.browser.webapps.WebappActivity t263}
+2026-11-24T07:47:12.413Z   server log: no signed GLB line for this job
+2026-11-24T07:47:15.638Z FAIL ar load: Scene Viewer is not showing the model (resumed: topResumedActivity=ActivityRecord{927a5d8 u0 com.android.chrome/org.chromium.chrome.browser.webapps.WebappActivity t263})
+2026-11-24T07:47:16.242Z   screenshot .artifacts/phone/run-2/08-fail-ar-load.png
+2026-11-24T07:47:16.266Z step notify (submits a job)
+2026-11-24T07:47:16.266Z REFUSED notify: notify refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-24T07:47:16.266Z step camera (submits a job)
+2026-11-24T07:47:16.266Z REFUSED camera: camera refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-24T07:47:16.266Z step share (submits a job)
+2026-11-24T07:47:16.266Z REFUSED share: share refused: it submits a job and win-main.tail6948f.ts.net is not localhost
+2026-11-24T07:47:16.273Z run 2: 1 step(s) failed

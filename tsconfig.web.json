@@ -9,5 +9,5 @@
     "paths": { "@/*": ["./app/web/*"] }
   },
   "include": ["app/web", "app/pipeline/presets.ts"],
-  "exclude": ["app/web/**/*.test.ts"]
+  "exclude": ["app/web/**/*.test.ts", "app/web/sw.ts"]
 }

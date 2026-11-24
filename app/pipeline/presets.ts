@@ -10,6 +10,39 @@ export const ULTRA_MESSAGE = "Ultra uses 30k triangles with 4096 textures.";
 export const isUltra = (faces: number, tex: number | null): boolean => faces === ULTRA_FACES && tex === ULTRA_TEX;
 /** A valid Detail and Texture pairing: Ultra's pair, or neither half of it. */
 export const validPairing = (faces: number, tex: number): boolean => isUltra(faces, tex) || (faces !== ULTRA_FACES && tex !== ULTRA_TEX);
+
+/** The four Quality levels the page offers, each a valid pairing of the values above (Design > Quality). */
+export const QUALITIES = [
+  { name: "Fast", faces: 5000, tex: 1024 },
+  { name: "Standard", faces: 10000, tex: 2048 },
+  { name: "High", faces: 20000, tex: 2048 },
+  { name: "Ultra", faces: 30000, tex: 4096 },
+] as const;
+export type QualityName = (typeof QUALITIES)[number]["name"];
+export const DEFAULT_QUALITY: QualityName = "Standard";
+
+export function qualityByName(name: QualityName): (typeof QUALITIES)[number] {
+  return QUALITIES.find((q) => q.name === name) ?? QUALITIES[1];
+}
+
+/** The level a pair matches, or null for an older job whose pair matches none. */
+export function qualityOf(faces: number, tex: number | null): QualityName | null {
+  return QUALITIES.find((q) => q.faces === faces && q.tex === tex)?.name ?? null;
+}
+
+/** What the page shows for a job's settings: the level's name, or `Custom (<k>k, <texture>)`. */
+export function qualityLabel(faces: number, tex: number | null): string {
+  const name = qualityOf(faces, tex);
+  if (name) return name;
+  const k = `${String(faces / 1000)}k`;
+  return tex === null ? `Custom (${k})` : `Custom (${k}, ${String(tex)})`;
+}
+
+/** The level Remix selects: the matching level, else the one with the same triangle count, else Standard. */
+export function remixQuality(faces: number, tex: number | null): QualityName {
+  return qualityOf(faces, tex) ?? QUALITIES.find((q) => q.faces === faces)?.name ?? DEFAULT_QUALITY;
+}
+
 export const MAX_VARIANTS = 4;
 export const MAX_SEED = 4294967295;
 export const IMAGE_SIZE = 1024;

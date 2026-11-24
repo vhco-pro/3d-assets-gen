@@ -1,16 +1,33 @@
 # Asset Studio
 
 A small web app that queues batches of 3D asset jobs on a GPU PC running ComfyUI and hands back
-game-ready GLB files. Type prompts (one per line) or upload images, pick a detail level and texture size,
-watch the queue, preview each model in the browser, and download one GLB or a zip of a selection with a
-`manifest.json`.
+game-ready GLB files. Type prompts (one per line), upload images or take photos, pick a Quality (Fast,
+Standard, High or Ultra), watch the queue, preview each model in the browser or in your room, and download
+or share one GLB, or download a zip of a selection with a `manifest.json`. On a phone it installs as an
+app with bottom tabs and "asset ready" notifications.
 
 Each job is one ComfyUI prompt: Z-Image Turbo makes the source image, then TRELLIS.2 makes the textured
-mesh, decimated to 5k, 10k or 20k triangles, or Ultra: 30k triangles with 4096 textures, more sampler
-steps and a finer remesh, about 10 minutes a job. The graphs mirror the image and TRELLIS.2 builders in
+mesh: Fast is 5k triangles with 1024 textures, Standard 10k with 2048, High 20k with 2048, and Ultra 30k
+triangles with 4096 textures, more sampler steps and a finer remesh, about 10 minutes a job. The graphs mirror the image and TRELLIS.2 builders in
 `scripts/generate_3d.py`, which stays in the repository as the reference.
 
-The feature document is [docs/internal/plans/asset-studio.md](docs/internal/plans/asset-studio.md).
+The feature documents are [docs/internal/plans/asset-studio.md](docs/internal/plans/asset-studio.md) and,
+for the phone app, [docs/internal/plans/asset-studio-mobile.md](docs/internal/plans/asset-studio-mobile.md).
+
+## On a phone
+
+Open `https://win-main.tail6948f.ts.net` on a phone in the tailnet. Below 1024 pixels the page shows Create,
+Queue and Library tabs, and an asset opens on its own page with View in your room (Scene Viewer on Android,
+Quick Look on iPhone), Share GLB, Download, Remix and Delete.
+
+- Android: in Chrome, open the menu and choose Install app (or Add to Home screen).
+- iPhone: in Safari, tap Share, then Add to Home Screen. The installed app keeps its own sign-in, so sign
+  in once inside it.
+
+Turn on `Notify me when assets are ready` on the Queue screen (on a desktop, above the Library) to get a
+notification when a job finishes, also with the app closed; every device that turned it on hears about
+every finished job. On iPhone it works only in the installed app. The service worker caches nothing, so a
+deploy shows on the next load.
 
 ## Develop
 
@@ -26,6 +43,19 @@ Needs Bun 1.4, Docker and python3 (python3 only for the golden check).
 
 Sign in to the dev stack with the token in `dev/config.yaml`. The server refuses that token unless
 ComfyUI answers the fake's marker endpoint, so it can never serve a real ComfyUI.
+
+`E2E_SKIP_WEBKIT=1 bun run verify` leaves the WebKit journeys out on a host without WebKit's libraries; the
+report says so, and such a run is no WebKit evidence. CI never sets it.
+
+The Android emulator journey is run by hand (never by CI), on a host with KVM:
+
+| Command | What it does |
+| --- | --- |
+| `scripts/phone/setup-emulator.sh` | Installs the Android SDK, the API 35 Play Store image and the `asset-studio` AVD under `~/.local/share/android-sdk`, Google Play Services for AR (checksum checked) and Chrome's command-line flag; idempotent; `--keep-running` leaves the emulator up |
+| `bun scripts/phone/android-journey.ts --run 1` | With `PHONE_BASE_URL=http://localhost:8790` and `PHONE_TOKEN`, runs the whole journey against `bun run dev` through `adb reverse` |
+| `bun scripts/phone/android-journey.ts --run 2` | With `PHONE_BASE_URL` set to the deployed app, runs the journey without submitting any job; steps that would submit one refuse to run unless the host is `localhost`. Step "ar load" also needs `PHONE_LOG_COMMAND`, a shell command that prints the app's log (for win-main, `ssh win-main docker logs --since 30m asset-studio-app-1`) |
+
+Each run writes a transcript and screenshots to `.artifacts/phone/run-<n>/`.
 
 ## Deploy
 

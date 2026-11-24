@@ -10,6 +10,9 @@ declare module "react" {
         loading?: "auto" | "lazy" | "eager";
         "interpolation-decay"?: string;
         "shadow-intensity"?: string;
+        ar?: boolean | string;
+        "ar-modes"?: string;
+        "ar-scale"?: string;
       };
     }
   }

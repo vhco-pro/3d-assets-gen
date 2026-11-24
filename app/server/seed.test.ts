@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { FakeComfy } from "../fake-comfy/fake.ts";
 import { ComfyClient } from "./comfy.ts";
 import { loadConfig } from "./config.ts";
-import { FIXTURE_JOBS, LONG_PROMPT, runSeed, seedFixture } from "./seed.ts";
+import { FIXTURE_CUSTOM, FIXTURE_HIGH, FIXTURE_JOBS, LONG_PROMPT, runSeed, seedFixture } from "./seed.ts";
 import { DEV_TOKEN, startServer } from "./serve.ts";
 import { openStore, type Store } from "./store.ts";
 import { testDirs, type TestDirs } from "./testkit.ts";
@@ -127,4 +127,19 @@ test("the fixture's four-job batch, unseen start and running thumbnail are seede
   const thumbs = join(dirs.config.comfyOutputDir, "00000000-0000-4000-8000-000000000007", "00000000-0000-4000-8000-000000000201", "thumb_00001_.png");
   expect(existsSync(thumbs)).toBe(true);
   store.close();
+});
+
+test("the fixture has a done High asset and a done asset whose pair matches no Quality level, with their files", () => {
+  const store = openStore(dirs.config.dataDir);
+  try {
+    seedFixture(store, dirs.config, "default", 1_800_000_000_000);
+    const pair = (id: string): unknown => store.db.query("SELECT faces, tex, state FROM jobs WHERE id = ?").get(id);
+    expect(pair(FIXTURE_HIGH)).toEqual({ faces: 20000, tex: 2048, state: "done" });
+    expect(pair(FIXTURE_CUSTOM)).toEqual({ faces: 5000, tex: 2048, state: "done" });
+    for (const id of [FIXTURE_HIGH, FIXTURE_CUSTOM]) {
+      for (const f of ["model.glb", "thumb.png", "source.png"]) expect(existsSync(join(dirs.config.dataDir, "assets", id, f))).toBe(true);
+    }
+  } finally {
+    store.close();
+  }
 });

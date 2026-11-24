@@ -9,6 +9,12 @@
     },
     {
       "path": "./tsconfig.e2e.json"
+    },
+    {
+      "path": "./tsconfig.sw.json"
+    },
+    {
+      "path": "./tsconfig.scripts.json"
     }
   ],
   "compilerOptions": {

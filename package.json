@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bootstrap": "bun install --frozen-lockfile && bunx playwright install chromium firefox",
+    "bootstrap": "bun install --frozen-lockfile && bunx playwright install chromium firefox webkit",
     "dev": "bun app/cli/dev.ts",
     "seed": "bun app/server/main.ts seed --config dev/config.yaml",
     "verify": "bash scripts/verify.sh",

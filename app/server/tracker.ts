@@ -35,6 +35,8 @@ export interface TrackerOptions {
   comfy: ComfyClient;
   now?: () => number;
   faults?: Faults;
+  /** Called once when a job becomes done, only when its update changed the row (asset-studio-mobile, Notifications). */
+  onDone?: (job: JobRow) => void;
 }
 
 export function compatible(version: string | null): boolean {
@@ -57,6 +59,7 @@ export class Tracker implements TrackerView {
   private readonly comfy: ComfyClient;
   private readonly now: () => number;
   private readonly faults: Faults;
+  private readonly onDone: ((job: JobRow) => void) | undefined;
   private state: ComfyState = "offline";
   private version: string | null = null;
   private snapshot: QueueSnapshot | null = null;
@@ -72,6 +75,7 @@ export class Tracker implements TrackerView {
     this.comfy = opts.comfy;
     this.now = opts.now ?? Date.now;
     this.faults = opts.faults ?? {};
+    this.onDone = opts.onDone;
   }
 
   health(): { comfyui: ComfyState; version: string | null } {
@@ -395,7 +399,7 @@ export class Tracker implements TrackerView {
       renameSync(work, finalDir);
       this.faults.afterRename?.();
     }
-    this.update(job.id, job.state, "state = 'done', cancel_requested = 0, error = NULL, finished_at = ?", [this.now()]);
+    if (this.update(job.id, job.state, "state = 'done', cancel_requested = 0, error = NULL, finished_at = ?", [this.now()])) this.onDone?.(job);
     this.faults.afterDone?.();
     removeComfyFiles(this.config, job.id);
   }

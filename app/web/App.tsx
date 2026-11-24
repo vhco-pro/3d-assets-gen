@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, ChevronDown, CircleAlert, Images } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
-import { DEFAULT_SHARED_STYLE, DETAILS, isUltra, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, TEXTURES, ULTRA_FACES, ULTRA_TEX } from "../pipeline/presets.ts";
-import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, startExport, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
-import { Badge } from "./components/ui/badge.tsx";
+import { Box, Camera, ChevronDown, ImagePlus, Images } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
+import { DEFAULT_QUALITY, DEFAULT_SHARED_STYLE, MAX_PROMPT_CHARS, MAX_SEED, MAX_SHARED_STYLE_CHARS, MAX_VARIANTS, QUALITIES, qualityByName, remixQuality, type QualityName } from "../pipeline/presets.ts";
+import { ApiError, deleteJob, fetchHealth, fetchJobs, fetchSession, jobAction, signIn, submitImages, submitPrompts, type Job, type PresetsInput } from "./api.ts";
+import { AssetGone, AssetPage, GONE_MESSAGE } from "./AssetPage.tsx";
+import { ErrorText, label, plural, qualityText, StateBadge, useSelection } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Card } from "./components/ui/card.tsx";
 import { Checkbox } from "./components/ui/checkbox.tsx";
@@ -13,59 +14,20 @@ import { Progress } from "./components/ui/progress.tsx";
 import { Switch } from "./components/ui/switch.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { ToggleGroup, ToggleGroupItem } from "./components/ui/toggle-group.tsx";
+import { NotifySwitch, useNotifications } from "./notify.tsx";
+import { openedFromLibrary, pushAsset, readRoute, replaceUrl, tabHref, WIDE_QUERY, type Route, type Tab } from "./nav.ts";
 import { estimates, formatDuration } from "./queue.ts";
+import { PhoneLibrary, PhoneShell } from "./Shell.tsx";
 import { Viewer } from "./Viewer.tsx";
+
+export { label, stateTerm } from "./common.tsx";
 
 const MiB = 1024 * 1024;
 const IMAGE_CAP = 200 * MiB;
 const SHARED_KEY = "asset-studio:shared-style";
-
-/** Glossary terms for job states (feature document, Glossary). */
-export function stateTerm(job: Job): string {
-  switch (job.state) {
-    case "pending":
-      return "Waiting";
-    case "submitted":
-      return job.running ? "Generating" : "Queued";
-    case "done":
-      return "Done";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-  }
-}
-
-/** The badge colour key: Generating, Done and Failed are coloured; the other states are neutral (Design > Page). */
-function badgeKind(job: Job): string {
-  if (job.state === "submitted" && job.running) return "generating";
-  if (job.state === "done") return "done";
-  if (job.state === "failed") return "failed";
-  return "neutral";
-}
-
-export function label(job: Job): string {
-  return job.kind === "prompt" ? (job.prompt ?? "") : (job.upload ?? "image");
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${String(n)} ${n === 1 ? one : many}`;
-}
-
-function StateBadge({ job }: { job: Job }): ReactNode {
-  return <Badge data-testid="job-state" data-badge={badgeKind(job)}>{stateTerm(job)}</Badge>;
-}
-
-/** An error message: a failed outcome, so it uses the danger tint with an icon. A job's stored error is not
- * a live event, so it is not announced as an alert. */
-function ErrorText({ children, live = true }: { children: ReactNode; live?: boolean }): ReactNode {
-  return (
-    <p role={live ? "alert" : undefined} data-error="">
-      <CircleAlert size={16} aria-hidden="true" />
-      <span>{children}</span>
-    </p>
-  );
-}
+const PHOTO_TYPES = "image/png,image/jpeg,image/webp";
+const PHOTO_REFUSED = "Only PNG, JPEG or WebP photos can be used.";
+const EXPORT_NOTICE = "The selection changed after the export started. Select the assets again and download them.";
 
 function Brand(): ReactNode {
   return (
@@ -141,6 +103,16 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }): ReactNode {
   );
 }
 
+/** One notice with a Dismiss button, in the banner area above the content. */
+function Notice({ text, onDismiss }: { text: string; onDismiss: () => void }): ReactNode {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <ErrorText>{text}</ErrorText>
+      <Button type="button" onClick={onDismiss}>Dismiss</Button>
+    </div>
+  );
+}
+
 function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
   const jobs = useQuery({
     queryKey: ["jobs"],
@@ -155,10 +127,121 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
     refetchInterval: (q) => (q.state.data?.some((j) => j.state === "pending" || j.state === "submitted") ? 2000 : 15000),
   });
   const health = useQuery({ queryKey: ["health"], queryFn: ({ signal }) => fetchHealth(signal), refetchInterval: 5000 });
+  const notifications = useNotifications();
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+  const [route, setRoute] = useState<Route>(() => readRoute(window.location.search));
   const [preview, setPreview] = useState<{ job: Job; opener: HTMLElement | null } | null>(null);
-  const [notice, setNotice] = useState<string | null>(() => (new URLSearchParams(window.location.search).get("export") === "gone" ? "The selection changed after the export started. Select the assets again and download them." : null));
+  // The export notice is read once, on load; the address loses its marker at once (below).
+  const [notice, setNotice] = useState<string | null>(() => (new URLSearchParams(window.location.search).get("export") === "gone" ? EXPORT_NOTICE : null));
+  // Remix remounts the composer with the asset's prompt and settings.
+  const [remix, setRemix] = useState<{ seq: number; draft: Draft | null }>({ seq: 0, draft: null });
+  const previewOpen = useRef(false);
+  useEffect(() => {
+    previewOpen.current = preview !== null;
+  }, [preview]);
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has("export")) return;
+    replaceUrl(window.matchMedia(WIDE_QUERY).matches ? "/" : tabHref(readRoute(window.location.search).tab));
+  }, []);
+
+  useEffect(() => {
+    const onPop = (): void => { setRoute(readRoute(window.location.search)); };
+    window.addEventListener("popstate", onPop);
+    return () => { window.removeEventListener("popstate", onPop); };
+  }, []);
+
+  useEffect(() => {
+    // Crossing 1024 pixels closes any open asset view, without a history entry.
+    const mq = window.matchMedia(WIDE_QUERY);
+    const onChange = (): void => {
+      const open = previewOpen.current || new URLSearchParams(window.location.search).has("asset");
+      setWide(mq.matches);
+      setPreview(null);
+      if (open) {
+        replaceUrl(tabHref("library"));
+        setRoute({ tab: "library", asset: null });
+      }
+    };
+    mq.addEventListener("change", onChange);
+    return () => { mq.removeEventListener("change", onChange); };
+  }, []);
+
   const list = jobs.data ?? [];
+  const done = list.filter((j) => j.state === "done");
   const comfy = health.data?.comfyui;
+  const assetJob = route.asset ? (done.find((j) => j.id === route.asset) ?? null) : null;
+  const assetGone = route.asset !== null && !jobs.isPending && assetJob === null;
+
+  const goTab = (tab: Tab): void => {
+    replaceUrl(tabHref(tab));
+    setRoute({ tab, asset: null });
+  };
+  const openAsset = (job: Job): void => {
+    pushAsset(job.id);
+    setRoute({ tab: "library", asset: job.id });
+  };
+  /** Back to the Library: history.back() when the Library pushed this entry, otherwise replace the address. */
+  const toLibrary = (fallback: string, next: Route): void => {
+    if (openedFromLibrary()) {
+      window.history.back();
+      return;
+    }
+    replaceUrl(fallback);
+    setRoute(next);
+  };
+  const phoneLibrary = (): void => { toLibrary(tabHref("library"), { tab: "library", asset: null }); };
+  const startRemix = (job: Job): void => {
+    const draft = draftFrom(job);
+    if (draft.sharedStyle !== undefined) saveShared(draft.sharedStyle);
+    setRemix((r) => ({ seq: r.seq + 1, draft }));
+  };
+  const closeLinkedAsset = (): void => { toLibrary("/", { tab: "create", asset: null }); };
+
+  const banners = (comfy === "offline" || comfy === "incompatible" || notice || (wide && assetGone)) && (
+    <div className="mx-auto grid w-full max-w-[90rem] gap-2 px-4 pt-3">
+      {comfy === "offline" && (
+        <div data-banner="offline" role="status">
+          <strong data-testid="comfy-banner-term">ComfyUI offline</strong>
+          <span>Jobs wait until it answers again.</span>
+        </div>
+      )}
+      {comfy === "incompatible" && (
+        <div data-banner="incompatible" role="status">
+          <strong data-testid="comfy-banner-term">ComfyUI incompatible</strong>
+          <span>{`Found ${health.data?.comfyuiVersion ?? "no version"}. Asset Studio needs 0.46.2 or newer and submits nothing until then.`}</span>
+        </div>
+      )}
+      {notice && <Notice text={notice} onDismiss={() => { setNotice(null); }} />}
+      {wide && assetGone && <Notice text={GONE_MESSAGE} onDismiss={closeLinkedAsset} />}
+    </div>
+  );
+
+  if (!wide) {
+    let content: ReactNode;
+    if (route.asset !== null) {
+      content = assetJob ? <AssetPage job={assetJob} onLibrary={phoneLibrary} onRemix={() => { startRemix(assetJob); goTab("create"); }} /> : assetGone ? <AssetGone onLibrary={phoneLibrary} /> : <p className="text-muted-foreground">Loading…</p>;
+    } else if (route.tab === "queue") {
+      content = (
+        <section data-screen="queue" className="grid gap-4">
+          <Card className="p-4"><NotifySwitch n={notifications} /></Card>
+          <Queue jobs={list} loading={jobs.isPending} error={jobs.error} showEmpty />
+        </section>
+      );
+    } else if (route.tab === "library") {
+      content = <PhoneLibrary jobs={done} onOpen={openAsset} />;
+    } else {
+      content = <section data-screen="create"><Composer key={remix.seq} draft={remix.draft} dropZone={false} /></section>;
+    }
+    return (
+      <PhoneShell tab={route.asset !== null ? "library" : route.tab} onTab={goTab} onAssetBack={route.asset !== null ? phoneLibrary : null} banners={banners}>
+        {content}
+      </PhoneShell>
+    );
+  }
+
+  const dialog = preview ?? (assetJob ? { job: assetJob, opener: null } : null);
   return (
     <div>
       <a className="skip" href="#library-heading">Skip to library</a>
@@ -171,36 +254,24 @@ function Studio({ onUnauthorised }: { onUnauthorised: () => void }): ReactNode {
           </p>
         )}
       </header>
-      {(comfy === "offline" || comfy === "incompatible" || notice) && (
-        <div className="mx-auto grid max-w-[90rem] gap-2 px-4 pt-3">
-          {comfy === "offline" && (
-            <div data-banner="offline" role="status">
-              <strong data-testid="comfy-banner-term">ComfyUI offline</strong>
-              <span>Jobs wait until it answers again.</span>
-            </div>
-          )}
-          {comfy === "incompatible" && (
-            <div data-banner="incompatible" role="status">
-              <strong data-testid="comfy-banner-term">ComfyUI incompatible</strong>
-              <span>{`Found ${health.data?.comfyuiVersion ?? "no version"}. Asset Studio needs 0.46.2 or newer and submits nothing until then.`}</span>
-            </div>
-          )}
-          {notice && (
-            <div className="flex flex-wrap items-center gap-3">
-              <ErrorText>{notice}</ErrorText>
-              <Button type="button" onClick={() => { setNotice(null); window.history.replaceState(null, "", "/"); }}>Dismiss</Button>
-            </div>
-          )}
-        </div>
-      )}
+      {banners}
       <main className="layout">
-        <Composer />
+        <Composer key={remix.seq} draft={remix.draft} dropZone />
         <div className="grid min-w-0 gap-5">
           <Queue jobs={list} loading={jobs.isPending} error={jobs.error} />
-          <Library jobs={list.filter((j) => j.state === "done")} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
+          <Card className="p-4" data-testid="notifications"><NotifySwitch n={notifications} /></Card>
+          <Library jobs={done} onPreview={(job, opener) => { setPreview({ job, opener }); }} />
         </div>
       </main>
-      {preview && <Viewer job={preview.job} name={label(preview.job)} opener={preview.opener} onClose={() => { setPreview(null); }} />}
+      {dialog && (
+        <Viewer
+          job={dialog.job}
+          name={label(dialog.job)}
+          opener={dialog.opener}
+          onClose={() => { if (preview) setPreview(null); else closeLinkedAsset(); }}
+          onRemix={() => { startRemix(dialog.job); if (preview) setPreview(null); else closeLinkedAsset(); }}
+        />
+      )}
     </div>
   );
 }
@@ -213,7 +284,7 @@ function readShared(): string {
   }
 }
 
-function saveShared(value: string): void {
+export function saveShared(value: string): void {
   try {
     window.localStorage.setItem(SHARED_KEY, value);
   } catch {
@@ -221,44 +292,63 @@ function saveShared(value: string): void {
   }
 }
 
-/** Detail's segment text: `5k`, `10k`, `20k` and `Ultra 30k`. */
-const detailLabel = (d: number): string => (d === ULTRA_FACES ? "Ultra 30k" : `${String(d / 1000)}k`);
+/** What Remix copies into Create: an image asset fills only Quality and Game-asset style. */
+interface Draft {
+  prompt?: string;
+  quality: QualityName;
+  style: boolean;
+  sharedStyle?: string;
+}
 
-function Segments({ name, legend, values, value, format, onChange, disabled }: { name: string; legend: string; values: readonly number[]; value: number; format: (v: number) => string; onChange: (v: number) => void; disabled?: (v: number) => boolean }): ReactNode {
-  const id = `${name}-label`;
+function draftFrom(job: Job): Draft {
+  const quality = remixQuality(job.faces, job.tex);
+  if (job.kind === "image") return { quality, style: job.style };
+  return { prompt: job.prompt ?? "", quality, style: job.style, sharedStyle: job.sharedStyle ?? "" };
+}
+
+/** Quality: one segmented radio group with the four levels (asset-studio-mobile, Design > Quality). */
+function QualityControl({ value, onChange }: { value: QualityName; onChange: (q: QualityName) => void }): ReactNode {
   return (
-    // Full width so Detail's four items and Texture's three stay on one row each.
     <div className="col-span-full grid gap-1.5">
-      <span className="font-semibold" id={id}>{legend}</span>
-      <ToggleGroup type="single" variant="outline" aria-labelledby={id} value={String(value)} onValueChange={(v) => { if (v) onChange(Number(v)); }} className="w-fit flex-wrap">
-        {values.map((v) => (
-          <ToggleGroupItem key={v} value={String(v)} disabled={disabled?.(v) ?? false} className="min-w-12 tabular-nums">{format(v)}</ToggleGroupItem>
+      <span className="font-semibold" id="quality-label">Quality</span>
+      <ToggleGroup type="single" variant="outline" aria-labelledby="quality-label" value={value} onValueChange={(v) => { const q = QUALITIES.find((x) => x.name === v); if (q) onChange(q.name); }} className="w-fit flex-wrap">
+        {QUALITIES.map((q) => (
+          <ToggleGroupItem key={q.name} value={q.name} className="min-w-16">{q.name}</ToggleGroupItem>
         ))}
       </ToggleGroup>
     </div>
   );
 }
 
-function Composer(): ReactNode {
+/** Take photo (the camera) or From photos (the library, several at once): each pick is added to the chosen images. */
+function PhotoButton({ capture, onPick }: { capture: boolean; onPick: (e: ChangeEvent<HTMLInputElement>) => void }): ReactNode {
+  const Icon = capture ? Camera : ImagePlus;
+  return (
+    <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-input bg-vh-control-bg px-4 text-sm font-medium hover:bg-vh-control-bg-hover has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring" data-control="">
+      {capture ? (
+        <input type="file" accept={PHOTO_TYPES} capture="environment" className="sr-only" onChange={onPick} />
+      ) : (
+        <input type="file" accept={PHOTO_TYPES} multiple className="sr-only" onChange={onPick} />
+      )}
+      <Icon size={18} aria-hidden="true" />
+      <span>{capture ? "Take photo" : "From photos"}</span>
+    </label>
+  );
+}
+
+function Composer({ draft, dropZone }: { draft: Draft | null; dropZone: boolean }): ReactNode {
   const qc = useQueryClient();
-  const [prompts, setPrompts] = useState("");
+  const [prompts, setPrompts] = useState(draft?.prompt ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [over, setOver] = useState(false);
-  const [faces, setFaces] = useState(10000);
-  const [tex, setTex] = useState(2048);
+  const [quality, setQuality] = useState<QualityName>(draft?.quality ?? DEFAULT_QUALITY);
+  const { faces, tex } = qualityByName(quality);
   const [variants, setVariants] = useState("1");
-  const [style, setStyle] = useState(true);
+  const [style, setStyle] = useState(draft?.style ?? true);
   const [seed, setSeed] = useState("");
-  const [shared, setShared] = useState(readShared);
+  const [shared, setShared] = useState(() => draft?.sharedStyle ?? readShared());
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const ultra = faces === ULTRA_FACES;
-  // Ultra is one pairing: it selects and locks 4096; leaving it goes back to the 2048 default.
-  const chooseDetail = (d: number): void => {
-    setFaces(d);
-    if (d === ULTRA_FACES) setTex(ULTRA_TEX);
-    else if (tex === ULTRA_TEX) setTex(2048);
-  };
   const lines = prompts.split("\n").map((l) => l.trim()).filter(Boolean);
   const v = Number(variants);
   const perLine = Number.isInteger(v) && v >= 1 ? Math.min(v, MAX_VARIANTS) : 1;
@@ -301,6 +391,19 @@ function Composer(): ReactNode {
     setStatus(null);
     mutation.mutate();
   };
+  // A picked photo is appended; a file of another type is refused here (the server checks the bytes too).
+  const addPhotos = (e: ChangeEvent<HTMLInputElement>): void => {
+    const picked = e.target.files ? [...e.target.files] : [];
+    e.target.value = "";
+    const ok = picked.filter((f) => /^image\/(png|jpeg|webp)$/.test(f.type));
+    if (ok.length < picked.length) {
+      setStatus(null);
+      setError(PHOTO_REFUSED);
+    } else {
+      setError(null);
+    }
+    if (ok.length > 0) setFiles((prev) => [...prev, ...ok]);
+  };
   const onDrop = (e: DragEvent<HTMLLabelElement>): void => {
     e.preventDefault();
     setOver(false);
@@ -318,7 +421,12 @@ function Composer(): ReactNode {
         </div>
         <div className="grid gap-1.5">
           <span className="font-semibold">Images</span>
-          <label
+          <div className="grid grid-cols-2 gap-2">
+            <PhotoButton capture onPick={addPhotos} />
+            <PhotoButton capture={false} onPick={addPhotos} />
+          </div>
+          {!dropZone && files.length > 0 && <p className="font-semibold">{plural(files.length, "image chosen", "images chosen")}</p>}
+          {dropZone && <label
             className="relative grid cursor-pointer place-items-center gap-0.5 rounded-md border border-dashed border-input bg-black/20 p-3 text-center hover:bg-vh-control-bg-hover has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring data-[over]:border-ring"
             data-over={over ? "" : undefined}
             onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -328,7 +436,8 @@ function Composer(): ReactNode {
             <input id="images" name="images" type="file" multiple accept="image/png,image/jpeg,image/webp" aria-label="Images" className="sr-only" onChange={(e) => { setFiles(e.target.files ? [...e.target.files] : []); }} />
             <span className="flex items-center gap-2 font-semibold"><Images size={16} aria-hidden="true" />{files.length > 0 ? plural(files.length, "image chosen", "images chosen") : "Drop images here or choose files"}</span>
             <span className="text-sm text-muted-foreground">PNG, JPEG or WebP, up to 20 MiB each</span>
-          </label>
+          </label>}
+          {!dropZone && <span className="text-sm text-muted-foreground">PNG, JPEG or WebP, up to 20 MiB each</span>}
           {files.length > 0 && (
             <div className="grid gap-1.5">
               <ul className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
@@ -341,9 +450,8 @@ function Composer(): ReactNode {
           )}
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-x-4 gap-y-3.5">
-          <Segments name="detail" legend="Detail" values={DETAILS} value={faces} format={detailLabel} onChange={chooseDetail} />
-          <Segments name="texture" legend="Texture" values={TEXTURES} value={tex} format={String} onChange={setTex} disabled={(t) => (ultra ? t !== ULTRA_TEX : t === ULTRA_TEX)} />
-          {ultra && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
+          <QualityControl value={quality} onChange={setQuality} />
+          {quality === "Ultra" && <p className="col-span-full text-sm text-muted-foreground">Ultra: best quality, about 10 min per job.</p>}
           <div className="grid gap-1.5">
             <label className="font-semibold" htmlFor="variants">Variants</label>
             <div className="flex gap-1.5">
@@ -421,8 +529,7 @@ function JobRow({ job, est, now, onAction }: { job: Job; est: Estimates; now: nu
         <ClampedText text={label(job)} />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StateBadge job={job} />
-          <Chip>{isUltra(job.faces, job.tex) ? "Ultra" : `${String(job.faces / 1000)}k`}</Chip>
-          {job.tex !== null && <Chip>{String(job.tex)}</Chip>}
+          <Chip>{qualityText(job)}</Chip>
           <Chip><span className="mono">{`seed ${String(job.seed)}`}</span></Chip>
         </div>
         {unfinished && (
@@ -509,7 +616,7 @@ function BatchGroup({ jobs, all, est, now, open, onOpenChange }: { jobs: Job[]; 
   );
 }
 
-function Queue({ jobs, loading, error }: { jobs: Job[]; loading: boolean; error: Error | null }): ReactNode {
+function Queue({ jobs, loading, error, showEmpty = false }: { jobs: Job[]; loading: boolean; error: Error | null; showEmpty?: boolean }): ReactNode {
   const now = useNow();
   const [openState, setOpenState] = useState<Record<string, boolean>>({});
   // A group's first state comes from whether it had unfinished jobs when it first appeared; after that the
@@ -517,7 +624,10 @@ function Queue({ jobs, loading, error }: { jobs: Job[]; loading: boolean; error:
   const [firstOpen, setFirstOpen] = useState<Record<string, boolean>>({});
   const rows = jobs.filter((j) => j.state !== "done");
   const failedLoad = error && !(error instanceof ApiError && error.status === 401);
-  if (!loading && !failedLoad && rows.length === 0) return null;
+  if (!loading && !failedLoad && rows.length === 0) {
+    // The desktop queue hides when empty; the phone's Queue screen says so instead.
+    return showEmpty ? <Card className="p-4 text-muted-foreground" data-testid="queue">Nothing in the queue.</Card> : null;
+  }
   const est = estimates(jobs.map((j) => ({ id: j.id, state: j.state, running: j.running, queuePosition: j.queuePosition, faces: j.faces, tex: j.tex, queuedAt: j.queuedAt, startedAt: j.startedAt, finishedAt: j.finishedAt })), now);
   const batches: string[] = [];
   for (const j of rows) if (!batches.includes(j.batchId)) batches.push(j.batchId);
@@ -556,25 +666,7 @@ function Queue({ jobs, loading, error }: { jobs: Job[]; loading: boolean; error:
 
 function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job, opener: HTMLElement | null) => void }): ReactNode {
   const qc = useQueryClient();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const live = new Set(jobs.map((j) => j.id));
-  const chosen = [...selected].filter((id) => live.has(id));
-  const allChosen = jobs.length > 0 && chosen.length === jobs.length;
-  const toggle = (id: string, on: boolean): void => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  };
-  const exportSelected = (): void => {
-    setError(null);
-    startExport(chosen)
-      .then((url) => { window.location.assign(url); })
-      .catch((e: unknown) => { setError(e instanceof Error ? e.message : "The download could not start. Try again."); });
-  };
+  const { chosen, allChosen, isSelected, toggle, setAll, exportSelected, error, setError } = useSelection(jobs);
   const remove = (id: string): void => {
     setError(null);
     deleteJob(id)
@@ -589,7 +681,7 @@ function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job, opener:
           <span className="tabular-nums text-muted-foreground">{plural(jobs.length, "asset", "assets")}</span>
           {jobs.length > 0 && (
             <div className="flex items-center gap-2">
-              <Checkbox id="select-all" checked={allChosen} onCheckedChange={(c) => { setSelected(c === true ? new Set(jobs.map((j) => j.id)) : new Set()); }} />
+              <Checkbox id="select-all" checked={allChosen} onCheckedChange={(c) => { setAll(c === true); }} />
               <label htmlFor="select-all">Select all</label>
             </div>
           )}
@@ -613,10 +705,11 @@ function Library({ jobs, onPreview }: { jobs: Job[]; onPreview: (j: Job, opener:
             <div className="flex flex-wrap items-center justify-between gap-1.5">
               <StateBadge job={j} />
               <div className="flex items-center gap-2">
-                <Checkbox id={`select-${j.id}`} checked={selected.has(j.id)} onCheckedChange={(c) => { toggle(j.id, c === true); }} aria-label={`Select ${label(j)}`} />
+                <Checkbox id={`select-${j.id}`} checked={isSelected(j.id)} onCheckedChange={(c) => { toggle(j.id, c === true); }} aria-label={`Select ${label(j)}`} />
                 <label htmlFor={`select-${j.id}`}>Select</label>
               </div>
             </div>
+            <span className="text-sm text-muted-foreground">{qualityText(j)}</span>
             {j.startedAt !== null && j.finishedAt !== null && <span className="text-sm text-muted-foreground">{`Generated in ${formatDuration(j.finishedAt - j.startedAt)}`}</span>}
             <div className="flex flex-wrap gap-1.5">
               <Button type="button" size="sm" aria-label={`Download ${label(j)}`} onClick={() => { window.location.assign(`/api/assets/${j.id}/model.glb`); }}>Download</Button>

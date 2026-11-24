@@ -43,7 +43,7 @@ test.describe("on the seeded fixture", () => {
     await expect(running).toContainText("Generating for 3 min");
     await expect(running).toContainText("about 3 min 40 s left");
     await expect(running.getByRole("progressbar")).toBeVisible();
-    for (const chip of ["10k", "2048", "seed 1001"]) await expect(running).toContainText(chip);
+    for (const chip of ["Quality: Standard", "seed 1001"]) await expect(running).toContainText(chip);
     const queued = set.getByTestId("job").filter({ hasText: "a potion bottle" });
     await expect(queued).toContainText("Added 12 min ago");
     await expect(queued).toContainText("Starts in about 3 min 40 s");
@@ -62,15 +62,15 @@ test.describe("on the seeded fixture", () => {
     await expect(old.getByRole("button", { name: "Collapse batch" })).toBeVisible();
   });
 
-  test("the cancelled Ultra fixture job's chip reads Ultra (AC-29)", async ({ page }) => {
+  test("the cancelled Ultra fixture job's chip reads Quality: Ultra (AC-29, asset-studio-mobile AC-04)", async ({ page }) => {
     await signIn(page, stack.url, stack.token);
     const group = batch(page, "an ornate dragon statue");
     await group.getByRole("button", { name: "Expand batch" }).click();
     const row = group.getByTestId("job").filter({ hasText: "an ornate dragon statue" });
     await expect(row.getByTestId("job-state")).toHaveText("Cancelled");
-    await expect(row).toContainText("Ultra");
+    await expect(row).toContainText("Quality: Ultra");
     await expect(row).not.toContainText("30k");
-    await expect(row).toContainText("4096");
+    await expect(row).not.toContainText("4096");
   });
 
   test("Cancel all cancels every unfinished job of the batch", async ({ page }) => {
@@ -108,14 +108,14 @@ test.describe("an Ultra batch on its own stack", () => {
     await stack.stop();
   });
 
-  test("finishes against the fake and its preview shows Ultra (30k triangles) (AC-29)", async ({ page }) => {
+  test("finishes against the fake and its preview shows Quality: Ultra (AC-29, asset-studio-mobile AC-04)", async ({ page }) => {
     await signIn(page, stack.url, stack.token);
-    await page.getByLabel("Detail", { exact: true }).getByRole("radio", { name: "Ultra 30k" }).click();
+    await page.getByLabel("Quality", { exact: true }).getByRole("radio", { name: "Ultra" }).click();
     await page.getByLabel("Prompts").fill("an ultra lantern");
     await page.getByRole("button", { name: /^Generate/ }).click();
     const asset = page.getByTestId("asset").filter({ hasText: "an ultra lantern" });
     await expect(asset).toHaveCount(1, { timeout: 60_000 });
     await asset.getByRole("button", { name: /^Preview/ }).click();
-    await expect(page.getByRole("dialog")).toContainText("Ultra (30k triangles)");
+    await expect(page.getByRole("dialog")).toContainText("Quality: Ultra");
   });
 });

@@ -1,11 +1,13 @@
-import { CircleAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Job } from "./api.ts";
+import { deleteJob, type Job } from "./api.ts";
+import { AR_UNAVAILABLE, arModeOf, sceneViewerIntent, useArLink, type ArMode } from "./ar.ts";
+import { dateFormat, ErrorText, qualityText } from "./common.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./components/ui/dialog.tsx";
 import { Progress } from "./components/ui/progress.tsx";
-import { isUltra } from "../pipeline/presets.ts";
 import { formatDuration } from "./queue.ts";
+import { ShareButton } from "./share.tsx";
 
 type Status = "loading" | "ready" | "failed";
 
@@ -46,24 +48,29 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
 /**
- * The preview: a modal dialog (focus trapped; Escape closes it and focus returns to the opener) with the
- * viewer, its download progress, the full prompt, the settings, the timing and the downloads.
+ * The 3D stage: loads the viewer module on demand, shows the model with its download progress, and offers
+ * Reload viewer when the module fails. Used by the Preview dialog and the phone's Asset page.
  */
-export function Viewer({ job, name, opener, onClose }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void }): ReactNode {
+export function ModelStage({ job, name, className, children }: { job: Job; name: string; className: string; children?: ReactNode }): ReactNode {
   const [attempt, setAttempt] = useState(0);
   const status = useViewerModule(attempt);
   const reduced = useReducedMotion();
   const ref = useRef<HTMLElement>(null);
   const [progress, setProgress] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [arMode, setArMode] = useState<ArMode | null>(null);
+  const link = useArLink(job.id, arMode === "scene-viewer");
+  const arButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     // Tests wait for data-loaded; production logs nothing to the console.
-    const onLoad = (): void => { el.dataset.loaded = "true"; setLoaded(true); };
+    const onLoad = (): void => {
+      el.dataset.loaded = "true";
+      setLoaded(true);
+      setArMode(arModeOf((el as HTMLElement & { canActivateAR?: boolean }).canActivateAR === true));
+    };
     const onProgress = (e: Event): void => { setProgress((e as CustomEvent<{ totalProgress: number }>).detail.totalProgress); };
     el.addEventListener("load", onLoad);
     el.addEventListener("progress", onProgress);
@@ -72,9 +79,99 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
       el.removeEventListener("progress", onProgress);
     };
   }, [status, job.id]);
-  const waited = job.startedAt !== null ? job.startedAt - job.queuedAt : null;
-  const generated = job.startedAt !== null && job.finishedAt !== null ? job.finishedAt - job.startedAt : null;
-  const total = job.finishedAt !== null ? job.finishedAt - job.queuedAt : null;
+  useEffect(() => {
+    // A native listener on the button itself: model-viewer listens for clicks on the slot's container and would
+    // start its own AR launch with the cookie-protected src, so this one stops the click first (a React onClick
+    // runs only after the click has bubbled past that container).
+    const button = arButton.current;
+    const el = ref.current;
+    if (!button || !el || !arMode) return;
+    const onClick = (e: MouseEvent): void => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (arMode === "quick-look") {
+        (el as HTMLElement & { activateAR?: () => Promise<void> }).activateAR?.().catch(() => undefined);
+        return;
+      }
+      if (link === null || link === "failed") return;
+      window.location.href = sceneViewerIntent(link.url, window.location.origin, window.location.href);
+    };
+    button.addEventListener("click", onClick);
+    return () => { button.removeEventListener("click", onClick); };
+  }, [arMode, link, status]);
+  const arBlocked = arMode === "scene-viewer" && (link === null || link === "failed");
+  return (
+    <div className={`preview-stage grid place-items-center overflow-hidden rounded-md ${className}`}>
+      {status === "loading" && <p className="text-muted-foreground">Loading the 3D viewer…</p>}
+      {status === "failed" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <ErrorText>The 3D viewer could not load.</ErrorText>
+          <Button type="button" onClick={() => { setAttempt((a) => a + 1); }}>Reload viewer</Button>
+        </div>
+      )}
+      {status === "ready" && (
+        <div className="relative size-full">
+          <model-viewer
+            ref={ref}
+            key={job.id}
+            src={`/api/assets/${job.id}/model.glb`}
+            alt={name}
+            camera-controls=""
+            loading="eager"
+            interpolation-decay={reduced ? "0" : "200"}
+            shadow-intensity="1"
+            ar
+            ar-modes="scene-viewer quick-look"
+            ar-scale="auto"
+          >
+            {/* model-viewer shows this slot only when it reports AR as possible; desktop browsers never do. */}
+            <Button ref={arButton} slot="ar-button" type="button" disabled={arBlocked} className="absolute right-3 bottom-3 min-h-11">View in your room</Button>
+            {children}
+          </model-viewer>
+          {arMode === "scene-viewer" && link === "failed" && <p role="status" className="absolute inset-x-3 top-3 rounded-md bg-black/70 px-3 py-2 text-sm">{AR_UNAVAILABLE}</p>}
+          {!loaded && (
+            <div className="absolute inset-x-4 bottom-4 grid gap-1.5" role="status">
+              <span className="text-sm text-muted-foreground">{`Loading model… ${String(Math.round(progress * 100))}%`}</span>
+              <Progress value={Math.round(progress * 100)} aria-label="Model download" className="h-1.5" />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The timing facts of a finished job: how long it waited, generated and took in total. */
+export function timing(job: Job): { waited: number | null; generated: number | null; total: number | null } {
+  return {
+    waited: job.startedAt !== null ? job.startedAt - job.queuedAt : null,
+    generated: job.startedAt !== null && job.finishedAt !== null ? job.finishedAt - job.startedAt : null,
+    total: job.finishedAt !== null ? job.finishedAt - job.queuedAt : null,
+  };
+}
+
+/**
+ * The preview: a modal dialog (focus trapped; Escape closes it and focus returns to the opener) with the
+ * viewer, its download progress, the full prompt, the settings, the timing and the downloads.
+ */
+export function Viewer({ job, name, opener, onClose, onRemix }: { job: Job; name: string; opener: HTMLElement | null; onClose: () => void; onRemix: () => void }): ReactNode {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { waited, generated, total } = timing(job);
+  const remove = (): void => {
+    setBusy(true);
+    setError(null);
+    deleteJob(job.id)
+      .then(async () => {
+        await qc.invalidateQueries({ queryKey: ["jobs"] });
+        onClose();
+      })
+      .catch((e: unknown) => {
+        setBusy(false);
+        setError(e instanceof Error ? e.message : "That action failed. Try again.");
+      });
+  };
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent showCloseButton={false} aria-modal="true" onCloseAutoFocus={(e) => { e.preventDefault(); opener?.focus(); }} className="grid max-h-[calc(100dvh-2rem)] w-[min(56rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border bg-[var(--vh-bg-1)] p-0 sm:max-w-none">
@@ -83,43 +180,11 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
           <DialogDescription className="sr-only">The 3D model with its prompt, settings and timing.</DialogDescription>
         </div>
         <div className="grid min-h-0 gap-3.5 overflow-y-auto p-4">
-          <div className="preview-stage grid h-[clamp(9rem,50dvh,30rem)] place-items-center overflow-hidden rounded-md">
-            {status === "loading" && <p className="text-muted-foreground">Loading the 3D viewer…</p>}
-            {status === "failed" && (
-              <div className="flex flex-wrap items-center gap-3">
-                <p role="alert" data-error="">
-                  <CircleAlert size={16} aria-hidden="true" />
-                  <span>The 3D viewer could not load.</span>
-                </p>
-                <Button type="button" onClick={() => { setAttempt((a) => a + 1); }}>Reload viewer</Button>
-              </div>
-            )}
-            {status === "ready" && (
-              <div className="relative size-full">
-                <model-viewer
-                  ref={ref}
-                  key={job.id}
-                  src={`/api/assets/${job.id}/model.glb`}
-                  alt={name}
-                  camera-controls=""
-                  loading="eager"
-                  interpolation-decay={reduced ? "0" : "200"}
-                  shadow-intensity="1"
-                />
-                {!loaded && (
-                  <div className="absolute inset-x-4 bottom-4 grid gap-1.5" role="status">
-                    <span className="text-sm text-muted-foreground">{`Loading model… ${String(Math.round(progress * 100))}%`}</span>
-                    <Progress value={Math.round(progress * 100)} aria-label="Model download" className="h-1.5" />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <ModelStage job={job} name={name} className="h-[clamp(9rem,50dvh,30rem)]" />
           <p data-testid="full-prompt" className="max-w-[72ch] whitespace-pre-wrap [overflow-wrap:anywhere]">{name}</p>
           {job.sharedStyle && <p className="text-sm text-muted-foreground"><span className="font-semibold">Shared style</span>{` ${job.sharedStyle}`}</p>}
+          <p className="font-semibold text-muted-foreground">{qualityText(job)}</p>
           <dl className="flex flex-wrap gap-x-5 gap-y-1 text-[.95rem] text-muted-foreground">
-            <div className="flex gap-1.5"><dt className="font-semibold">Detail</dt><dd className="tabular-nums">{isUltra(job.faces, job.tex) ? "Ultra (30k triangles)" : `${String(job.faces / 1000)}k triangles`}</dd></div>
-            {job.tex !== null && <div className="flex gap-1.5"><dt className="font-semibold">Texture</dt><dd className="tabular-nums">{String(job.tex)}</dd></div>}
             <div className="flex gap-1.5"><dt className="font-semibold">Seed</dt><dd className="mono">{String(job.seed)}</dd></div>
             <div className="flex gap-1.5"><dt className="font-semibold">Created</dt><dd>{dateFormat.format(job.createdAt)}</dd></div>
             {waited !== null && <div className="flex gap-1.5"><dt className="font-semibold">Waited</dt><dd className="tabular-nums">{formatDuration(waited)}</dd></div>}
@@ -127,7 +192,11 @@ export function Viewer({ job, name, opener, onClose }: { job: Job; name: string;
             {total !== null && <div className="flex gap-1.5"><dt className="font-semibold">Total</dt><dd className="tabular-nums">{formatDuration(total)}</dd></div>}
           </dl>
         </div>
+        {error && <div className="px-4"><ErrorText>{error}</ErrorText></div>}
         <div className="flex flex-wrap justify-end gap-2 border-t border-border px-4 py-3">
+          <ShareButton job={job} />
+          <Button type="button" onClick={onRemix}>Remix</Button>
+          <Button type="button" variant="delete" disabled={busy} onClick={remove}>Delete</Button>
           <Button type="button" onClick={() => { window.location.assign(`/api/assets/${job.id}/model.glb`); }}>Download GLB</Button>
           <Button type="button" onClick={onClose}>Close</Button>
         </div>
