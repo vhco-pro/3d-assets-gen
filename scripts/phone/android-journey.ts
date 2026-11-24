@@ -465,7 +465,7 @@ export const STEPS: Step[] = [
         // Left on by an earlier run: turn it off and on again so this run sees the subscription saved.
         ctx.log("notifications already on; turning them off and on again");
         await tapElement(ctx, sw);
-        await page.waitForFunction(() => document.querySelector('[aria-label="Notify me when assets are ready"]')?.getAttribute("aria-checked") === "false", undefined, { timeout: 30_000 });
+        await until("the switch off", async () => ((await sw.getAttribute("aria-checked")) === "false" ? true : null), 30_000);
       }
       const posted = page.waitForResponse((r) => r.url().endsWith("/api/push/subscriptions") && r.request().method() === "POST", { timeout: 60_000 });
       await tapElement(ctx, sw);
@@ -605,7 +605,11 @@ export const STEPS: Step[] = [
       await tapNotification(ctx, prompt);
       ctx.page = await until("the reopened app", () => Promise.resolve(ctx.context.pages().find((p) => p.url().includes(`asset=${id}`)) ?? null), 30_000);
       await ctx.page.getByTestId("asset-page").waitFor({ timeout: 20_000 });
-      ctx.log(`the tap opened /?asset=${id} and the Asset page shows`);
+      // The reopened window paints a few seconds after its page renders (uiautomator cannot read the page while
+      // its 3D view renders), so the screenshot waits for the model and then for the window.
+      await ctx.page.getByTestId("asset-page").locator("model-viewer[data-loaded=true]").waitFor({ timeout: 60_000 });
+      await sleep(2000);
+      ctx.log(`the tap opened /?asset=${id} and its Asset page shows the model`);
       await ctx.shot("notify-closed");
 
       // Turned off, a finished job brings no notification.
